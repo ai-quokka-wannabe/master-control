@@ -1,0 +1,21 @@
+{
+    "recommendations": [
+        "ms-vscode.cpptools-extension-pack",
+        "ms-vscode.cpptools-themes",
+        "ms-vscode.cmake-tools",
+        "xaver.clang-format",
+        "llvm-vs-code-extensions.vscode-clangd",
+        "slevesque.shader",
+        "shader-slang.slang-language-extension",
+        "usernamehw.errorlens",
+        "editorconfig.editorconfig",
+        "davidanson.vscode-markdownlint",
+        "bierner.markdown-mermaid",
+        "donjayamanne.githistory",
+        "github.vscode-github-actions",
+        "gruntfuggly.todo-tree",
+        "redhat.vscode-yaml",
+        "ms-vscode.hexeditor",
+        "github.vscode-pull-request-github"
+    ]
+}
