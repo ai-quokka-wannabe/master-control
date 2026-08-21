@@ -30,13 +30,22 @@ original sentence, all of it specified in TOPOLOGY.md:
   write-buffer high-water does the other half.
 - Per-subscriber send loops from day one (the wire has no broadcast primitive, deliberately).
 
-## Etape 2 — the roster of record
+## Etape 2 — the roster of record, and the simulated world moves in
 
 The `REZ`/`DEREZ` lifecycle, dynamic from day one — a world that must restart to admit a
 newcomer is a session, and the Grid is not a session. A join is a broadcast and a stage rebuild;
 a leave is a broadcast; late arrival is not a special case. Added by the audit: per-creature RNG
 substreams derived from the master seed; traceable identities on creatures and models; intent
 conflicts resolved deterministically against the settled snapshot and logged.
+
+This etape also executes the placement ruling (CLAUDE.md § Rules): the simulated world —
+`stepBody`, `sanitiseAndClamp`, the ground function and the shared constants — is ported from
+the flagship's `grid` library to Rust here as the one implementation, the flagship deleting its
+copy and its local `--program --ticks` physics in the same movement (its dev loop dials a local
+Master Control instead — the constellation from the first command). Acceptance: the flagship's
+behavioural physics tests re-run here with tolerances; the per-tick hash test joins this suite;
+`WELCOME`'s world-definition fingerprint and twin tests guard what stays shared. The flagship's
+`rehearsal_master_control` retires when Etape 1 lands, for the same one-implementation reason.
 
 ## Etape 3 — validation
 

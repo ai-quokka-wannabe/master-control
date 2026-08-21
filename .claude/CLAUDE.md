@@ -13,8 +13,8 @@ engineering.
    repository's protocol carries TICK_STATE end to end, proven by the flagship's own spectator.
    The flesh may now grow, in the blueprint's order: the heartbeat first (`TODO.md` § Etape 1).
    The original discipline survives in one sentence: never implement here a truth that still
-   lives only in the flagship — consume the flagship's `grid` library through the C face it
-   grows for this consumer, rather than retelling it.
+   lives elsewhere — when a truth moves here (the simulated world, at Etape 2), the flagship's
+   copy is deleted in the same movement, so there is one implementation at every moment.
 2. **The settings are mirrored from the flagship, deliberately.** Repository settings, rulesets,
    CI shape, lint configuration and governance files are copies of `tron-grid-lite`'s, kept as
    identical as the repository's emptiness allows — the owner wants them identical, not
@@ -40,11 +40,18 @@ engineering.
   server half — a plain citizen at the wire with no side door. The loader is a few dozen lines
   of `extern "C"` declarations (`LoadLibraryW`/`GetProcAddress`, `dlopen`/`dlsym`) rather than
   a crate, per the no-crates rule.
-- **The world's truth stays the flagship's, and the boundary is a C ABI.** The heartbeat needs
-  no world; before Etape 2 (roster physics, the world definition), the flagship's `grid`
-  library grows a plain C face this process consumes — the organisation's established shape for
-  a contract between languages — because a Rust retelling of `stepBody` or the world definition
-  is exactly the second implementation this repository's founding rule forbids.
+- **The simulated world moves here, in Rust, at Etape 2** (the owner's ruling, 2026-08-21,
+  superseding the earlier C-face plan). The flagship's `grid` library is two worlds fused: the
+  *perceived* world (geometry, materials, stage, senses) stays C++ in tron-grid-lite forever —
+  its consumers render and sense, and this server never renders — while the *simulated* world
+  (`stepBody`, `sanitiseAndClamp`, the ground function, the shared constants) follows its owner
+  out and is ported to Rust here as **the one implementation**, with the flagship deleting its
+  copy in the same movement: source gravity following runtime authority, never a retelling
+  beside an original. The port's acceptance is the flagship's behavioural physics tests re-run
+  with tolerances (no two libms agree in the last bit), the per-tick hash test moves into this
+  repository's suite, and the constants still shared with the perceived world (floor config,
+  body dimensions, dt) are guarded by `WELCOME`'s world-definition fingerprint plus twin tests.
+  The heartbeat needs none of it.
 - **Spelling:** British English everywhere. The LICENCE file content is untouchable (legal
   document).
 - **Docs:** the design authority is TOPOLOGY.md in the flagship. Docs here point at it; they do
