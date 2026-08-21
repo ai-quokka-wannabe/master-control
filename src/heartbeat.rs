@@ -27,7 +27,10 @@ use crate::link_dll::{
     Connection, Derez, Hello, LNK_OK, LinkDll, Listener, Message, ROLE_CREATURE_HOST,
     ROLE_SPECTATOR, TickStateHeader, Welcome,
 };
-use crate::script::{DT_SECONDS, GUEST_CREATURE_ID, Guest, blinker_derezzes_at, tell};
+use crate::physics::{Body, FIRST_BODY, TICK_SECONDS, sanitise_and_clamp};
+use crate::script::{
+    GUEST_CREATURE_ID, GUEST_SPAWN_X, GUEST_SPAWN_Z, blinker_derezzes_at, floor, tell,
+};
 use crate::stager::{ActionStager, Applied, Intent, Verdict};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -76,7 +79,7 @@ pub struct Heartbeat {
     config: Config,
     citizens: Vec<Citizen>,
     stager: ActionStager,
-    guest: Guest,
+    guest: Body,
     tick: u64,
     next_client_id: u64,
     overruns: u64,
@@ -90,7 +93,12 @@ impl Heartbeat {
             config,
             citizens: Vec::new(),
             stager: ActionStager::default(),
-            guest: Guest::default(),
+            guest: Body::standing_at(
+                GUEST_SPAWN_X,
+                GUEST_SPAWN_Z,
+                floor(GUEST_SPAWN_X, GUEST_SPAWN_Z),
+                FIRST_BODY,
+            ),
             tick: 0,
             next_client_id: 1,
             overruns: 0,
@@ -110,7 +118,7 @@ impl Heartbeat {
     /// Turn the world until `stop` says otherwise. The only wall clock in the process lives in
     /// this function.
     pub fn run(&mut self, stop: &AtomicBool) {
-        let dt = Duration::from_secs_f64(f64::from(DT_SECONDS));
+        let dt = Duration::from_secs_f64(f64::from(TICK_SECONDS));
         let mut next_tick_time = Instant::now() + dt;
 
         while !stop.load(Ordering::Relaxed) {
@@ -155,7 +163,7 @@ impl Heartbeat {
 
             let welcome = Welcome {
                 current_tick: self.tick,
-                nominal_dt_seconds: DT_SECONDS,
+                nominal_dt_seconds: TICK_SECONDS,
                 #[allow(clippy::cast_possible_truncation)]
                 client_id: client_id as u32,
             };
@@ -251,8 +259,12 @@ impl Heartbeat {
     fn step_one_tick(&mut self) {
         self.tick += 1;
 
+        // The validator is the only path into the world: whatever the stager applied is
+        // sanitised and clamped against the guest's own body before physics ever sees it.
         let intent = match self.stager.intent_for(GUEST_CREATURE_ID, self.tick) {
-            Applied::Fresh(intent) | Applied::Repeated(intent) => intent,
+            Applied::Fresh(intent) | Applied::Repeated(intent) => {
+                sanitise_and_clamp(intent, &self.guest.bounds)
+            }
             Applied::Coasted => Intent::default(),
         };
         let telling = tell(self.tick, &mut self.guest, intent);

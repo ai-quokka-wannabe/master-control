@@ -190,7 +190,7 @@ fn a_creature_host_steers_the_guest_and_silence_repeats_then_coasts() {
         "a steered guest moves (forward is -Z at yaw zero)"
     );
     assert!(
-        steered_row.velocity[2] < -3.0,
+        steered_row.velocity[2] < -0.5,
         "the row carries the commanded velocity"
     );
 
@@ -248,7 +248,7 @@ fn a_stale_intent_is_refused_but_the_world_keeps_talking() {
     let deadline = Instant::now() + PATIENCE;
     loop {
         let (_, states) = await_tick(&mut spectator, 0);
-        if guest_row(&states).velocity[2] < -1.0 {
+        if guest_row(&states).velocity[2] < -0.5 {
             break;
         }
         assert!(
@@ -316,7 +316,7 @@ fn a_reaped_hosts_creature_stays_embodied_on_the_neutral_reflex() {
     loop {
         let (tick, states) = await_tick(&mut spectator, 0);
         steer(&mut second_host, tick + 1, 3.0, 3.0);
-        if guest_row(&states).velocity[2] < -2.0 {
+        if guest_row(&states).velocity[2] < -0.5 {
             break;
         }
         assert!(

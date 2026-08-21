@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The physics comes home: Etape 2's first half, the placement ruling executed on this side.**
+  The flagship's `stepBody` and `sanitiseAndClamp` now live here, in Rust, as the one
+  implementation of the simulated world — the companion flagship movement deletes the C++ copy.
+  The ground arrives as a **contract function**: `grid_mesh_height` and the analytic relief
+  beneath it, ported operation for operation and held to the flagship by golden vectors the C++
+  side itself generated (`tools/generate_physics_goldens.cpp`) — compared **bit-exactly**,
+  because the arithmetic is an integer hash, a smoothstep and a floor, with no libm anywhere to
+  disagree in. The step is held by a golden *life*: 256 ticks of fall, landing, walk, arc,
+  garbage intent and reverse, compared with tolerances because the arc goes through sin and
+  cos. The guest stops gliding and starts **walking**: gravity, traction, exact arc turns,
+  climb-limit walls felt on the front face, foot contacts every standing tick, specific force
+  in the body frame — spawned at a cell centre whose flatness is a checked promise, not a
+  remembered one. Every intent now passes through the server-side validator before physics sees
+  it (sanitise-then-clamp, comparison-based so a NaN becomes zero and never a legal-looking
+  bound — the flagship's mutation-testing lesson, kept), and the per-tick FNV state hash — the
+  flagship's Etape 16 determinism check — joins this suite as the authoritative process's own
+  guard, with per-creature seed substreams ready for the roster of record. Twenty-three tests;
+  five properties broken deliberately once — the lattice hash constant, the arc replaced by the
+  chord it refuses to be, the walls switched off, injected wall-clock nondeterminism (whose
+  first attempt injected exactly zero, because Windows nanoseconds are multiples of a hundred —
+  the breakage round itself needed a breakage round), and the wall-arrest clause the golden
+  life happened never to reach, which therefore got its own cliff. Proven live against the
+  flagship's window. The REZ/DEREZ wire lifecycle — Etape 2's other half — waits on the REZ
+  payload (Link Etape 6), recorded in TODO.md.
+
 - **The heartbeat: Master Control lives, and the constellation is real.** Etape 1, in Rust with
   the link repository's discipline (stable, edition 2024, `std` only, zero crates, fmt and
   clippy as law). The wire arrives exactly as ruled: the pinned `external/link` submodule is

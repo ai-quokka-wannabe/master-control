@@ -13,24 +13,26 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
-//! The heartbeat's scripted world: the understudy's three creatures, inherited, plus one guest
-//! a creature host may steer.
+//! The world's telling: the understudy's set dressing, and one real body.
 //!
-//! **This is a script, not physics.** The guest glides by direct kinematic integration of its
-//! staged intent - no gravity, no contacts, no body clamps - because the simulated world
-//! arrives at Etape 2 as the port of the flagship's `stepBody`, and a second physics grown here
-//! meanwhile is exactly what this repository's founding rule forbids. The script exists so the
-//! pacing, the acceptance window and the silence rules are observable through a real window
-//! before any of that lands.
+//! Since the physics came home (the placement ruling's Etape 2), the guest is no longer a
+//! kinematic glide: it is a [`crate::physics::Body`] stepped by the ported `stepBody` against
+//! the real terraced floor - gravity, traction, arc turns, climb-limit walls, contacts. The two
+//! orbiters and the blinker remain scripted set dressing, deliberately: they exist so a
+//! spectator always has motion and snapshot-removal to show, and they claim to be nothing more.
 
+use crate::ground::{GRID_FLOOR_CONFIG, grid_mesh_height};
 use crate::link_dll::{CreatureState, EVENT_VOCALISATION, Event};
+use crate::physics::{Body, step_body};
 use crate::stager::Intent;
-
-/// Seconds per tick - the ABI's number, 32 Hz, exact in binary32.
-pub const DT_SECONDS: f32 = 0.031_25;
 
 /// The steerable guest's identity - the one row a creature host may claim.
 pub const GUEST_CREATURE_ID: u32 = 100;
+
+/// Where the guest rezzes: the centre of a cell, so its first steps cross no riser and its
+/// physics is legible from the very first telling.
+pub const GUEST_SPAWN_X: f32 = 1.0;
+pub const GUEST_SPAWN_Z: f32 = 5.0;
 
 /// The blinker's period, in ticks: four seconds there, four seconds gone - the understudy's
 /// rhythm, kept so a spectator shows snapshot-authoritative removal against this server too.
@@ -39,6 +41,12 @@ const BLINK_HALF_PERIOD: u64 = 128;
 /// The caller calls this often, for this long.
 const CALL_PERIOD: u64 = 64;
 const CALL_LENGTH: u64 = 8;
+
+/// The floor the guest walks - the world's own, never a stand-in.
+#[must_use]
+pub fn floor(x: f32, z: f32) -> f32 {
+    grid_mesh_height(x, z, &GRID_FLOOR_CONFIG)
+}
 
 /// One orbiting creature's row at a tick: a circle walked at constant speed, facing along it.
 /// Yaw is wrapped onto ±pi so the seam the spectator's shortest-arc blend guards keeps being
@@ -51,7 +59,7 @@ fn orbiter(
     phase: f32,
 ) -> CreatureState {
     #[allow(clippy::cast_precision_loss)]
-    let time = tick as f32 * DT_SECONDS;
+    let time = tick as f32 * crate::physics::TICK_SECONDS;
     let angle = angular_speed.mul_add(time, phase);
     let yaw = wrap_to_pi(std::f32::consts::PI - angle);
 
@@ -81,59 +89,15 @@ fn wrap_to_pi(angle: f32) -> f32 {
     }
 }
 
-/// The guest's pose, owned across ticks because intent integrates.
-pub struct Guest {
-    position: [f32; 3],
-    yaw: f32,
-    velocity: [f32; 3],
-    yaw_rate: f32,
-    vocalisation: f32,
-}
-
-impl Default for Guest {
-    fn default() -> Self {
-        Guest {
-            position: [0.0, 0.05, 6.0],
-            yaw: 0.0,
-            velocity: [0.0, 0.0, 0.0],
-            yaw_rate: 0.0,
-            vocalisation: 0.0,
-        }
-    }
-}
-
-impl Guest {
-    /// One scripted glide: yaw then translate along the ABI's own facing convention (forward is
-    /// -Z at yaw zero, positive yaw turns left; `lnk_protocol.h` calls it the roster's own).
-    /// NaN in an intent is flattened to zero first - the wire's floats are unclamped until the
-    /// real validator arrives with Etape 2's port, and a NaN position would poison every
-    /// spectator's blend.
-    fn glide(&mut self, intent: Intent) {
-        let forward_speed = finite_or_zero(intent.forward_speed);
-        let turn_rate = finite_or_zero(intent.turn_rate);
-        self.vocalisation = finite_or_zero(intent.vocalisation).clamp(0.0, 1.0);
-
-        self.yaw = wrap_to_pi(turn_rate.mul_add(DT_SECONDS, self.yaw));
-        let forward = [-self.yaw.sin(), 0.0, -self.yaw.cos()];
-        self.position[0] = (forward[0] * forward_speed).mul_add(DT_SECONDS, self.position[0]);
-        self.position[2] = (forward[2] * forward_speed).mul_add(DT_SECONDS, self.position[2]);
-        self.velocity = [forward[0] * forward_speed, 0.0, forward[2] * forward_speed];
-        self.yaw_rate = turn_rate;
-    }
-}
-
-fn finite_or_zero(value: f32) -> f32 {
-    if value.is_finite() { value } else { 0.0 }
-}
-
 /// The world this tick: every row, and any events that sounded.
 pub struct Telling {
     pub rows: Vec<CreatureState>,
     pub events: Vec<Event>,
 }
 
-/// Steps the script to `tick` with the guest's applied intent, and tells the result.
-pub fn tell(tick: u64, guest: &mut Guest, guest_intent: Intent) -> Telling {
+/// Steps the world to `tick` - the guest by real physics with its already-sanitised staged
+/// intent, the set dressing by its script - and tells the result.
+pub fn tell(tick: u64, guest: &mut Body, staged: Intent) -> Telling {
     let mut rows = vec![
         orbiter(1, tick, 6.0, 0.6, 0.0),
         orbiter(2, tick, 9.0, -0.35, 2.1),
@@ -151,13 +115,13 @@ pub fn tell(tick: u64, guest: &mut Guest, guest_intent: Intent) -> Telling {
     }
 
     let previous_voice = guest.vocalisation;
-    guest.glide(guest_intent);
+    step_body(guest, staged, floor);
     rows.push(CreatureState {
         creature_id: GUEST_CREATURE_ID,
         position: guest.position,
         yaw: guest.yaw,
         velocity: guest.velocity,
-        yaw_rate: guest.yaw_rate,
+        yaw_rate: guest.turn_rate,
         vocalisation: guest.vocalisation,
     });
 
@@ -198,55 +162,67 @@ pub fn blinker_derezzes_at(tick: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::physics::{FIRST_BODY, TICK_SECONDS};
+
+    fn spawned_guest() -> Body {
+        Body::standing_at(
+            GUEST_SPAWN_X,
+            GUEST_SPAWN_Z,
+            floor(GUEST_SPAWN_X, GUEST_SPAWN_Z),
+            FIRST_BODY,
+        )
+    }
 
     #[test]
-    fn the_guest_glides_by_its_intent_and_holds_still_on_coast() {
-        let mut guest = Guest::default();
+    fn the_guest_walks_by_real_physics_and_stands_still_on_zero_intent() {
+        let mut guest = spawned_guest();
         let before = guest.position;
         tell(
             1,
             &mut guest,
             Intent {
-                forward_speed: 2.0,
+                forward_speed: 1.0,
                 turn_rate: 0.0,
                 vocalisation: 0.0,
             },
         );
         assert!(
-            (guest.position[2] - (before[2] - 2.0 * DT_SECONDS)).abs() < 1e-6,
-            "forward is -Z at yaw zero"
+            (guest.position[2] - (before[2] - TICK_SECONDS)).abs() < 1e-6,
+            "forward is -Z at yaw zero, at the commanded metre per second"
+        );
+        assert!(guest.grounded, "a walking guest keeps its feet");
+        assert!(
+            !guest.contacts.is_empty(),
+            "a standing body feels the floor every tick"
         );
 
         let held = guest.position;
         tell(2, &mut guest, Intent::default());
         assert_eq!(
             guest.position, held,
-            "zero intent is a stop, and a stop stays put"
+            "zero intent brakes, and a stopped body stays put"
         );
     }
 
     #[test]
-    fn a_nan_intent_becomes_zero_not_a_position() {
-        let mut guest = Guest::default();
-        tell(
-            1,
-            &mut guest,
-            Intent {
-                forward_speed: f32::NAN,
-                turn_rate: f32::INFINITY,
-                vocalisation: f32::NAN,
-            },
-        );
-        assert!(
-            guest.position.iter().all(|axis| axis.is_finite()),
-            "garbage never becomes a pose"
-        );
-        assert!(guest.vocalisation.abs() < f32::EPSILON);
+    fn the_spawn_cell_is_flat_enough_to_walk() {
+        // The spawn promise, checked rather than remembered: a metre of forward walk from the
+        // spawn crosses no wall-height rise, so the first tellings show motion, not a creature
+        // pinned to a riser.
+        let start = floor(GUEST_SPAWN_X, GUEST_SPAWN_Z);
+        for step in 0..32 {
+            #[allow(clippy::cast_precision_loss)]
+            let z = GUEST_SPAWN_Z - (step as f32 * TICK_SECONDS);
+            assert!(
+                (floor(GUEST_SPAWN_X, z) - start).abs() <= crate::physics::CLIMB_LIMIT_METRES,
+                "the guest's opening walk must not start against a wall"
+            );
+        }
     }
 
     #[test]
     fn the_blinker_keeps_the_understudys_rhythm() {
-        let mut guest = Guest::default();
+        let mut guest = spawned_guest();
         assert_eq!(
             tell(0, &mut guest, Intent::default()).rows.len(),
             4,
@@ -268,7 +244,7 @@ mod tests {
 
     #[test]
     fn a_guest_call_sounds_once_on_its_onset() {
-        let mut guest = Guest::default();
+        let mut guest = spawned_guest();
         let first = tell(
             1,
             &mut guest,
