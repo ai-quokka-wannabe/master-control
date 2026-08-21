@@ -12,8 +12,6 @@ concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: true
 
-# The repository is documentation and settings today; the flagship-style build matrix arrives
-# with the first code, per the extraction order in tron-grid-lite's docs/TOPOLOGY.md.
 jobs:
     quick-checks:
         name: Quick Checks (markdown)
@@ -47,15 +45,9 @@ jobs:
               run: markdownlint-cli2 "**/*.md"
 
             # A carriage return sitting inside a line is invisible in every editor, survives
-            # clang-format and markdownlint, and reads as ordinary text in review. Three reached
-            # the flagship's main before this step existed there, each one a Doxygen \return
-            # written through a tool chain that collapsed the escape, leaving a control character
-            # and a word reading "eturn" where the tag should be.
-            #
-            # .gitattributes normalises to LF and this runner is Linux, so the checkout contains
-            # no legitimate carriage return at all and any match is a stray. -I skips binary
-            # files, and taking the file list from git keeps build outputs and untracked scratch
-            # out of it.
+            # rustfmt and markdownlint, and reads as ordinary text in review. The flagship's
+            # main met three before this step existed there. .gitattributes normalises to LF
+            # and this runner is Linux, so any match is a stray inside a line.
             - name: Check for stray carriage returns
               run: |
                 if git ls-files -z | xargs -0 grep -lIP '\r'; then
@@ -63,16 +55,56 @@ jobs:
                     exit 1
                 fi
 
+    build:
+        name: Build (${{ matrix.os }})
+        needs: quick-checks
+        timeout-minutes: 20
+
+        strategy:
+            fail-fast: false
+
+            matrix:
+                os: [ubuntu-latest, windows-latest]
+
+        runs-on: ${{ matrix.os }}
+
+        steps:
+            # The wire is a pinned submodule: the build script compiles its cdylib and copies it
+            # beside every executable, which is how the residence rule holds in CI too.
+            - name: Checkout repository (with the wire)
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                submodules: true
+
+            # The runners ship a Rust toolchain, but an image refresh can lag a release; updating
+            # to current stable makes the toolchain a fact of this run rather than of the image.
+            - name: Update the stable toolchain
+              run: |
+                rustup update --no-self-update stable
+                rustup default stable
+                cargo --version
+                rustc --version
+
+            - name: Formatting must be canonical
+              run: cargo fmt --check
+
+            - name: Clippy, warnings as errors
+              run: cargo clippy --all-targets -- --deny warnings
+
+            - name: Test (unit, twin and the whole world stood up)
+              run: cargo test
+
     ci-success:
         name: CI Success
-        needs: [quick-checks]
+        needs: [quick-checks, build]
         runs-on: ubuntu-latest
         if: always()
 
         steps:
             - name: Check if all jobs succeeded
               run: |
-                if [[ "${{ needs.quick-checks.result }}" != "success" ]]; then
+                if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
+                   [[ "${{ needs.build.result }}" != "success" ]]; then
                     echo "One or more jobs failed"
                     exit 1
                 fi
