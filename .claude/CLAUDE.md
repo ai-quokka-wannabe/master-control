@@ -13,7 +13,8 @@ engineering.
    repository's protocol carries TICK_STATE end to end, proven by the flagship's own spectator.
    The flesh may now grow, in the blueprint's order: the heartbeat first (`TODO.md` § Etape 1).
    The original discipline survives in one sentence: never implement here a truth that still
-   lives only in the flagship — consume the flagship's `grid` library rather than retelling it.
+   lives only in the flagship — consume the flagship's `grid` library through the C face it
+   grows for this consumer, rather than retelling it.
 2. **The settings are mirrored from the flagship, deliberately.** Repository settings, rulesets,
    CI shape, lint configuration and governance files are copies of `tron-grid-lite`'s, kept as
    identical as the repository's emptiness allows — the owner wants them identical, not
@@ -25,9 +26,25 @@ engineering.
 - **Identity:** the being is **Master Control**, capitalised like Program and User;
   `master-control`, lowercase and hyphenated, names only this repository. Never *MCP* in prose.
   Tron vocabulary per the flagship's STYLE.md § Tron Naming.
-- **Language, when the flesh arrives:** C++20 with the flagship's toolchain, presets and
-  warnings-as-errors discipline. Deviceless: no Vulkan, no window, no swapchain — if a change
-  needs a device, it belongs in tron-grid-lite.
+- **Language: Rust** (the owner's ruling, 2026-08-21), with the link repository's discipline
+  mirrored: stable toolchain, edition 2024, `cargo fmt` and `cargo clippy` clean, `std` only —
+  no third-party crates. The authoritative process gets the memory-safe language for the same
+  reason the parser did: it is the component hostile bytes eventually reach. Deviceless: no
+  Vulkan, no window, no swapchain — if a change needs a device, it belongs in tron-grid-lite.
+- **Link is consumed as the DLL, never as a crate** (the owner's ruling, 2026-08-21, "fully
+  agnostic" — and the doctrine agrees): "one implementation loaded by both ends cannot drift"
+  works through one *binary* at run time, and a crate dependency would compile a second copy of
+  the protocol into this process — same source, different artefact, drift possible again.
+  Master Control loads `link.dll`/`liblink.so` from beside its executable exactly as every
+  TronGrid Lite does — the residence rule, `lnkGetClientVTable`, the fingerprint, the vtable's
+  server half — a plain citizen at the wire with no side door. The loader is a few dozen lines
+  of `extern "C"` declarations (`LoadLibraryW`/`GetProcAddress`, `dlopen`/`dlsym`) rather than
+  a crate, per the no-crates rule.
+- **The world's truth stays the flagship's, and the boundary is a C ABI.** The heartbeat needs
+  no world; before Etape 2 (roster physics, the world definition), the flagship's `grid`
+  library grows a plain C face this process consumes — the organisation's established shape for
+  a contract between languages — because a Rust retelling of `stepBody` or the world definition
+  is exactly the second implementation this repository's founding rule forbids.
 - **Spelling:** British English everywhere. The LICENCE file content is untouchable (legal
   document).
 - **Docs:** the design authority is TOPOLOGY.md in the flagship. Docs here point at it; they do
@@ -57,8 +74,9 @@ process — dt is sacred, the wall clock is the degree of freedom, and the keepa
 ## CI today
 
 `quick-checks` (markdown lint + stray carriage returns) feeding the `CI Success` gate — the
-ruleset requires that check by its exact name. The flagship-style build matrix arrives with the
-first code.
+ruleset requires that check by its exact name. The build matrix arrives with the first code,
+and it is the link repository's cargo-flavoured shape (fmt, clippy, test, both platforms), not
+the flagship's — this is a Rust repository.
 
 ## Process
 

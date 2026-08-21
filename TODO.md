@@ -9,8 +9,12 @@ forgotten.
 
 ## Etape 1 — the heartbeat
 
-A paced tick loop broadcasting `TICK_STATE` over the wire to whoever is connected. What the
-audit added to the original sentence, all of it specified in TOPOLOGY.md:
+A paced tick loop broadcasting `TICK_STATE` over the wire to whoever is connected — **in Rust**
+(the owner's ruling; see CLAUDE.md § Rules), loading Link as the DLL beside the executable
+through a few dozen lines of hand-written `extern "C"` loader, never as a crate. The heartbeat
+needs no world: a scripted or empty roster broadcast is enough to prove the pacing, the
+acceptance window and the silence rules against real spectators. What the audit added to the
+original sentence, all of it specified in TOPOLOGY.md:
 
 - The pacing **mechanism**: fixed-dt accumulator against the wall clock with a max-steps clamp
   per iteration — and falling behind is *loud* (an overrun counter and a "can't keep up" line).
