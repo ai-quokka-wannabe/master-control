@@ -38,14 +38,16 @@ a leave is a broadcast; late arrival is not a special case. Added by the audit: 
 substreams derived from the master seed; traceable identities on creatures and models; intent
 conflicts resolved deterministically against the settled snapshot and logged.
 
-This etape also executes the placement ruling (CLAUDE.md § Rules): the simulated world —
-`stepBody`, `sanitiseAndClamp`, the ground function and the shared constants — is ported from
-the flagship's `grid` library to Rust here as the one implementation, the flagship deleting its
-copy and its local `--program --ticks` physics in the same movement (its dev loop dials a local
-Master Control instead — the constellation from the first command). Acceptance: the flagship's
-behavioural physics tests re-run here with tolerances; the per-tick hash test joins this suite;
-`WELCOME`'s world-definition fingerprint and twin tests guard what stays shared. The flagship's
-`rehearsal_master_control` retires when Etape 1 lands, for the same one-implementation reason.
+The placement ruling's port is **done on this side**: `stepBody`, `sanitiseAndClamp` and the
+ground contract live in `src/physics.rs` and `src/ground.rs`, held to the flagship by golden
+vectors (bit-exact for the ground, tolerance for the arc's sin/cos), with the per-tick hash in
+this suite and per-creature seed substreams ready. What remains of this etape:
+
+- **The flagship's deletion movement**: its `stepBody`, physics tests, Etape-16 hash and the
+  local `--program --ticks` mode go, its dev loop dialling a local Master Control instead.
+- **The REZ/DEREZ wire lifecycle**, gated on the REZ payload (Link Etape 6): real descriptors
+  replace `FIRST_BODY`, joins broadcast, the roster becomes plural, `WELCOME` grows the
+  world-definition fingerprint in the same protocol bump.
 
 ## Etape 3 — validation
 
