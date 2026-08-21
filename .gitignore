@@ -13,3 +13,7 @@
 # Bytecode, which appears as soon as anything imports a tool rather than running it.
 __pycache__/
 *.pyc
+
+# The golden generator's local build litter - the goldens are what gets committed.
+*.obj
+generate_physics_goldens.exe
