@@ -6,14 +6,14 @@ engineering.
 
 **Two facts that govern every decision in this repo:**
 
-1. **This repository is deliberately code-free until the flagship's seams exist.** The blueprint
-   (`docs/TOPOLOGY.md` in `tron-grid-lite`) grows the server's flesh inside the flagship first —
-   next to the physics, world definition and tick code it must share — and extracts it here once
-   the world-definition constants leave `main.cpp`, the library target exists, and the wire (the
-   `link` repository) can carry a tick. Do not start server code here ahead of that order: a
-   second implementation of a truth still being written elsewhere is exactly the drift this
-   organisation's static_assert culture exists to prevent. Documentation lives here freely;
-   flesh waits for the seams.
+1. **The gates this repository waited behind are open** (2026-08-21). The rule was: code-free
+   until the world-definition constants leave the flagship's `main.cpp`, the `src/` library
+   target exists, and the wire can carry a tick. All three hold — the flagship's
+   `src/world_definition.hpp` and the `grid` library landed with its seams PR, and the `link`
+   repository's protocol carries TICK_STATE end to end, proven by the flagship's own spectator.
+   The flesh may now grow, in the blueprint's order: the heartbeat first (`TODO.md` § Etape 1).
+   The original discipline survives in one sentence: never implement here a truth that still
+   lives only in the flagship — consume the flagship's `grid` library rather than retelling it.
 2. **The settings are mirrored from the flagship, deliberately.** Repository settings, rulesets,
    CI shape, lint configuration and governance files are copies of `tron-grid-lite`'s, kept as
    identical as the repository's emptiness allows — the owner wants them identical, not
@@ -35,6 +35,24 @@ engineering.
 - **Don't over-engineer.** Keep it simple. No abstractions until there's a concrete second use
   case.
 - **Licence:** GPL v3-or-later.
+
+## The authoritative process's own build rules
+
+These are the two disciplines the MMO audit assigned to *this* repository's build and code
+specifically (the mechanisms and their citations live in TOPOLOGY.md § Master Control's
+mechanics — pointers here, per the no-copying rule above):
+
+- **Pin the floating-point environment from the first commit.** Strict FP, no fast-math,
+  contraction pinned; treat libm transcendentals with the flagship's documented suspicion. The
+  replay claim rests on this build, and a build flag is nearly free on day one and unpayable
+  after logs exist.
+- **Determinism dies at hidden state.** No iteration over unordered containers anywhere in the
+  simulation; no cache living outside the hashed state; nothing recomputed at load that could
+  differ from what was saved. Factorio's own desync specimens are the citation.
+
+And the one clock rule: the tick loop is the single place a wall clock may exist in this
+process — dt is sacred, the wall clock is the degree of freedom, and the keepalive constants in
+`lnk_protocol.h` are the only other time this repository is allowed to care about.
 
 ## CI today
 
