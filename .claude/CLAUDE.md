@@ -78,6 +78,35 @@ And the one clock rule: the tick loop is the single place a wall clock may exist
 process — dt is sacred, the wall clock is the degree of freedom, and the keepalive constants in
 `lnk_protocol.h` are the only other time this repository is allowed to care about.
 
+## GPU physics: considered and rejected, with the trigger written down
+
+Raised by the owner when the physics moved here (2026-08-21), answered with numbers rather than
+taste, and recorded so it is never re-litigated from memory:
+
+- **Determinism is the product, and a GPU would spend it.** The replay claim — the world
+  replays bit-identically from seed, state and the action log — rests on one CPU process under
+  a pinned floating-point build. The flagship's own digest tables measure what a GPU costs
+  here: per-*vendor* float behaviour, 2.95% of bytes differing between NVIDIA and Intel on an
+  identical scene. A GPU-stepped world would replay only on the exact card and driver that
+  recorded it, which is no replay claim at all.
+- **The arithmetic is microscopic.** The physics is analytic closed forms — a few hundred
+  floating-point operations per body per tick. At 32 Hz, a *thousand* creatures cost well under
+  a millisecond of one core's 31.25 ms budget; the golden trajectory steps 256 ticks in
+  microseconds. GPUs win at millions of parallel identical items; a world of hundreds of
+  heterogeneous bodies with branching contacts is CPU territory, and every shipped MMO surveyed
+  by the audit simulates on CPU for exactly these reasons.
+- **Deviceless is a deployment property.** "A server that runs headless in a cupboard" — any
+  machine, any cloud, no driver in the dependency chain of the world's truth.
+- **Rust is not the obstacle, and never was**: Vulkan bindings exist for Rust should some
+  future need arise. The exclusion is doctrine, not language.
+
+**The trigger**, should scale ever genuinely demand more: first measure — then multithread the
+step across cores (bodies are independent within a tick by construction; determinism survives a
+fixed reduction order), and only past *that* revisit anything device-shaped, as its own written
+decision. Sense computation is the one load that could ever grow device-sized here
+(server-computed hearing on the integrity ladder), and the acoustic gather is a host-CPU
+function by design.
+
 ## CI today
 
 `quick-checks` (markdown lint + stray carriage returns) feeding the `CI Success` gate — the
