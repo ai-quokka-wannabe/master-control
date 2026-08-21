@@ -15,8 +15,6 @@ on:
 
     workflow_dispatch:
 
-# The repository is documentation and settings today; the flagship-style build matrix arrives
-# with the first code, per the extraction order in tron-grid-lite's docs/TOPOLOGY.md.
 jobs:
     quick-checks:
         name: Quick Checks (markdown)
@@ -49,6 +47,13 @@ jobs:
             - name: Lint markdown
               run: markdownlint-cli2 "**/*.md"
 
+            # Save the npm cache so pull-request runs can restore it read-only.
+            - name: Save npm cache
+              uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                path: ~/.npm
+                key: npm-markdownlint-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-mdlint-${{ steps.mdlint-version.outputs.version }}
+
             # A carriage return sitting inside a line is invisible in every editor, survives
             # clang-format and markdownlint, and reads as ordinary text in review. Three reached
             # the flagship's main before this step existed there, each one a Doxygen \return
@@ -66,16 +71,54 @@ jobs:
                     exit 1
                 fi
 
+    build:
+        name: Build (${{ matrix.os }})
+        needs: quick-checks
+        timeout-minutes: 20
+
+        strategy:
+            fail-fast: false
+
+            matrix:
+                os: [ubuntu-latest, windows-latest]
+
+        runs-on: ${{ matrix.os }}
+
+        steps:
+            # The wire is a pinned submodule: the build script compiles its cdylib and copies it
+            # beside every executable, which is how the residence rule holds in CI too.
+            - name: Checkout repository (with the wire)
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                submodules: true
+
+            - name: Update the stable toolchain
+              run: |
+                rustup update --no-self-update stable
+                rustup default stable
+                cargo --version
+                rustc --version
+
+            - name: Formatting must be canonical
+              run: cargo fmt --check
+
+            - name: Clippy, warnings as errors
+              run: cargo clippy --all-targets -- --deny warnings
+
+            - name: Test (unit, twin and the whole world stood up)
+              run: cargo test
+
     ci-success:
         name: CI Success
-        needs: [quick-checks]
+        needs: [quick-checks, build]
         runs-on: ubuntu-latest
         if: always()
 
         steps:
             - name: Check if all jobs succeeded
               run: |
-                if [[ "${{ needs.quick-checks.result }}" != "success" ]]; then
+                if [[ "${{ needs.quick-checks.result }}" != "success" ]] || \
+                   [[ "${{ needs.build.result }}" != "success" ]]; then
                     echo "One or more jobs failed"
                     exit 1
                 fi

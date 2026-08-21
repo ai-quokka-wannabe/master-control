@@ -1,4 +1,5 @@
 /build
+/target
 /.qtcreator
 /.vs
 .claude/settings.local.json

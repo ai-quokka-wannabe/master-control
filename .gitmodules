@@ -1,0 +1,3 @@
+[submodule "external/link"]
+	path = external/link
+	url = https://github.com/ai-quokka-wannabe/link.git
