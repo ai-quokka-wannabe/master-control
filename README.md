@@ -22,11 +22,21 @@ and why every delegation is the way it is, lives in the flagship's
 
 ## What Lives Here Today
 
-Documentation and the organisation's settings — deliberately nothing else yet. The blueprint
-grows the world inside the flagship first, next to the physics, world definition and tick code
-it must share, and extracts it here once the seams exist and the wire can carry a tick.
-[TODO.md](TODO.md) stages the etapes that day unlocks. Until then, an empty repository is an
-honest one: nothing here can drift from a truth that is still being written elsewhere.
+**The heartbeat**: a Rust world server that listens on the Grid's port, welcomes spectators and
+creature hosts through the very Link DLL every TronGrid Lite loads, and broadcasts a scripted
+world at a sacred 32 Hz — the pacing accumulator with its clamp and its loud lag counter, the
+acceptance window with idempotent dedupe, the three silence rules, keepalive reaping, and the
+minimal flood posture, all per the blueprint. The world it tells is still a script (two
+orbiters, a blinker, and one guest a creature host may steer); the *simulated* world arrives at
+Etape 2 as the port of the flagship's physics, per the placement ruling. [TODO.md](TODO.md)
+stages what remains.
+
+```text
+git submodule update --init
+cargo run --release            # Greetings, Programs! Master Control listening on port 30702.
+```
+
+Then, from a tron-grid-lite build: `TronGridLite --window` — the constellation on one machine.
 
 ## The Doctrine
 
