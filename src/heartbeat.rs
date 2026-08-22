@@ -355,6 +355,7 @@ impl Heartbeat {
         let tick = self.tick;
         let roster = &mut self.roster;
         let stager = &mut self.stager;
+        let mut late_leaves: Vec<u32> = Vec::new();
         self.citizens.retain_mut(|citizen| {
             let mut alive = true;
             for model in rezzed {
@@ -370,16 +371,19 @@ impl Heartbeat {
             }
             alive = alive && citizen.connection.flush().is_ok();
             if !alive {
-                let orphaned = roster.orphan(citizen.client_id);
-                log_info(&format!(
-                    "client {} could not be told the roster - dropped; {} creature(s) stay embodied, ownerless.",
-                    citizen.client_id,
-                    orphaned.len()
-                ));
+                let leaving = part_with(citizen, roster, "could not be told the roster");
                 stager.owner_died(citizen.client_id);
+                for id in &leaving {
+                    stager.release(*id);
+                }
+                late_leaves.extend(leaving);
             }
             alive
         });
+        if !late_leaves.is_empty() {
+            // A leave discovered through a failed send still owes everyone its DEREZ.
+            self.relay(&[], &late_leaves);
+        }
     }
 
     /// The keepalive contract, this end's half: PING the quiet, reap the dead. A reaped host's
@@ -417,7 +421,7 @@ impl Heartbeat {
         // The validator is the only path into the world: whatever the stager applied is
         // sanitised and clamped against each body's own bounds inside the roster's step.
         let stager = &mut self.stager;
-        let (body_rows, body_events) = self.roster.step(tick, |creature_id| {
+        let telling = self.roster.step(tick, |creature_id| {
             match stager.intent_for(creature_id, tick) {
                 Applied::Fresh(intent) | Applied::Repeated(intent) => intent,
                 Applied::Coasted => Intent::default(),
@@ -425,9 +429,10 @@ impl Heartbeat {
         });
         let dressing = set_dressing(tick);
         let mut rows = dressing.rows;
-        rows.extend(body_rows);
+        rows.extend(telling.rows);
         let mut events = dressing.events;
-        events.extend(body_events);
+        events.extend(telling.events);
+        let letters = telling.letters;
 
         #[allow(clippy::cast_possible_truncation)]
         let header = TickStateHeader {
@@ -444,6 +449,7 @@ impl Heartbeat {
         // Per-subscriber sends, per the composable-broadcast rule: the loop is the seam
         // interest management drops into, even while everyone still hears everything.
         let roster = &mut self.roster;
+        let mut late_leaves: Vec<u32> = Vec::new();
         self.citizens.retain_mut(|citizen| {
             let mut alive = citizen.connection.send_tick_state(&header, &rows) == LNK_OK;
             if alive && let Some(derez) = &derez {
@@ -454,17 +460,69 @@ impl Heartbeat {
                     alive = citizen.connection.send_event(event) == LNK_OK;
                 }
             }
+            // The owner's letter, after the tick it belongs to: composed per subscriber, which
+            // is the seam this loop was built as.
+            for letter in letters
+                .iter()
+                .filter(|letter| letter.owner == citizen.client_id)
+            {
+                if alive {
+                    alive = citizen
+                        .connection
+                        .send_proprioception(&letter.header, &letter.contacts)
+                        == LNK_OK;
+                }
+            }
             alive = alive && citizen.connection.flush().is_ok();
             if !alive {
-                let orphaned = roster.orphan(citizen.client_id);
-                log_info(&format!(
-                    "client {} could not be told tick {} - dropped; {} creature(s) stay embodied, ownerless.",
-                    citizen.client_id, header.tick, orphaned.len()
-                ));
+                let leaving = part_with(
+                    citizen,
+                    roster,
+                    &format!("could not be told tick {}", header.tick),
+                );
                 stager.owner_died(citizen.client_id);
+                for id in &leaving {
+                    stager.release(*id);
+                }
+                late_leaves.extend(leaving);
             }
             alive
         });
+        if !late_leaves.is_empty() {
+            // A leave discovered through a failed send still owes everyone its DEREZ.
+            self.relay(&[], &late_leaves);
+        }
+    }
+}
+
+/// A citizen whose socket failed while being written to is either gone (a crash: its creatures
+/// stay embodied, ownerless) or had already said BYE and hung up before this end read it (a
+/// leave: its creatures leave with it). The socket still holds the answer - a BYE waiting to be
+/// read - so the farewell is looked for before the verdict. Returns the ids that leave.
+fn part_with(citizen: &mut Citizen, roster: &mut Roster, what_failed: &str) -> Vec<u32> {
+    let said_bye = loop {
+        match citizen.connection.poll() {
+            Ok(Some(Message::Bye)) => break true,
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => break false,
+        }
+    };
+    if said_bye {
+        let leaving = roster.leave(citizen.client_id);
+        log_info(&format!(
+            "client {} {what_failed} - it had said BYE; {} creature(s) leave with it.",
+            citizen.client_id,
+            leaving.len()
+        ));
+        leaving
+    } else {
+        let orphaned = roster.orphan(citizen.client_id);
+        log_info(&format!(
+            "client {} {what_failed} - dropped; {} creature(s) stay embodied, ownerless.",
+            citizen.client_id,
+            orphaned.len()
+        ));
+        Vec::new()
     }
 }
 

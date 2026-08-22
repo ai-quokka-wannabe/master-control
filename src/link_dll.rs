@@ -36,7 +36,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -64,6 +64,7 @@ pub const MSG_DEREZ: u8 = 7;
 pub const MSG_PING: u8 = 8;
 pub const MSG_PONG: u8 = 9;
 pub const MSG_BYE: u8 = 10;
+pub const MSG_PROPRIOCEPTION: u8 = 11;
 
 pub const ROLE_SPECTATOR: u8 = 1;
 pub const ROLE_CREATURE_HOST: u8 = 2;
@@ -75,6 +76,31 @@ pub const EVENT_VOCALISATION: u8 = 1;
 pub const REZ_MAX_VERTICES: u32 = 1_024;
 pub const REZ_MAX_TRIANGLES: u32 = 2_048;
 pub const REZ_MAX_MATERIALS: u32 = 16;
+
+/// `LNK_CONTACTS_MAX`: the most contacts the owner's letter carries, and so the most a body
+/// may declare.
+pub const CONTACTS_MAX: u32 = 16;
+
+/// `LnkContact`: one contact a body felt this tick - where, and the impulse delivered there.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Contact {
+    pub position: [f32; 3],
+    pub impulse: [f32; 3],
+}
+
+/// `LnkProprioception`: the owner's letter - the body's feel this tick, followed on the wire
+/// by `contact_count` [`Contact`] rows. Server to the owning host only.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Proprioception {
+    pub tick: u64,
+    pub creature_id: u32,
+    pub grounded: u8,
+    pub reserved0: [u8; 3],
+    pub specific_force: [f32; 3],
+    pub contact_count: u32,
+}
 
 /// `LnkWorldDefinition`: what the simulated world is made of, the fields both ends must agree
 /// on before a position means the same thing twice. The fingerprint over it is the DLL's to
@@ -220,6 +246,8 @@ const _: () = assert!(size_of::<Rez>() == 32);
 const _: () = assert!(size_of::<RezVertex>() == 12);
 const _: () = assert!(size_of::<RezTriangle>() == 16);
 const _: () = assert!(size_of::<RezMaterial>() == 32);
+const _: () = assert!(size_of::<Contact>() == 24);
+const _: () = assert!(size_of::<Proprioception>() == 32);
 const _: () = assert!(size_of::<CreatureState>() == 40);
 const _: () = assert!(size_of::<TickStateHeader>() == 16);
 const _: () = assert!(size_of::<Actions>() == 40);
@@ -231,7 +259,7 @@ const _: () = assert!(size_of::<Derez>() == 16);
 // ---------------------------------------------------------------------------------------------
 
 /// `LNK_CLIENT_ABI_VERSION` this binding was written against; the export refuses any other.
-pub const CLIENT_ABI_VERSION: u32 = 4;
+pub const CLIENT_ABI_VERSION: u32 = 5;
 
 pub type LnkStatus = i32;
 
@@ -275,6 +303,14 @@ pub struct RezView {
     pub materials: *const RezMaterial,
 }
 
+/// `LnkProprioceptionView`: the header by value, the contacts borrowed until the next poll.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ProprioceptionView {
+    pub proprioception: Proprioception,
+    pub contacts: *const Contact,
+}
+
 /// The union behind `LnkMessageView.as`. Reading the member the type byte names is the
 /// contract; [`MessageView::message`] is the one place that read happens.
 #[repr(C)]
@@ -289,6 +325,7 @@ pub union MessageViewPayload {
     pub hello: Hello,
     pub actions: Actions,
     pub rez: RezView,
+    pub proprioception: ProprioceptionView,
 }
 
 #[repr(C)]
@@ -319,6 +356,11 @@ pub enum Message {
     },
     Event(Event),
     Derez(Derez),
+    /// The owner's letter, contacts copied out.
+    Proprioception {
+        header: Proprioception,
+        contacts: Vec<Contact>,
+    },
     Ping(Ping),
     Pong(Pong),
     Bye,
@@ -376,6 +418,13 @@ impl MessageView {
                     }
                 }
                 MSG_EVENT => Message::Event(self.payload.event),
+                MSG_PROPRIOCEPTION => {
+                    let view = self.payload.proprioception;
+                    Message::Proprioception {
+                        header: view.proprioception,
+                        contacts: rows(view.contacts, view.proprioception.contact_count),
+                    }
+                }
                 MSG_DEREZ => Message::Derez(self.payload.derez),
                 MSG_PING => Message::Ping(self.payload.ping),
                 MSG_PONG => Message::Pong(self.payload.pong),
@@ -443,6 +492,11 @@ pub struct LnkClientVTable {
     ) -> LnkStatus,
     pub send_event: extern "C" fn(connection: *mut LnkClient, event: *const Event) -> LnkStatus,
     pub send_derez: extern "C" fn(connection: *mut LnkClient, derez: *const Derez) -> LnkStatus,
+    pub send_proprioception: extern "C" fn(
+        connection: *mut LnkClient,
+        proprioception: *const Proprioception,
+        contacts: *const Contact,
+    ) -> LnkStatus,
     pub close_server: extern "C" fn(server: *mut LnkServer),
 }
 
@@ -786,6 +840,19 @@ impl Connection {
         (self.vtable.send_derez)(self.client, derez)
     }
 
+    /// The owner's letter, contacts by borrow; the library copies them and judges the count
+    /// against the cap before reading a row.
+    pub fn send_proprioception(
+        &mut self,
+        header: &Proprioception,
+        contacts: &[Contact],
+    ) -> LnkStatus {
+        if contacts.len() != header.contact_count as usize {
+            return LNK_BAD_ARGUMENT;
+        }
+        (self.vtable.send_proprioception)(self.client, header, contacts.as_ptr())
+    }
+
     pub fn send_ping(&mut self, nonce: u64) -> LnkStatus {
         (self.vtable.send_ping)(self.client, nonce)
     }
@@ -871,6 +938,8 @@ mod tests {
             ),
             ("LNK_MSG_HELLO", u64::from(MSG_HELLO)),
             ("LNK_MSG_REZ", u64::from(MSG_REZ)),
+            ("LNK_MSG_PROPRIOCEPTION", u64::from(MSG_PROPRIOCEPTION)),
+            ("LNK_CONTACTS_MAX", u64::from(CONTACTS_MAX)),
             ("LNK_MSG_BYE", u64::from(MSG_BYE)),
             ("LNK_REZ_MAX_VERTICES", u64::from(REZ_MAX_VERTICES)),
             ("LNK_REZ_MAX_TRIANGLES", u64::from(REZ_MAX_TRIANGLES)),

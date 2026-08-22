@@ -28,8 +28,8 @@
 //! run - the hidden-state checklist, applied to the roster itself.
 
 use crate::link_dll::{
-    CreatureState, EVENT_VOCALISATION, Event, Rez, RezMaterial, RezTriangle, RezVertex,
-    TICK_STATE_MAX_CREATURES,
+    CONTACTS_MAX, Contact, CreatureState, EVENT_VOCALISATION, Event, Proprioception, Rez,
+    RezMaterial, RezTriangle, RezVertex, TICK_STATE_MAX_CREATURES,
 };
 use crate::physics::{Body, BodyBounds, FIRST_BODY, floor, sanitise_and_clamp};
 use crate::stager::Intent;
@@ -56,7 +56,8 @@ pub const SET_DRESSING_ROWS: u32 = 3;
 pub const WORLD_MAX_FORWARD_SPEED: f32 = 10.0;
 pub const WORLD_MAX_TURN_RATE: f32 = std::f32::consts::TAU;
 pub const WORLD_MAX_VOCALISATION: f32 = 1.0;
-pub const WORLD_MAX_CONTACTS: u32 = 16;
+/// No more than the owner's letter can carry - the wire's cap is the world's.
+pub const WORLD_MAX_CONTACTS: u32 = CONTACTS_MAX;
 
 /// A body as it came over the wire, kept whole so the relay and the late-join replay are the
 /// host's own bytes and nothing this side reassembled.
@@ -124,6 +125,23 @@ pub enum Admission {
 pub enum DerezRefusal {
     NotResident,
     NotOwner { owner: Option<u64> },
+}
+
+/// One owner's letter for one tick.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Letter {
+    pub owner: u64,
+    pub header: Proprioception,
+    pub contacts: Vec<Contact>,
+}
+
+/// What one step of the roster tells: the rows for everyone, the events for everyone, and a
+/// letter per owned body for its owner alone.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Telling {
+    pub rows: Vec<CreatureState>,
+    pub events: Vec<Event>,
+    pub letters: Vec<Letter>,
 }
 
 /// The roster of record.
@@ -272,14 +290,11 @@ impl Roster {
 
     /// One tick for every body: the intent each is given (already judged by the stager) is
     /// sanitised and clamped against its own bounds - the validator is the only path in - and
-    /// the rows and the voice onsets are told back, in roster order.
-    pub fn step(
-        &mut self,
-        tick: u64,
-        mut intent_for: impl FnMut(u32) -> Intent,
-    ) -> (Vec<CreatureState>, Vec<Event>) {
+    /// the rows, the voice onsets and each owner's letter are told back, in roster order.
+    pub fn step(&mut self, tick: u64, mut intent_for: impl FnMut(u32) -> Intent) -> Telling {
         let mut rows = Vec::with_capacity(self.residents.len());
         let mut events = Vec::new();
+        let mut letters = Vec::new();
         for (id, resident) in &mut self.residents {
             let intent = sanitise_and_clamp(intent_for(*id), &resident.body.bounds);
             let previous_voice = resident.body.vocalisation;
@@ -304,8 +319,38 @@ impl Roster {
                     reserved0: [0; 3],
                 });
             }
+            // The letter: only an owned body has anyone to write to. The contacts are the
+            // physics' own, already truncated to the body's budget, which never exceeds the cap.
+            if let Some(owner) = resident.owner {
+                let contacts: Vec<Contact> = body
+                    .contacts
+                    .iter()
+                    .map(|contact| Contact {
+                        position: contact.position,
+                        impulse: contact.impulse,
+                    })
+                    .collect();
+                #[allow(clippy::cast_possible_truncation)]
+                let header = Proprioception {
+                    tick,
+                    creature_id: *id,
+                    grounded: u8::from(body.grounded),
+                    reserved0: [0; 3],
+                    specific_force: body.specific_force,
+                    contact_count: contacts.len() as u32,
+                };
+                letters.push(Letter {
+                    owner,
+                    header,
+                    contacts,
+                });
+            }
         }
-        (rows, events)
+        Telling {
+            rows,
+            events,
+            letters,
+        }
     }
 }
 
@@ -481,7 +526,11 @@ mod tests {
         let mut slow = model(7);
         slow.header.max_forward_speed = 0.25;
         roster.rez(1, slow);
-        let (rows, events) = roster.step(1, |_| Intent {
+        let Telling {
+            rows,
+            events,
+            letters,
+        } = roster.step(1, |_| Intent {
             forward_speed: 1.0,
             turn_rate: 0.0,
             vocalisation: 0.5,
@@ -498,11 +547,39 @@ mod tests {
             "the guest walked a metre a second"
         );
         assert_eq!(events.len(), 2, "two voices started");
-        let (_, later) = roster.step(2, |_| Intent {
+        // One letter: the guest is nobody's, and nobody is written to about it.
+        assert_eq!(letters.len(), 1);
+        assert_eq!(letters[0].owner, 1);
+        assert_eq!(letters[0].header.creature_id, 7);
+        assert_eq!(
+            letters[0].header.grounded, 1,
+            "a walking body keeps its feet"
+        );
+        assert!(
+            !letters[0].contacts.is_empty()
+                && letters[0].header.contact_count as usize == letters[0].contacts.len(),
+            "a standing body feels the floor, and the count is the rows"
+        );
+        assert!(
+            letters[0].header.specific_force[1] > 0.0,
+            "an otolith at rest reads upward"
+        );
+        let later = roster.step(2, |_| Intent {
             forward_speed: 0.0,
             turn_rate: 0.0,
             vocalisation: 0.5,
         });
-        assert!(later.is_empty(), "a continuing call is already in the rows");
+        assert!(
+            later.events.is_empty(),
+            "a continuing call is already in the rows"
+        );
+        roster.claim(GUEST_CREATURE_ID, 2);
+        let claimed = roster.step(3, |_| Intent::default());
+        assert_eq!(
+            claimed.letters.len(),
+            2,
+            "a claimed guest has someone to write to"
+        );
+        assert_eq!(claimed.letters[1].owner, 2);
     }
 }
