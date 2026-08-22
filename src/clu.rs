@@ -52,8 +52,12 @@ enum Record {
     Rez {
         creature_id: u32,
         bounds: BodyBounds,
+        vertices: Vec<[f32; 3]>,
     },
     Derez {
+        creature_id: u32,
+    },
+    Claim {
         creature_id: u32,
     },
     Applied {
@@ -115,8 +119,29 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                 #[allow(clippy::cast_possible_truncation)]
                 max_contact_count: number(6)? as usize,
             },
+            vertices: {
+                // Older logs end at the contact count: a body without a mesh, as they were.
+                let count = if words.len() > 7 { number(7)? } else { 0 };
+                let mut vertices = Vec::new();
+                for index in 0..count {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let at = 8 + (index as usize) * 3;
+                    let mut vertex = [0.0f32; 3];
+                    for (axis, slot) in vertex.iter_mut().enumerate() {
+                        *slot = hex_f32(words.get(at + axis).ok_or_else(|| {
+                            format!("malformed rez, short of its vertices: {line}")
+                        })?)?;
+                    }
+                    vertices.push(vertex);
+                }
+                vertices
+            },
         })),
         "derez" => Ok(Some(Record::Derez {
+            #[allow(clippy::cast_possible_truncation)]
+            creature_id: number(2)? as u32,
+        })),
+        "claim" => Ok(Some(Record::Claim {
             #[allow(clippy::cast_possible_truncation)]
             creature_id: number(2)? as u32,
         })),
@@ -215,9 +240,18 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
             Record::Rez {
                 creature_id,
                 bounds,
+                vertices,
             } => {
                 let mut model = Model::bodiless(creature_id, &bounds);
                 model.header.creature_id = creature_id;
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    model.header.vertex_count = vertices.len() as u32;
+                }
+                model.vertices = vertices
+                    .into_iter()
+                    .map(|position| crate::link_dll::RezVertex { position })
+                    .collect();
                 match roster.rez(0, model) {
                     Admission::Embodied | Admission::Adopted => {}
                     refused => {
@@ -229,12 +263,20 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
                 }
             }
             Record::Derez { creature_id } => {
-                if roster.derez(0, creature_id).is_err() {
+                if let Err(refusal) = roster.derez(0, creature_id) {
                     return Err(format!(
-                        "line {}: the log derezzes creature {creature_id}, which is not embodied on re-simulation",
-                        line_number + 1
+                        "line {}: the log derezzes creature {creature_id}, which on re-simulation is {}",
+                        line_number + 1,
+                        match refusal {
+                            crate::roster::DerezRefusal::NotResident => "not embodied".to_string(),
+                            crate::roster::DerezRefusal::NotOwner { owner } =>
+                                format!("owned by {owner:?}, not the log's host"),
+                        }
                     ));
                 }
+            }
+            Record::Claim { creature_id } => {
+                roster.claim(creature_id, 0);
             }
             Record::Applied {
                 tick,
@@ -365,12 +407,30 @@ mod tests {
             Ok(Some(Record::Rez {
                 creature_id: 7,
                 bounds,
+                vertices,
             })) => {
                 assert!((bounds.max_forward_speed - 1.0).abs() < f32::EPSILON);
                 assert_eq!(bounds.max_contact_count, 4);
+                assert!(vertices.is_empty(), "an older log's rez is a bodiless body");
             }
             other => panic!("{other:?}"),
         }
+        match parse_line(
+            "rez 5 7 3F800000 3FC90FDB 3F800000 4 2 00000000 3F800000 00000000 BF800000 00000000 3F000000",
+        ) {
+            Ok(Some(Record::Rez { vertices, .. })) => {
+                assert_eq!(vertices, vec![[0.0, 1.0, 0.0], [-1.0, 0.0, 0.5]]);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            parse_line("rez 5 7 3F800000 3FC90FDB 3F800000 4 2 00000000").is_err(),
+            "a rez short of its vertices is malformed"
+        );
+        assert!(matches!(
+            parse_line("claim 9 100"),
+            Ok(Some(Record::Claim { creature_id: 100 }))
+        ));
         assert!(matches!(
             parse_line("derez 9 7"),
             Ok(Some(Record::Derez { creature_id: 7 }))

@@ -224,6 +224,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Clu tells the truth: the log carries the mesh, the claim, and the order.** A bug hunt
+  found three ways the record could disagree with the world. The input log wrote a rez as
+  bounds alone, so Clu re-simulated every shaped body as a point - and the hull is simulation
+  state (where a body stands, how it is seated, what it touches); the `rez` line now carries
+  every vertex as bits and Clu builds the same hull, older logs still reading as bodiless. A
+  `DEREZ` then a `REZ` of one identity in one drain - a body swapped - was told to every
+  citizen, the Disk and the log as `REZ` then `DEREZ`, a body gone: the roster's changes are
+  now one ordered list, told in the order the world made them, and a rez's bounds are captured
+  at admission so a body that left in the same breath is still logged as having come. An
+  orphan taken up by steering - the guest, in every early test - changed owner with no line
+  in the log, so Clu refused its later derez as nobody's: `claim` is a line now, and Clu
+  applies it. Beside those: the set dressing's identities (0 to 3) are refused to any `REZ`, a
+  body wearing one having shared rows with the scenery and been derezzed by its blinks; an
+  orphan is claimed by a word the world *accepts*, never by one it refuses; an owner rezzing
+  its own creature again keeps what it staged, a new body not being a new mind; infinity in a
+  vertex is refused as "not a normal number", not as a subnormal; and the handshake timeout's
+  comment now says what it costs (a quarter second, eight ticks, loud). Tested: the Clu life
+  now holds a cube and the guest claimed by steering; a swap in one breath is heard in order
+  and re-simulates; both red on the old code.
+
 - **The first word's piggyback is not a loss.** A host learns of a tick from its telling, so
   its first `ACTIONS` is always about the tick after the first it was told, and the previous
   intent riding beside it names a step the creature rightly coasted through before any word

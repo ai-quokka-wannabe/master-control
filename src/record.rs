@@ -139,21 +139,36 @@ impl InputLog {
     }
 
     /// A body rezzed (or adopted with new bounds) at this tick: what the re-simulation needs
-    /// to stand the same body under the same clamp.
-    pub fn rez(&mut self, tick: u64, creature_id: u32, bounds: &BodyBounds) {
-        let _ = writeln!(
-            self.file,
-            "rez {tick} {creature_id} {} {} {} {}",
+    /// to stand the same body under the same clamp - and its vertices, every one as bits,
+    /// because the hull is simulation state: where a body stands, how it is seated, what it
+    /// touches, all follow from the mesh, and a log without it re-simulates a different world.
+    pub fn rez(&mut self, tick: u64, creature_id: u32, bounds: &BodyBounds, vertices: &[[f32; 3]]) {
+        let mut line = format!(
+            "rez {tick} {creature_id} {} {} {} {} {}",
             bits(bounds.max_forward_speed),
             bits(bounds.max_turn_rate),
             bits(bounds.max_vocalisation_strength),
-            bounds.max_contact_count
+            bounds.max_contact_count,
+            vertices.len()
         );
+        for vertex in vertices {
+            for axis in vertex {
+                line.push(' ');
+                line.push_str(&bits(*axis));
+            }
+        }
+        let _ = writeln!(self.file, "{line}");
     }
 
     /// A body that left at this tick.
     pub fn derez(&mut self, tick: u64, creature_id: u32) {
         let _ = writeln!(self.file, "derez {tick} {creature_id}");
+    }
+
+    /// An orphan taken up by steering at this tick: ownership changed without a rez, and a
+    /// re-simulation that does not know it refuses the owner's later derez.
+    pub fn claim(&mut self, tick: u64, creature_id: u32) {
+        let _ = writeln!(self.file, "claim {tick} {creature_id}");
     }
 
     /// The periodic hash over every body, in roster order.
