@@ -46,7 +46,14 @@ fn clu_main(arguments: Vec<String>) -> std::process::ExitCode {
             ticks,
             hashes,
             ended,
+            other_build,
         }) => {
+            if let Some(stamp) = other_build {
+                println!(
+                    "[WARN] Clu: the log was made by build {stamp}; this is build {}. They agreed - but a later disagreement would be a different binary first.",
+                    master_control::build_info::build_hash_hex()
+                );
+            }
             if !ended {
                 println!(
                     "[WARN] Clu: the log has no end line - the world did not stop on request, and whatever followed its last line was never written."
@@ -151,7 +158,9 @@ fn main() -> std::process::ExitCode {
 
     if wants_version {
         println!(
-            "[INFO] Master Control {VERSION} | Link protocol {}",
+            "[INFO] Master Control {VERSION} build={} ({} source files) | Link protocol {}",
+            master_control::build_info::build_hash_hex(),
+            master_control::build_info::BUILD_FILES_HASHED,
             wire.protocol_version()
         );
         return std::process::ExitCode::SUCCESS;
