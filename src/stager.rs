@@ -38,7 +38,12 @@ pub enum Verdict {
     /// Staged for its tick. Replaces an earlier intent staged for the same (creature, tick) -
     /// latest wins - which is also what makes the piggybacked resend free to process.
     Accepted { creature_id: u32, intent_tick: u64 },
-    /// Arrived after its tick was stepped. Refused, on the record.
+    /// The piggybacked resend of an intent this creature already stepped with: the silence rule
+    /// working as designed, idempotent, and not worth a line - a log that names every honest
+    /// resend as a refusal buries the refusals that matter.
+    AlreadyApplied { creature_id: u32, intent_tick: u64 },
+    /// Arrived after its tick was stepped, and was never applied: a real loss. Refused, on the
+    /// record.
     RefusedStale {
         creature_id: u32,
         intent_tick: u64,
@@ -76,6 +81,8 @@ struct CreatureStaging {
     staged: HashMap<u64, Intent>,
     last_accepted: Option<Intent>,
     repeat_budget: u32,
+    /// The tick whose fresh intent was last applied, so a resend of it is known for what it is.
+    last_applied_tick: Option<u64>,
 }
 
 /// The stager for every steerable creature. Etape 1 has exactly one (the scripted guest), but
@@ -105,6 +112,7 @@ impl ActionStager {
                 staged: HashMap::new(),
                 last_accepted: None,
                 repeat_budget: 0,
+                last_applied_tick: None,
             });
         if staging.owner != sender {
             verdicts.push(Verdict::RefusedNotOwner {
@@ -115,7 +123,12 @@ impl ActionStager {
         }
 
         let mut judge = |tick: u64, intent: Intent| {
-            let verdict = if tick < next_tick {
+            let verdict = if staging.last_applied_tick == Some(tick) {
+                Verdict::AlreadyApplied {
+                    creature_id: actions.creature_id,
+                    intent_tick: tick,
+                }
+            } else if tick < next_tick {
                 Verdict::RefusedStale {
                     creature_id: actions.creature_id,
                     intent_tick: tick,
@@ -176,6 +189,7 @@ impl ActionStager {
 
         if let Some(intent) = staging.staged.remove(&tick) {
             staging.last_accepted = Some(intent);
+            staging.last_applied_tick = Some(tick);
             staging.repeat_budget = ACTIONS_REPEAT_TICKS;
             Applied::Fresh(intent)
         } else if staging.repeat_budget > 0
@@ -198,6 +212,7 @@ impl ActionStager {
                 staged: HashMap::new(),
                 last_accepted: None,
                 repeat_budget: 0,
+                last_applied_tick: None,
             },
         );
     }
@@ -308,6 +323,49 @@ mod tests {
             ),
             other => panic!("expected a fresh intent, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_resend_of_an_applied_intent_is_silence_and_a_lost_one_is_a_refusal() {
+        let mut stager = ActionStager::default();
+        let _ = stager.feed(1, &actions(10, 1.0, 0.0), 10);
+        let _ = stager.intent_for(100, 10);
+        // The honest host's next message: tick 11 current, tick 10 piggybacked - already applied.
+        let verdicts = stager.feed(1, &actions(11, 2.0, 1.0), 11);
+        assert!(
+            matches!(
+                verdicts[0],
+                Verdict::AlreadyApplied {
+                    intent_tick: 10,
+                    ..
+                }
+            ),
+            "the resend of what was stepped with is not a refusal, got {:?}",
+            verdicts[0]
+        );
+        assert!(matches!(
+            verdicts[1],
+            Verdict::Accepted {
+                intent_tick: 11,
+                ..
+            }
+        ));
+        // A stale intent that was never applied - the tick 12 message arriving when 13 is next,
+        // with nothing ever staged for 12 - is a real loss, and says so.
+        let _ = stager.intent_for(100, 11);
+        let _ = stager.intent_for(100, 12);
+        let verdicts = stager.feed(1, &actions(12, 3.0, 2.0), 13);
+        assert!(
+            matches!(
+                verdicts[1],
+                Verdict::RefusedStale {
+                    intent_tick: 12,
+                    ..
+                }
+            ),
+            "an intent that never landed is refused on the record, got {:?}",
+            verdicts[1]
+        );
     }
 
     #[test]
