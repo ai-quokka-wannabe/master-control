@@ -25,6 +25,7 @@
 //! Refusals are logged too: an action that existed and was refused is exactly the datum
 //! "every accepted action" throws away.
 
+use crate::physics::BodyBounds;
 use crate::stager::{Applied, Intent, Verdict};
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -83,6 +84,11 @@ impl InputLog {
             "# applied <tick> <creature> <fresh|repeated|coasted> <forward_bits> <turn_bits> <voice_bits>"
         )?;
         writeln!(file, "# hash <tick> <fnv1a_64_hex>")?;
+        writeln!(
+            file,
+            "# rez <tick> <creature> <max_forward_bits> <max_turn_bits> <max_voice_bits> <max_contacts>"
+        )?;
+        writeln!(file, "# derez <tick> <creature>")?;
         file.flush()?;
         Ok(InputLog { file })
     }
@@ -129,6 +135,24 @@ impl InputLog {
             bits(intent.turn_rate),
             bits(intent.vocalisation)
         );
+    }
+
+    /// A body rezzed (or adopted with new bounds) at this tick: what the re-simulation needs
+    /// to stand the same body under the same clamp.
+    pub fn rez(&mut self, tick: u64, creature_id: u32, bounds: &BodyBounds) {
+        let _ = writeln!(
+            self.file,
+            "rez {tick} {creature_id} {} {} {} {}",
+            bits(bounds.max_forward_speed),
+            bits(bounds.max_turn_rate),
+            bits(bounds.max_vocalisation_strength),
+            bounds.max_contact_count
+        );
+    }
+
+    /// A body that left at this tick.
+    pub fn derez(&mut self, tick: u64, creature_id: u32) {
+        let _ = writeln!(self.file, "derez {tick} {creature_id}");
     }
 
     /// The periodic hash over every body, in roster order.

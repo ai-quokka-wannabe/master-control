@@ -17,6 +17,7 @@
 //! integration tests can stand a whole world up on a port of the operating system's choosing;
 //! the binary in `main.rs` is a thin caller.
 
+pub mod clu;
 pub mod ground;
 pub mod heartbeat;
 pub mod link_dll;
