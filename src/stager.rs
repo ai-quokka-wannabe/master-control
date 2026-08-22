@@ -149,7 +149,7 @@ impl ActionStager {
                     intent_tick: tick,
                     next_tick,
                 }
-            } else if tick > next_tick + 1 {
+            } else if tick > next_tick.saturating_add(1) {
                 Verdict::RefusedFuture {
                     creature_id: actions.creature_id,
                     intent_tick: tick,
@@ -459,5 +459,47 @@ mod tests {
             matches!(verdicts[1], Verdict::Accepted { .. }),
             "a reconnecting host may claim the freed creature"
         );
+    }
+
+    #[test]
+    fn a_replayed_tick_takes_the_latest_word_and_the_far_ends_of_u64_are_refused_not_panicked() {
+        let mut stager = ActionStager::default();
+        assert!(matches!(
+            stager.feed(1, &actions(10, 1.0, 0.0), 10)[1],
+            Verdict::Accepted { .. }
+        ));
+        // The same tick again, a different word: latest wins, and the step reads the latest.
+        assert!(matches!(
+            stager.feed(1, &actions(10, 2.0, 0.0), 10)[1],
+            Verdict::Accepted { .. }
+        ));
+        assert!(matches!(
+            stager.intent_for(100, 10),
+            Applied::Fresh(Intent { forward_speed, .. }) if forward_speed == 2.0
+        ));
+        // Stepped, the same tick a third time is the resend of an applied intent: silence.
+        assert!(matches!(
+            stager.feed(1, &actions(10, 3.0, 0.0), 11)[1],
+            Verdict::AlreadyApplied { .. }
+        ));
+        assert!(
+            matches!(stager.intent_for(100, 11), Applied::Repeated(Intent { forward_speed, .. }) if forward_speed == 2.0),
+            "a replayed tick never overwrites what the world stepped with"
+        );
+
+        // Tick 0 has no previous: judged once, never underflowed.
+        let verdicts = stager.feed(1, &actions(0, 1.0, 0.0), 11);
+        assert_eq!(verdicts.len(), 1);
+        assert!(matches!(
+            verdicts[0],
+            Verdict::RefusedStale { intent_tick: 0, .. }
+        ));
+        // u64::MAX is the far future, and its piggyback u64::MAX - 1 is too.
+        let verdicts = stager.feed(1, &actions(u64::MAX, 1.0, 0.0), 11);
+        assert!(matches!(verdicts[0], Verdict::RefusedFuture { .. }));
+        assert!(matches!(verdicts[1], Verdict::RefusedFuture { .. }));
+        // And the window's arithmetic at the top of the range does not wrap.
+        let verdicts = stager.feed(1, &actions(u64::MAX, 1.0, 0.0), u64::MAX);
+        assert!(matches!(verdicts[1], Verdict::Accepted { .. }));
     }
 }
