@@ -27,7 +27,7 @@ use crate::link_dll::{
     Actions, Connection, Derez, Hello, LNK_OK, LinkDll, Listener, Message, PROTOCOL_VERSION,
     ROLE_CREATURE_HOST, ROLE_SPECTATOR, TickStateHeader, Welcome,
 };
-use crate::physics::{TICK_SECONDS, state_hash, world_definition};
+use crate::physics::{BodyBounds, FIRST_BODY, TICK_SECONDS, state_hash, world_definition};
 use crate::record::InputLog;
 use crate::roster::{Admission, DerezRefusal, Model, Roster};
 use crate::script::{blinker_derezzes_at, set_dressing};
@@ -47,7 +47,8 @@ pub struct Config {
     /// Ticks stepped at most per loop iteration - the clamp on the accumulator.
     pub max_catch_up: u32,
     /// How long an accepted knock may take to finish its handshake. Short, deliberately: the
-    /// handshake blocks this loop, so a slow talker buys at most this much of a tick.
+    /// handshake blocks this loop, so a slow talker stalls the world for at most this long - a
+    /// quarter second by default, eight ticks, paid back loudly as overruns and never silently.
     pub handshake_timeout: Duration,
     pub verbose: bool,
     /// Where to write the Disk - the state log, what the world said in the wire's own bytes.
@@ -108,6 +109,21 @@ pub struct Heartbeat {
     input_log: Option<InputLog>,
     /// The wire, kept for the Disk's rollover: the next file opens through it.
     wire: LinkDll,
+}
+
+/// One change to the roster, in the order it happened - the order is the record. A DEREZ
+/// followed by a REZ of the same identity in one drain is a body swapped, and told the other
+/// way round it is a body gone; the log, the Disk and every citizen hear the changes in the
+/// one order the world made them.
+enum Change {
+    /// A body rezzed or adopted, with the bounds it was admitted under - captured then, because
+    /// the resident may be gone again by the time the change is told.
+    Rez { model: Model, bounds: BodyBounds },
+    /// A body that left.
+    Derez(u32),
+    /// An orphan taken up by steering: the log's business alone, ownership being nothing the
+    /// wire carries.
+    Claim(u32),
 }
 
 /// The Disk being written: the file's connection, and what the rollover needs to name the next.
@@ -307,8 +323,7 @@ impl Heartbeat {
         let stager = &mut self.stager;
         let roster = &mut self.roster;
         let input_log = &mut self.input_log;
-        let mut rezzed: Vec<Model> = Vec::new();
-        let mut derezzed: Vec<u32> = Vec::new();
+        let mut changes: Vec<Change> = Vec::new();
 
         self.citizens.retain_mut(|citizen| {
             for _ in 0..quota {
@@ -334,14 +349,29 @@ impl Heartbeat {
                                         record_verdict(sender, verdict, verbose);
                                     }
                                     Some(owner) => {
-                                        if owner.is_none() && roster.claim(actions.creature_id, sender) {
+                                        // An orphan is taken up by steering it - by a word the
+                                        // world accepts, not by one it refuses: the stream is
+                                        // claimed first so the verdicts are the new owner's.
+                                        let claiming = owner.is_none();
+                                        if claiming {
                                             stager.reassign(actions.creature_id, sender);
-                                            log_info(&format!(
-                                                "client {sender} took up creature {} by steering it.",
-                                                actions.creature_id
-                                            ));
                                         }
                                         let verdicts = stager.feed(sender, &actions, next_tick);
+                                        if claiming {
+                                            if verdicts
+                                                .iter()
+                                                .any(|verdict| matches!(verdict, Verdict::Accepted { .. }))
+                                                && roster.claim(actions.creature_id, sender)
+                                            {
+                                                log_info(&format!(
+                                                    "client {sender} took up creature {} by steering it.",
+                                                    actions.creature_id
+                                                ));
+                                                changes.push(Change::Claim(actions.creature_id));
+                                            } else {
+                                                stager.release(actions.creature_id);
+                                            }
+                                        }
                                         if let Some(log) = input_log.as_mut() {
                                             log_judged(log, sender, &actions, next_tick, &verdicts);
                                         }
@@ -365,6 +395,7 @@ impl Heartbeat {
                                     triangles,
                                     materials,
                                 };
+                                let owner_before = roster.owner_of(creature_id).flatten();
                                 match roster.rez(sender, model.clone()) {
                                     Admission::Embodied => {
                                         stager.reassign(creature_id, sender);
@@ -372,14 +403,20 @@ impl Heartbeat {
                                             "client {sender} rezzed creature {creature_id} ({} vertices, {} triangles, {} materials) - embodied at tick {tick}.",
                                             model.header.vertex_count, model.header.triangle_count, model.header.material_count
                                         ));
-                                        rezzed.push(model);
+                                        let bounds = roster.resident(creature_id).map_or(FIRST_BODY, |resident| resident.body.bounds);
+                                        changes.push(Change::Rez { model, bounds });
                                     }
                                     Admission::Adopted => {
-                                        stager.reassign(creature_id, sender);
+                                        // A new owner gets a fresh stream; the same owner
+                                        // keeps what it staged - a new body is not a new mind.
+                                        if owner_before != Some(sender) {
+                                            stager.reassign(creature_id, sender);
+                                        }
                                         log_info(&format!(
                                             "client {sender} rezzed creature {creature_id} again - taken up where it stands, wearing the new body."
                                         ));
-                                        rezzed.push(model);
+                                        let bounds = roster.resident(creature_id).map_or(FIRST_BODY, |resident| resident.body.bounds);
+                                        changes.push(Change::Rez { model, bounds });
                                     }
                                     Admission::RefusedOwned { owner } => log_info(&format!(
                                         "client {sender} tried to rez creature {creature_id}, which client {owner} wears - refused."
@@ -406,7 +443,7 @@ impl Heartbeat {
                                             "client {sender} derezzed creature {} - it leaves the world at tick {tick}.",
                                             derez.creature_id
                                         ));
-                                        derezzed.push(derez.creature_id);
+                                        changes.push(Change::Derez(derez.creature_id));
                                     }
                                     Err(DerezRefusal::NotResident) => log_info(&format!(
                                         "client {sender} tried to derez creature {}, which nobody wears - ignored.",
@@ -433,7 +470,7 @@ impl Heartbeat {
                                     citizen.client_id,
                                     leaving.len()
                                 ));
-                                derezzed.extend(leaving);
+                                changes.extend(leaving.into_iter().map(Change::Derez));
                                 stager.owner_died(citizen.client_id);
                                 return false;
                             }
@@ -460,40 +497,36 @@ impl Heartbeat {
             true
         });
 
-        self.relay(&rezzed, &derezzed);
+        self.relay(&changes);
     }
 
-    /// Tell every citizen what changed in the roster: each rezzed body verbatim, each leave as
-    /// a DEREZ stamped with the current tick. A citizen that cannot be told is dropped.
-    fn relay(&mut self, rezzed: &[Model], derezzed: &[u32]) {
-        if rezzed.is_empty() && derezzed.is_empty() {
+    /// Tell every citizen what changed in the roster, in the order it changed: each rezzed
+    /// body verbatim, each leave as a DEREZ stamped with the current tick; the log hears the
+    /// claims too. A citizen that cannot be told is dropped.
+    fn relay(&mut self, changes: &[Change]) {
+        if changes.is_empty() {
             return;
         }
         let tick = self.tick;
         if let Some(log) = self.input_log.as_mut() {
-            for model in rezzed {
-                if let Some(resident) = self.roster.resident(model.header.creature_id) {
-                    log.rez(tick, model.header.creature_id, &resident.body.bounds);
+            for change in changes {
+                match change {
+                    Change::Rez { model, bounds } => {
+                        let vertices: Vec<[f32; 3]> = model
+                            .vertices
+                            .iter()
+                            .map(|vertex| vertex.position)
+                            .collect();
+                        log.rez(tick, model.header.creature_id, bounds, &vertices);
+                    }
+                    Change::Derez(creature_id) => log.derez(tick, *creature_id),
+                    Change::Claim(creature_id) => log.claim(tick, *creature_id),
                 }
-            }
-            for creature_id in derezzed {
-                log.derez(tick, *creature_id);
             }
         }
         if let Some(disk) = self.disk.as_mut() {
             let disk = &mut disk.connection;
-            let mut told = true;
-            for model in rezzed {
-                told = told && send_model(disk, model);
-            }
-            for creature_id in derezzed {
-                let derez = Derez {
-                    tick,
-                    creature_id: *creature_id,
-                    reserved0: [0; 4],
-                };
-                told = told && disk.send_derez(&derez) == LNK_OK;
-            }
+            let told = tell_changes(disk, changes, tick);
             if !(told && disk.flush().is_ok()) {
                 log_warn("the Disk could not be written - recording stops here.");
                 self.disk = None;
@@ -503,18 +536,7 @@ impl Heartbeat {
         let stager = &mut self.stager;
         let mut late_leaves: Vec<u32> = Vec::new();
         self.citizens.retain_mut(|citizen| {
-            let mut alive = true;
-            for model in rezzed {
-                alive = alive && send_model(&mut citizen.connection, model);
-            }
-            for creature_id in derezzed {
-                let derez = Derez {
-                    tick,
-                    creature_id: *creature_id,
-                    reserved0: [0; 4],
-                };
-                alive = alive && citizen.connection.send_derez(&derez) == LNK_OK;
-            }
+            let mut alive = tell_changes(&mut citizen.connection, changes, tick);
             alive = alive && citizen.connection.flush().is_ok();
             if !alive {
                 let leaving = part_with(citizen, roster, "could not be told the roster");
@@ -528,7 +550,8 @@ impl Heartbeat {
         });
         if !late_leaves.is_empty() {
             // A leave discovered through a failed send still owes everyone its DEREZ.
-            self.relay(&[], &late_leaves);
+            let leaves: Vec<Change> = late_leaves.into_iter().map(Change::Derez).collect();
+            self.relay(&leaves);
         }
     }
 
@@ -666,7 +689,8 @@ impl Heartbeat {
         });
         if !late_leaves.is_empty() {
             // A leave discovered through a failed send still owes everyone its DEREZ.
-            self.relay(&[], &late_leaves);
+            let leaves: Vec<Change> = late_leaves.into_iter().map(Change::Derez).collect();
+            self.relay(&leaves);
         }
         // Last, once everything this tick owed the Disk is on it - the late leaves included.
         self.roll_the_disk_if_due(tick);
@@ -785,6 +809,28 @@ fn open_disk(
     disk.flush()
         .map_err(|status| format!("the Disk could not be written: status {status}"))?;
     Ok(disk)
+}
+
+/// The changes, in order, on one connection: REZ and DEREZ as the wire carries them; a claim
+/// is nothing the wire says.
+fn tell_changes(connection: &mut Connection, changes: &[Change], tick: u64) -> bool {
+    for change in changes {
+        let told = match change {
+            Change::Rez { model, .. } => send_model(connection, model),
+            Change::Derez(creature_id) => {
+                connection.send_derez(&Derez {
+                    tick,
+                    creature_id: *creature_id,
+                    reserved0: [0; 4],
+                }) == LNK_OK
+            }
+            Change::Claim(_) => true,
+        };
+        if !told {
+            return false;
+        }
+    }
+    true
 }
 
 fn send_model(connection: &mut Connection, model: &Model) -> bool {

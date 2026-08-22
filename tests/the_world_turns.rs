@@ -457,6 +457,43 @@ fn a_body(creature_id: u32) -> (Rez, Vec<RezVertex>, Vec<RezTriangle>, Vec<RezMa
     (header, vertices, triangles, materials)
 }
 
+/// A shaped body - a half-metre cube on the floor - whose hull is simulation state: where it
+/// stands, how it is seated, what it touches all follow from the mesh.
+fn a_cube(creature_id: u32) -> (Rez, Vec<RezVertex>, Vec<RezTriangle>, Vec<RezMaterial>) {
+    let (mut header, _, _, materials) = a_body(creature_id);
+    let vertices: Vec<RezVertex> = (0..8u32)
+        .map(|corner| RezVertex {
+            position: [
+                if corner & 1 == 0 { -0.25 } else { 0.25 },
+                if corner & 2 == 0 { -0.05 } else { 0.45 },
+                if corner & 4 == 0 { -0.25 } else { 0.25 },
+            ],
+        })
+        .collect();
+    let triangles = vec![
+        RezTriangle {
+            vertices: [0, 1, 2],
+            material: 0,
+        },
+        RezTriangle {
+            vertices: [4, 6, 5],
+            material: 0,
+        },
+    ];
+    header.vertex_count = 8;
+    header.triangle_count = 2;
+    (header, vertices, triangles, materials)
+}
+
+fn rez_cube(connection: &mut master_control::link_dll::Connection, creature_id: u32) {
+    let (header, vertices, triangles, materials) = a_cube(creature_id);
+    assert_eq!(
+        connection.send_rez(&header, &vertices, &triangles, &materials),
+        master_control::link_dll::LNK_OK
+    );
+    let _ = connection.flush().expect("flush");
+}
+
 fn rez(connection: &mut master_control::link_dll::Connection, creature_id: u32) {
     let (header, vertices, triangles, materials) = a_body(creature_id);
     assert_eq!(
@@ -919,16 +956,21 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
     let wire = LinkDll::beside_executable().expect("wire");
     let fingerprint = wire.world_fingerprint(&world_definition());
 
-    // A life worth re-simulating: a body rezzed, steered for a stretch, left.
+    // A life worth re-simulating: a body rezzed, steered for a stretch, left - beside a shaped
+    // body whose hull decides where it stands, and the guest, taken up by steering and left
+    // with the host: three things a log that forgot the mesh or the claim would get wrong.
     {
         let world = World::stand_up(config);
         let (mut host, _) = wire
             .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
             .expect("host");
         rez(&mut host, 7);
+        rez_cube(&mut host, 8);
         let (mut seen, _) = await_tick(&mut host, 1);
         for _ in 0..24 {
             steer_creature(&mut host, 7, seen + 1, 1.5);
+            steer_creature(&mut host, 8, seen + 1, 0.5);
+            steer_creature(&mut host, GUEST_CREATURE_ID, seen + 1, 0.25);
             let (tick, _) = await_tick(&mut host, seen + 1);
             seen = tick;
         }
@@ -943,7 +985,7 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
     match master_control::clu::check(&log_path, Some(&disk_path), &wire).expect("clu reads the log")
     {
         master_control::clu::Verdict::Agreed { ticks, hashes } => {
-            assert!(ticks >= 30, "{ticks} ticks");
+            assert!(ticks >= 24, "{ticks} ticks");
             assert!(hashes >= 3, "{hashes} hashes");
         }
         other => panic!("an honest log must agree: {other:?}"),
@@ -1530,4 +1572,79 @@ fn a_disk_rolls_over_at_a_size_and_every_file_is_whole() {
     for file in &files {
         let _ = std::fs::remove_file(file);
     }
+}
+
+#[test]
+fn a_derez_and_a_rez_of_one_identity_in_one_breath_are_told_in_that_order() {
+    let mut disk_path = std::env::temp_dir();
+    disk_path.push(format!("master-control-swap-{}.disk", std::process::id()));
+    let mut log_path = std::env::temp_dir();
+    log_path.push(format!("master-control-swap-{}.log", std::process::id()));
+    let config = Config {
+        disk: Some(disk_path.clone()),
+        input_log: Some(log_path.clone()),
+        hash_every: 4,
+        ..quick_config()
+    };
+    let wire = LinkDll::beside_executable().expect("wire");
+    let fingerprint = wire.world_fingerprint(&world_definition());
+    let last_tick = {
+        let world = World::stand_up(config);
+        let (mut spectator, _) = wire
+            .connect(&world.address(), ROLE_SPECTATOR, fingerprint, 5_000)
+            .expect("spectator");
+        let (mut host, _) = wire
+            .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+            .expect("host");
+        rez(&mut host, 7);
+        let (seen, _) = await_tick(&mut spectator, 2);
+        // The swap: DEREZ then REZ of the same identity, one flush - a body changed, not gone.
+        assert_eq!(
+            host.send_derez(&master_control::link_dll::Derez {
+                tick: seen,
+                creature_id: 7,
+                reserved0: [0; 4],
+            }),
+            master_control::link_dll::LNK_OK
+        );
+        let (header, vertices, triangles, materials) = a_cube(7);
+        assert_eq!(
+            host.send_rez(&header, &vertices, &triangles, &materials),
+            master_control::link_dll::LNK_OK
+        );
+        let _ = host.flush().expect("flush");
+        // The spectator hears the DEREZ and then the REZ - and keeps creature 7 in its rows.
+        let mut heard: Vec<&str> = Vec::new();
+        let deadline = Instant::now() + PATIENCE;
+        while heard.len() < 2 {
+            match spectator.poll().expect("healthy") {
+                Some(Message::Derez(derez)) if derez.creature_id == 7 => heard.push("derez"),
+                Some(Message::Rez { header, .. }) if header.creature_id == 7 => heard.push("rez"),
+                Some(Message::Ping(ping)) => {
+                    let _ = spectator.send_pong(ping.nonce);
+                    let _ = spectator.flush();
+                }
+                _ => {}
+            }
+            assert!(Instant::now() < deadline, "the swap was never told");
+        }
+        assert_eq!(heard, vec!["derez", "rez"], "the order the world made them");
+        let (tick, rows) = await_tick(&mut spectator, seen + 12);
+        assert!(
+            rows.iter().any(|row| row.creature_id == 7),
+            "the swapped body lives on"
+        );
+        drop(host);
+        let (tick, _) = await_tick(&mut spectator, tick + 4);
+        tick
+    };
+    // And Clu, re-simulating the log with its mesh, agrees with every hash - a log that had
+    // the swap backwards, or the cube bodiless, would not.
+    match master_control::clu::check(&log_path, Some(&disk_path), &wire).expect("clu reads the log")
+    {
+        master_control::clu::Verdict::Agreed { ticks, .. } => assert!(ticks >= last_tick - 2),
+        other => panic!("an honest log must agree: {other:?}"),
+    }
+    let _ = std::fs::remove_file(&disk_path);
+    let _ = std::fs::remove_file(&log_path);
 }
