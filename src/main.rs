@@ -13,7 +13,7 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
-//! `master-control [port] [--verbose] [--version] [--disk <path>] [--log <path>]` - the world server of the Grid;
+//! `master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]` - the world server of the Grid;
 //! `master-control clu <log> [<disk>]` - Clu, the re-simulation and the hash check.
 //!
 //! The command line keeps the flagship's ruled shape: where the world listens is the plain
@@ -73,6 +73,7 @@ fn main() -> std::process::ExitCode {
     let mut port = DEFAULT_PORT;
     let mut verbose = false;
     let mut disk: Option<std::path::PathBuf> = None;
+    let mut disk_roll_bytes = Config::default().disk_roll_bytes;
     let mut input_log: Option<std::path::PathBuf> = None;
     let mut wants_version = false;
 
@@ -92,6 +93,16 @@ fn main() -> std::process::ExitCode {
                     eprintln!("[FATAL] --disk needs a path: where to record the world (a .disk).");
                     return std::process::ExitCode::FAILURE;
                 }
+            }
+            "--disk-roll" => {
+                let mebibytes = arguments.next().and_then(|word| word.parse::<u64>().ok());
+                let Some(mebibytes) = mebibytes else {
+                    eprintln!(
+                        "[FATAL] --disk-roll needs a size in MiB: the Disk rolls over to the next file at it (0 never rolls)."
+                    );
+                    return std::process::ExitCode::FAILURE;
+                };
+                disk_roll_bytes = mebibytes.saturating_mul(1024 * 1024);
             }
             "--log" => {
                 input_log = arguments.next().map(std::path::PathBuf::from);
@@ -114,7 +125,7 @@ fn main() -> std::process::ExitCode {
             },
             other => {
                 eprintln!(
-                    "[FATAL] Unknown flag {other}. The surface is deliberately small: [port], --verbose, --version, --disk <path>, --log <path>."
+                    "[FATAL] Unknown flag {other}. The surface is deliberately small: [port], --verbose, --version, --disk <path>, --disk-roll <MiB>, --log <path>."
                 );
                 return std::process::ExitCode::FAILURE;
             }
@@ -140,6 +151,7 @@ fn main() -> std::process::ExitCode {
     let config = Config {
         verbose,
         disk,
+        disk_roll_bytes,
         input_log,
         ..Config::default()
     };
