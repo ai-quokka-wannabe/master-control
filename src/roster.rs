@@ -28,8 +28,8 @@
 //! run - the hidden-state checklist, applied to the roster itself.
 
 use crate::link_dll::{
-    CONTACTS_MAX, Contact, CreatureState, EVENT_VOCALISATION, Event, Proprioception, Rez,
-    RezMaterial, RezTriangle, RezVertex, TICK_STATE_MAX_CREATURES,
+    CONTACTS_MAX, Contact, CreatureState, EVENT_SCRATCH, EVENT_VOCALISATION, Event, Proprioception,
+    Rez, RezMaterial, RezTriangle, RezVertex, TICK_STATE_MAX_CREATURES,
 };
 use crate::physics::{Body, BodyBounds, FIRST_BODY, floor, sanitise_and_clamp};
 use crate::stager::Intent;
@@ -347,6 +347,18 @@ impl Roster {
                 yaw_rate: body.turn_rate,
                 vocalisation: body.vocalisation,
             });
+            // The scratch: the loudest slide this body made along any face this tick, sounded
+            // from the contact point - footsteps, a scrape along a riser, a brush past another.
+            if let Some((strength, position)) = loudest_scratch(body) {
+                events.push(Event {
+                    tick,
+                    position,
+                    strength,
+                    creature_id: *id,
+                    kind: EVENT_SCRATCH,
+                    reserved0: [0; 3],
+                });
+            }
             // A call that starts is news; a call that continues is already in the rows.
             if body.vocalisation > 0.0 && previous_voice <= 0.0 {
                 events.push(Event {
@@ -367,6 +379,9 @@ impl Roster {
                     .map(|contact| Contact {
                         position: contact.position,
                         impulse: contact.impulse,
+                        normal: contact.normal,
+                        depth: contact.depth,
+                        slip: contact.slip,
                     })
                     .collect();
                 #[allow(clippy::cast_possible_truncation)]
@@ -406,6 +421,32 @@ fn hull_of(model: &Model) -> Option<crate::hull::Hull> {
         .map(|vertex| vertex.position)
         .collect();
     crate::hull::Hull::from_points(&points)
+}
+
+/// The strength and world position of a body's loudest slide this tick, if any is loud enough:
+/// the slip against the normal impulse, capped at one - the exact-contacts ruling's scratch.
+fn loudest_scratch(body: &Body) -> Option<(f32, [f32; 3])> {
+    let mut loudest: Option<(f32, [f32; 3])> = None;
+    for contact in &body.contacts {
+        let slip = (contact.slip[0] * contact.slip[0]
+            + contact.slip[1] * contact.slip[1]
+            + contact.slip[2] * contact.slip[2])
+            .sqrt();
+        let impulse = (contact.impulse[0] * contact.impulse[0]
+            + contact.impulse[1] * contact.impulse[1]
+            + contact.impulse[2] * contact.impulse[2])
+            .sqrt();
+        let strength = (slip * impulse).min(1.0);
+        if strength >= crate::physics::SCRATCH_THRESHOLD
+            && loudest.is_none_or(|(loud, _)| strength > loud)
+        {
+            loudest = Some((
+                strength,
+                crate::physics::body_to_world(&contact.position, body.position, body.yaw),
+            ));
+        }
+    }
+    loudest
 }
 
 fn spawned(bounds: BodyBounds) -> Body {
@@ -654,6 +695,64 @@ mod tests {
                 .contacts
                 .iter()
                 .all(|c| c.normal == [0.0, 1.0, 0.0])
+        );
+    }
+
+    #[test]
+    fn a_walking_shaped_body_scratches_the_floor_and_a_standing_one_is_silent() {
+        let mut roster = Roster::with_the_guest();
+        assert_eq!(roster.rez(1, shaped(7)), Admission::Embodied);
+        let standing = roster.step(1, |_| Intent::default());
+        assert!(
+            !standing.events.iter().any(|e| e.kind == EVENT_SCRATCH),
+            "nothing slides, nothing scratches"
+        );
+        let walking = roster.step(2, |id| {
+            if id == 7 {
+                Intent {
+                    forward_speed: 1.0,
+                    turn_rate: 0.0,
+                    vocalisation: 0.0,
+                }
+            } else {
+                Intent::default()
+            }
+        });
+        let scratches: Vec<&Event> = walking
+            .events
+            .iter()
+            .filter(|e| e.kind == EVENT_SCRATCH)
+            .collect();
+        assert_eq!(
+            scratches.len(),
+            1,
+            "one scratch per body per tick, the loudest: {:?}",
+            walking.events
+        );
+        assert_eq!(scratches[0].creature_id, 7);
+        assert!(scratches[0].strength > 0.0 && scratches[0].strength <= 1.0);
+        // Sounded from a foot, on the floor under the body, not from the body's origin.
+        let body = &roster.resident(7).expect("7").body;
+        assert!(
+            (scratches[0].position[1] - (body.position[1] - 0.05)).abs() < 1e-5,
+            "from the foot: {:?} vs body {:?}",
+            scratches[0].position,
+            body.position
+        );
+        // And the letter carries the contact's face: normal up, a slip of the walking speed.
+        let letter = walking
+            .letters
+            .iter()
+            .find(|l| l.header.creature_id == 7)
+            .expect("letter");
+        assert!(letter.contacts.iter().all(|c| c.normal == [0.0, 1.0, 0.0]));
+        assert!(
+            letter
+                .contacts
+                .iter()
+                .any(|c| (c.slip[2] + 1.0).abs() < 1e-4),
+            "slip -Z at a metre a second: {:?}",
+            letter.contacts[0].slip
         );
     }
 
