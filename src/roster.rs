@@ -68,6 +68,10 @@ pub const WORLD_MAX_TURN_RATE: f32 = std::f32::consts::TAU;
 pub const WORLD_MAX_VOCALISATION: f32 = 1.0;
 /// No more than the owner's letter can carry - the wire's cap is the world's.
 pub const WORLD_MAX_CONTACTS: u32 = CONTACTS_MAX;
+/// The set dressing's identities - the orbiters and the blinker are 1, 2 and 3, and 0 is no
+/// creature - which no host may rez: a body wearing one would share rows with the scenery and
+/// be derezzed by its blinks.
+pub const SET_DRESSING_LAST_ID: u32 = 3;
 /// How far from its own origin a body may reach, in metres, on every axis. A creature is a
 /// few metres at the very most; a vertex farther out is not a body but a number, and a number
 /// like 1e30 overflows the hull's arithmetic into infinities the world could not replay.
@@ -230,6 +234,9 @@ impl Roster {
         };
         if let Err(reason) = body_extent(&model) {
             return Admission::RefusedBounds(reason);
+        }
+        if model.header.creature_id <= SET_DRESSING_LAST_ID {
+            return Admission::RefusedBounds("creature ids 0 to 3 are the set dressing's");
         }
         let creature_id = model.header.creature_id;
         match self.residents.get_mut(&creature_id) {
@@ -606,7 +613,7 @@ fn body_extent(model: &Model) -> Result<(), &'static str> {
     for vertex in &model.vertices {
         for axis in vertex.position {
             if axis != 0.0 && !axis.is_normal() {
-                return Err("a vertex coordinate is subnormal");
+                return Err("a vertex coordinate is not a normal number");
             }
             if axis.abs() > BODY_MAX_EXTENT {
                 return Err("a vertex lies farther than 4 m from the body origin");
@@ -833,6 +840,32 @@ mod tests {
             }
         }
         assert_eq!(points.len(), Roster::capacity());
+    }
+
+    #[test]
+    fn the_set_dressings_identities_are_nobodys_to_wear() {
+        let mut roster = Roster::with_the_guest();
+        for id in 0..=SET_DRESSING_LAST_ID {
+            assert!(
+                matches!(roster.rez(1, model(id)), Admission::RefusedBounds(_)),
+                "creature {id} is the scenery's"
+            );
+        }
+        assert_eq!(
+            roster.rez(1, model(SET_DRESSING_LAST_ID + 1)),
+            Admission::Embodied
+        );
+        // And infinity, which the wire refuses before the roster ever sees it, is named for what
+        // it is if it ever arrives: not a normal number, not a subnormal.
+        let mut endless = model(9);
+        endless.vertices.push(RezVertex {
+            position: [f32::INFINITY, 0.0, 0.0],
+        });
+        endless.header.vertex_count = 2;
+        assert_eq!(
+            roster.rez(1, endless),
+            Admission::RefusedBounds("a vertex coordinate is not a normal number")
+        );
     }
 
     #[test]
