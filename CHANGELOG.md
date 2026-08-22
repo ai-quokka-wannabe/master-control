@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The two logs: a Disk and an input log (Etape 4).** `--disk <path>` records the world to a
+  Disk - a client whose socket is a file, opened through Link's `record_open` and told
+  everything every citizen is told, the owners' letters included, from the same per-subscriber
+  loop - so the state log is what was said in the wire's own bytes, and a replay viewer is a
+  spectator that opened it. The Disk opens with the roster as it stood (the late joiner's
+  replay) and ends with `BYE`. `--log <path>` writes the input log: every intent judged, with
+  sender, creature, tick, the three floats as bit patterns and the verdict - refusals too -
+  every intent applied with the tick it applied to and how it came to be (fresh, repeated,
+  coasted), and a hash over every body every `hash_every` ticks (32, once a second). An
+  integration test runs a short life with both, replays the Disk through the same DLL and finds
+  the body's whole life on it bit for bit, and reads the log's verdicts, applied intents and
+  hashes on the beat; three breakage rounds discriminated. `link_dll.rs` mirrors ABI v6.
 - **The owner's letter: PROPRIOCEPTION, every tick, to the one host that owns the body (Link
   v5).** `link_dll.rs` mirrors the message, its contact rows and `LNK_CONTACTS_MAX` (now the
   world's own contact cap). The roster's step tells, beside the rows and events for everyone,

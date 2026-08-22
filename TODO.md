@@ -61,10 +61,23 @@ adversarial tests (NaN, infinities, denormals, replayed ticks, out-of-range indi
 ## Etape 4 — the logs
 
 Dual state-and-input logs and the periodic state hash — the flagship's Etape 16 promoted to the
-world. The world replays; the minds do not. Added by the audit: the state log opens with a
-header (protocol fingerprint, start metadata) and rotates (~55 MB per hour); each input record
-carries *which tick the action actually applied to*, and refused actions are logged too; a hash
-disagreement produces a state diff with floats serialised as hex.
+world. The world replays; the minds do not.
+
+**Done (2026-08-22), the two logs.** `--disk <path>` records the world to a **Disk** — a client
+whose socket is a file, opened through Link (`record_open`) and told everything every citizen is
+told, letters included, from the same per-subscriber loop; its header names the protocol
+fingerprint, the world fingerprint and the start, and it ends with `BYE`. A replay viewer is a
+spectator that opened it (`replay_open`); the integration test replays a whole life bit for bit.
+`--log <path>` writes the input log: every intent judged (sender, creature, tick, the three
+floats as bit patterns, the verdict — refusals included), every intent applied (with the tick it
+applied to and whether it was fresh, repeated or coasted), and a hash of every body every
+`hash_every` ticks. The owner's names: the file is a *Disk*; the program that reads Disks is
+*Clu*.
+
+**Still owed:** rotation (~55 MB per hour; a Disk should roll over at a size, each file whole);
+Clu itself — replay into a `--window`, re-simulate from the input log and compare the hashes,
+and on disagreement a state diff with floats as hex; the master seed in the log's header once
+the world draws one.
 
 ## Etape 5 — contacts, exact
 

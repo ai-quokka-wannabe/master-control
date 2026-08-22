@@ -195,6 +195,11 @@ impl Roster {
         self.residents.get(&creature_id)
     }
 
+    /// Every body, in roster order - what the periodic hash is taken over.
+    pub fn bodies(&self) -> impl Iterator<Item = &Body> {
+        self.residents.values().map(|resident| &resident.body)
+    }
+
     /// Every model, in roster order - what a late joiner is told before its first tick.
     pub fn models(&self) -> impl Iterator<Item = &Model> {
         self.residents.values().map(|resident| &resident.model)

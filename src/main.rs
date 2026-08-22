@@ -13,7 +13,7 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
-//! `master-control [port] [--verbose] [--version]` - the world server of the Grid.
+//! `master-control [port] [--verbose] [--version] [--disk <path>] [--log <path>]` - the world server of the Grid.
 //!
 //! The command line keeps the flagship's ruled shape: where the world listens is the plain
 //! positional argument, defaulting to the port Tron guards; `--version` states this build and
@@ -28,11 +28,30 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> std::process::ExitCode {
     let mut port = DEFAULT_PORT;
     let mut verbose = false;
+    let mut disk: Option<std::path::PathBuf> = None;
+    let mut input_log: Option<std::path::PathBuf> = None;
     let mut wants_version = false;
 
-    for argument in std::env::args().skip(1) {
+    let mut arguments = std::env::args().skip(1);
+    while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--verbose" => verbose = true,
+            "--disk" => {
+                disk = arguments.next().map(std::path::PathBuf::from);
+                if disk.is_none() {
+                    eprintln!("[FATAL] --disk needs a path: where to record the world (a .disk).");
+                    return std::process::ExitCode::FAILURE;
+                }
+            }
+            "--log" => {
+                input_log = arguments.next().map(std::path::PathBuf::from);
+                if input_log.is_none() {
+                    eprintln!(
+                        "[FATAL] --log needs a path: where to log every intent and the periodic hash."
+                    );
+                    return std::process::ExitCode::FAILURE;
+                }
+            }
             "--version" => wants_version = true,
             other if !other.starts_with("--") => match other.parse::<u16>() {
                 Ok(chosen) => port = chosen,
@@ -45,7 +64,7 @@ fn main() -> std::process::ExitCode {
             },
             other => {
                 eprintln!(
-                    "[FATAL] Unknown flag {other}. The surface is deliberately small: [port], --verbose, --version."
+                    "[FATAL] Unknown flag {other}. The surface is deliberately small: [port], --verbose, --version, --disk <path>, --log <path>."
                 );
                 return std::process::ExitCode::FAILURE;
             }
@@ -70,6 +89,8 @@ fn main() -> std::process::ExitCode {
 
     let config = Config {
         verbose,
+        disk,
+        input_log,
         ..Config::default()
     };
     let mut heartbeat = match Heartbeat::new(&wire, port, config) {
