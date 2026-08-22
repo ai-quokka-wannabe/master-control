@@ -74,6 +74,16 @@ malformed frames (reserved words, short frames, a spectator's ACTIONS, unknown a
 types, the world's own messages sent back at it, out-of-range indices, lying counts, a NaN
 vertex, a BYE with a payload) each hung up on while the honest spectator never noticed.
 
+## Etape 3b — determinism hardening
+
+**Done (2026-08-23), the first half.** The state hash by a replay hash's rules (domain tag,
+length prefixes, tag bytes, identities, hidden state); `clippy.toml` as the hidden-state rule
+made mechanical; the `release-check` profile in CI; Clu as a diagnostic with an `end` line and
+seven named refusals. **Still owed, the second half:** seeded random-walk tests with invariants
+asserted every step (a cheap tier in CI, an expensive `#[ignore]` tier), and a std-only
+build-provenance stamp in `--version` and the Disk and log headers, so a replay mismatch can say
+"different binary" before it says "simulation bug".
+
 ## Etape 4 — the logs
 
 Dual state-and-input logs and the periodic state hash — the flagship's Etape 16 promoted to the

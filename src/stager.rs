@@ -22,7 +22,7 @@
 //! sends; the heartbeat owns those.
 
 use crate::link_dll::{ACTIONS_REPEAT_TICKS, Actions};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// The twelve bytes of intent, staged or applied.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -84,7 +84,7 @@ struct CreatureStaging {
     owner: u64,
     /// Accepted intents by the tick they are staged for. Two entries at most in practice -
     /// the window is two ticks wide - but a map states the rule rather than an optimisation.
-    staged: HashMap<u64, Intent>,
+    staged: BTreeMap<u64, Intent>,
     last_accepted: Option<Intent>,
     repeat_budget: u32,
     /// The tick whose fresh intent was last applied, so a resend of it is known for what it is.
@@ -98,7 +98,7 @@ struct CreatureStaging {
 /// nothing here knows that.
 #[derive(Default)]
 pub struct ActionStager {
-    creatures: HashMap<u32, CreatureStaging>,
+    creatures: BTreeMap<u32, CreatureStaging>,
 }
 
 impl ActionStager {
@@ -118,7 +118,7 @@ impl ActionStager {
             .entry(actions.creature_id)
             .or_insert_with(|| CreatureStaging {
                 owner: sender,
-                staged: HashMap::new(),
+                staged: BTreeMap::new(),
                 last_accepted: None,
                 repeat_budget: 0,
                 last_applied_tick: None,
@@ -227,7 +227,7 @@ impl ActionStager {
             creature_id,
             CreatureStaging {
                 owner,
-                staged: HashMap::new(),
+                staged: BTreeMap::new(),
                 last_accepted: None,
                 repeat_budget: 0,
                 last_applied_tick: None,

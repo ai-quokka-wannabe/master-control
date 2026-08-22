@@ -1,0 +1,15 @@
+# The hidden-state rule, enforced by the linter rather than by review. The world replays bit
+# for bit only if nothing in the simulation depends on an iteration order the language does not
+# promise or on a clock the replay does not have. Each entry names the rule it keeps; a module
+# that must break one - the heartbeat, which owns the one wall clock - says so with an allow and
+# a comment, which is the visible, greppable exception the rule wants.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "iteration order is not a promise; a BTreeMap orders by key and replays" },
+    { path = "std::collections::HashSet", reason = "iteration order is not a promise; a BTreeSet orders by key and replays" },
+    { path = "std::time::Instant", reason = "the tick loop is the one place a wall clock may exist (heartbeat.rs)" },
+    { path = "std::time::SystemTime", reason = "the tick loop is the one place a wall clock may exist (heartbeat.rs)" },
+]
+disallowed-methods = [
+    { path = "std::time::Instant::now", reason = "the tick loop is the one place a wall clock may exist (heartbeat.rs)" },
+    { path = "std::time::SystemTime::now", reason = "the tick loop is the one place a wall clock may exist (heartbeat.rs)" },
+]
