@@ -388,6 +388,10 @@ impl Heartbeat {
                                         "client {sender} tried to rez creature {creature_id} into a full world ({} bodies) - refused.",
                                         roster.len()
                                     )),
+                                    Admission::RefusedCrowded => log_warn(&format!(
+                                        "client {sender} tried to rez creature {creature_id} onto a crowded spawn pad ({} bodies, no free spot) - refused.",
+                                        roster.len()
+                                    )),
                                     Admission::RefusedBounds(reason) => log_info(&format!(
                                         "client {sender} tried to rez creature {creature_id} with bounds outside the world - {reason} - refused."
                                     )),
