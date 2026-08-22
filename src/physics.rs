@@ -115,6 +115,11 @@ pub fn creature_seed(master_seed: u64, creature_id: u64) -> u64 {
 
 /// Zero if not a real number, then clamped by comparison to the body's bounds.
 ///
+/// "Not a real number" is wider than NaN and the infinities: a **subnormal** is finite and is
+/// flushed too, because a machine stepping with flush-to-zero reads it as zero where another
+/// reads it as itself, and a world that replays bit for bit on both can afford neither. A
+/// negative zero is zero with its sign gone, so "still" has one bit pattern.
+///
 /// **What must be true is that a NaN becomes zero and never a bound.** Sanitise precedes clamp,
 /// and the clamp is comparison-based deliberately: rewritten with min/max the NaN would fall
 /// through to a legal-looking bound, and the creature would sprint with nothing looking wrong -
@@ -130,7 +135,7 @@ pub fn sanitise_and_clamp(intent: Intent, bounds: &BodyBounds) -> Intent {
             value
         }
     };
-    let finite_or_zero = |value: f32| if value.is_finite() { value } else { 0.0 };
+    let finite_or_zero = |value: f32| if value.is_normal() { value } else { 0.0 };
 
     let vocalisation = finite_or_zero(intent.vocalisation);
     Intent {
@@ -1337,6 +1342,57 @@ mod tests {
 
     fn floor(x: f32, z: f32) -> f32 {
         grid_mesh_height(x, z, &GRID_FLOOR_CONFIG)
+    }
+
+    #[test]
+    fn a_subnormal_is_flushed_and_the_largest_finite_clamps_without_overflow() {
+        // A subnormal is finite, so `is_finite` lets it through - and a machine running with
+        // flush-to-zero steps it differently from one that does not. The world replays bit for
+        // bit on both only if the validator flushes it first.
+        let tiny = Intent {
+            forward_speed: f32::from_bits(1), // the smallest positive subnormal
+            turn_rate: -1.0e-40,
+            vocalisation: f32::MIN_POSITIVE / 2.0,
+        };
+        let clean = sanitise_and_clamp(tiny, &FIRST_BODY);
+        assert_eq!(clean.forward_speed.to_bits(), 0.0f32.to_bits());
+        assert_eq!(
+            clean.turn_rate.to_bits(),
+            0.0f32.to_bits(),
+            "flushed to +0, not -0"
+        );
+        assert_eq!(clean.vocalisation.to_bits(), 0.0f32.to_bits());
+        // The smallest normal is a real number and stays one.
+        let normal = Intent {
+            forward_speed: f32::MIN_POSITIVE,
+            turn_rate: -f32::MIN_POSITIVE,
+            vocalisation: f32::MIN_POSITIVE,
+        };
+        let kept = sanitise_and_clamp(normal, &FIRST_BODY);
+        assert_eq!(kept.forward_speed, f32::MIN_POSITIVE);
+        assert_eq!(kept.turn_rate, -f32::MIN_POSITIVE);
+        // A negative zero is zero, with the sign gone: one bit pattern for "still".
+        let minus_zero = sanitise_and_clamp(
+            Intent {
+                forward_speed: -0.0,
+                turn_rate: -0.0,
+                vocalisation: -0.0,
+            },
+            &FIRST_BODY,
+        );
+        assert_eq!(minus_zero.forward_speed.to_bits(), 0);
+        assert_eq!(minus_zero.turn_rate.to_bits(), 0);
+        assert_eq!(minus_zero.vocalisation.to_bits(), 0);
+        // The largest finite float clamps to the bound; nothing on the way overflows.
+        let huge = Intent {
+            forward_speed: f32::MAX,
+            turn_rate: -f32::MAX,
+            vocalisation: f32::MAX,
+        };
+        let clamped = sanitise_and_clamp(huge, &FIRST_BODY);
+        assert_eq!(clamped.forward_speed, FIRST_BODY.max_forward_speed);
+        assert_eq!(clamped.turn_rate, -FIRST_BODY.max_turn_rate);
+        assert_eq!(clamped.vocalisation, FIRST_BODY.max_vocalisation_strength);
     }
 
     #[test]

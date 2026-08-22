@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Etape 3, validation: the adversarial suite, and the three things it found.** Subnormals are
+  finite, so `is_finite` let them through, and a machine stepping with flush-to-zero reads
+  them as zero where another reads them as themselves - a world that replays bit for bit on
+  both can afford neither, so the validator flushes them from intents (negative zero too: one
+  bit pattern for "still") and the roster refuses a body carrying one. A vertex at 1e30 m was
+  admitted, and would have overflowed the hull into infinities: `BODY_MAX_EXTENT`, four metres
+  on every axis, refuses it in a word. The stager's window wrapped at the top of u64. And a
+  citizen could send the world its own WELCOME and be quietly ignored - that one is Link's
+  (every message now flows its own way only), taken up here with the submodule. The suite:
+  subnormal, negative-zero and largest-finite intents; replayed ticks, tick 0, `u64::MAX`; a
+  body past its extent, a subnormal one, a thousand copies of one point (a point proxy, no
+  panic), a body at every cap stepped without stalling; and a citizen that speaks raw bytes at
+  the world's door - NaN and infinite intents sanitised with the host kept and the guest
+  standing still, and fourteen malformed frames each hung up on while the honest spectator
+  never noticed. Breakage rounds on the flush and the extent check, each caught.
 - **The point proxy's foot slips too.** A bodiless creature's one floor contact reported no
   slip, so a bodiless walker never scratched; it now carries the walk in the body's frame like
   any foot, and the first live walker's footsteps reached the spectator (63 scratches in 64
