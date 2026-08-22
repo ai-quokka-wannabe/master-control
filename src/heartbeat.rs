@@ -557,6 +557,9 @@ fn role_name(hello: &Hello) -> &'static str {
 
 fn record_verdict(sender: u64, verdict: Verdict, verbose: bool) {
     match verdict {
+        Verdict::AlreadyApplied { .. } => {
+            // The resend of an applied intent: silence is the record, because nothing happened.
+        }
         Verdict::Accepted {
             creature_id,
             intent_tick,

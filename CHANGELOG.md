@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The resend is silence.** The piggybacked previous intent - the honest host's every message
+  carries one - was judged stale and logged as a refusal every tick once the first real host
+  connected, burying the refusals that matter. The stager now remembers the tick it last
+  applied a fresh intent for: a resend of that intent is `AlreadyApplied`, recorded by saying
+  nothing; a stale intent that never landed is still `RefusedStale`, on the record.
+
 ### Added
 
 - **The owner's letter: PROPRIOCEPTION, every tick, to the one host that owns the body (Link
