@@ -53,6 +53,17 @@ impl InputLog {
         start_unix_seconds: u64,
         hash_every: u32,
     ) -> std::io::Result<InputLog> {
+        // The operator names the path; the judgement a Disk path gets applies here too: it
+        // never climbs, so a typo is a refusal rather than a file somewhere surprising.
+        if path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "an input log path never climbs - no .. component",
+            ));
+        }
         let mut file = BufWriter::new(File::create(path)?);
         writeln!(file, "# master-control input log")?;
         let hex: String = protocol_fingerprint
@@ -134,6 +145,12 @@ impl InputLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_log_path_never_climbs() {
+        let climbing = std::path::PathBuf::from("../elsewhere/input.log");
+        assert!(InputLog::create(&climbing, 5, &[0; 32], 0, 0, 0, 32).is_err());
+    }
 
     #[test]
     fn the_log_states_its_world_and_writes_floats_as_bits() {
