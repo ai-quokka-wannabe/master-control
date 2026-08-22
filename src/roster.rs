@@ -45,6 +45,16 @@ pub const GUEST_CREATURE_ID: u32 = 100;
 /// trigger for a spawn rule that keeps them apart.
 pub const SPAWN_PAD_X: f32 = 1.0;
 pub const SPAWN_PAD_Z: f32 = 5.0;
+/// The spawn lattice: spots half a metre apart in a square spiral out from the pad, the first
+/// free one taken. Half a metre is wider than any first body and narrower than any stride.
+pub const SPAWN_SPACING: f32 = 0.5;
+/// How many rings the spiral walks before the pad is crowded: eight, an 8.5 m square of 289
+/// spots on the pad's terrace - more than the roster holds, so a world of point proxies fills
+/// before it crowds, and a crowded pad is what bodies with real footprints make of it.
+pub const SPAWN_RINGS: i32 = 8;
+/// The room a point proxy claims on the lattice, so two bodiless creatures never share a
+/// spot either: the first body's half length, as the hull-less spectator sees it.
+const SPAWN_POINT_HALF_WIDTH: f32 = crate::physics::BODY_HALF_LENGTH;
 
 /// The set dressing the script tells beside the roster: two orbiters and the blinker. The
 /// roster's capacity is what the wire's snapshot can carry minus those.
@@ -120,6 +130,8 @@ pub enum Admission {
     RefusedOwned { owner: u64 },
     /// The snapshot could not carry one more row.
     RefusedFull,
+    /// Every spot of the spawn lattice is taken, and a body is never stood on another.
+    RefusedCrowded,
     /// A bound outside what the world allows - named, so the host's author can read why.
     RefusedBounds(&'static str),
 }
@@ -235,13 +247,18 @@ impl Roster {
                 if self.residents.len() >= Roster::capacity() {
                     return Admission::RefusedFull;
                 }
+                let hull = hull_of(&model);
+                let Some((x, z)) = self.spawn_spot(hull.as_ref()) else {
+                    return Admission::RefusedCrowded;
+                };
                 self.residents.insert(
                     creature_id,
                     Resident {
                         owner: Some(sender),
                         body: {
-                            let mut body = spawned(bounds);
-                            body.hull = hull_of(&model);
+                            let mut body =
+                                Body::standing_at(x, z, floor(SPAWN_PAD_X, SPAWN_PAD_Z), bounds);
+                            body.hull = hull;
                             // A shaped body stands on its own lowest vertex, not on a half
                             // height it does not have.
                             if let Some(hull) = body.hull.as_ref() {
@@ -255,6 +272,51 @@ impl Roster {
                 Admission::Embodied
             }
         }
+    }
+
+    /// The spawn rule: the first spot of the lattice spiral, out from the pad, on the pad's own
+    /// terrace, where the new body's footprint overlaps nobody's. The spiral is a fixed walk -
+    /// ring by ring, east then south then west then north - so the same roster seats the same
+    /// body on the same spot on every run: a decision of the world, replayed like the rest.
+    /// `None` when every spot is taken.
+    fn spawn_spot(&self, hull: Option<&crate::hull::Hull>) -> Option<(f32, f32)> {
+        let pad_height = floor(SPAWN_PAD_X, SPAWN_PAD_Z);
+        let newcomer = footprint_of(hull);
+        let taken: Vec<([f32; 2], [f32; 2])> = self
+            .residents
+            .values()
+            .map(|resident| {
+                let (low, high) = footprint_of(resident.body.hull.as_ref());
+                let at = resident.body.position;
+                (
+                    [low[0] + at[0], low[1] + at[2]],
+                    [high[0] + at[0], high[1] + at[2]],
+                )
+            })
+            .collect();
+        for ring in 0..=SPAWN_RINGS {
+            for (dx, dz) in ring_walk(ring) {
+                #[allow(clippy::cast_precision_loss)]
+                let x = SPAWN_PAD_X + dx as f32 * SPAWN_SPACING;
+                #[allow(clippy::cast_precision_loss)]
+                let z = SPAWN_PAD_Z + dz as f32 * SPAWN_SPACING;
+                if (floor(x, z) - pad_height).abs() > 1e-6 {
+                    continue; // Down a step, or up one: not the pad.
+                }
+                let low = [newcomer.0[0] + x, newcomer.0[1] + z];
+                let high = [newcomer.1[0] + x, newcomer.1[1] + z];
+                let free = taken.iter().all(|(their_low, their_high)| {
+                    low[0] > their_high[0]
+                        || high[0] < their_low[0]
+                        || low[1] > their_high[1]
+                        || high[1] < their_low[1]
+                });
+                if free {
+                    return Some((x, z));
+                }
+            }
+        }
+        None
     }
 
     /// A host steering an orphan takes it up - the first-claimant rule, now on the record.
@@ -456,6 +518,51 @@ fn loudest_scratch(body: &Body) -> Option<(f32, [f32; 3])> {
     loudest
 }
 
+/// The ground-plane footprint of a body around its origin, (low, high) on x and z: the hull's
+/// extents, or the point proxy's half length each way.
+fn footprint_of(hull: Option<&crate::hull::Hull>) -> ([f32; 2], [f32; 2]) {
+    match hull {
+        None => (
+            [-SPAWN_POINT_HALF_WIDTH, -SPAWN_POINT_HALF_WIDTH],
+            [SPAWN_POINT_HALF_WIDTH, SPAWN_POINT_HALF_WIDTH],
+        ),
+        Some(hull) => hull.vertices.iter().fold(
+            ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]),
+            |(low, high), vertex| {
+                (
+                    [low[0].min(vertex[0]), low[1].min(vertex[2])],
+                    [high[0].max(vertex[0]), high[1].max(vertex[2])],
+                )
+            },
+        ),
+    }
+}
+
+/// One ring of the square spiral, as lattice offsets: ring 0 is the pad itself; ring n walks
+/// its perimeter clockwise from the east, a fixed order.
+fn ring_walk(ring: i32) -> Vec<(i32, i32)> {
+    if ring == 0 {
+        return vec![(0, 0)];
+    }
+    #[allow(clippy::cast_sign_loss)]
+    let mut walk = Vec::with_capacity((8 * ring) as usize);
+    // East edge, north to south; south edge, east to west; west edge, south to north; north
+    // edge, west to east - each without its last corner, which the next edge begins with.
+    for dz in -ring..ring {
+        walk.push((ring, dz));
+    }
+    for dx in (-ring + 1..=ring).rev() {
+        walk.push((dx, ring));
+    }
+    for dz in (-ring + 1..=ring).rev() {
+        walk.push((-ring, dz));
+    }
+    for dx in -ring..ring {
+        walk.push((dx, -ring));
+    }
+    walk
+}
+
 fn spawned(bounds: BodyBounds) -> Body {
     Body::standing_at(
         SPAWN_PAD_X,
@@ -652,6 +759,83 @@ mod tests {
     }
 
     #[test]
+    fn every_body_spawns_on_a_spot_of_its_own_and_a_crowded_pad_refuses() {
+        let mut roster = Roster::with_the_guest();
+        let guest_at = roster
+            .resident(GUEST_CREATURE_ID)
+            .expect("guest")
+            .body
+            .position;
+        assert_eq!(roster.rez(1, model(7)), Admission::Embodied);
+        assert_eq!(roster.rez(1, model(8)), Admission::Embodied);
+        let seven = roster.resident(7).expect("7").body.position;
+        let eight = roster.resident(8).expect("8").body.position;
+        // Three bodies, three spots: none on top of another, all on the pad's own terrace,
+        // each a lattice step apart - the spiral's first two rings.
+        for (a, b) in [(guest_at, seven), (guest_at, eight), (seven, eight)] {
+            let apart = ((a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+            assert!(
+                apart >= SPAWN_SPACING - 1e-6,
+                "{a:?} and {b:?} share a spot"
+            );
+        }
+        for at in [seven, eight] {
+            assert!(
+                (floor(at[0], at[2]) - floor(SPAWN_PAD_X, SPAWN_PAD_Z)).abs() < 1e-6,
+                "a spawn spot is on the pad's terrace, not down a step"
+            );
+        }
+        // The spiral is fixed: the same roster spawns the same body on the same spot, every
+        // run - replayed state, like everything the world decides.
+        let mut again = Roster::with_the_guest();
+        again.rez(1, model(7));
+        again.rez(1, model(8));
+        assert_eq!(again.resident(8).expect("8").body.position, eight);
+
+        // A shaped body takes the room its hull needs: a two-metre-wide one leaves the spots its
+        // footprint covers to nobody.
+        assert_eq!(roster.rez(1, wide(9)), Admission::Embodied);
+        let nine = roster.resident(9).expect("9").body.position;
+        for other in [guest_at, seven, eight] {
+            assert!(
+                (nine[0] - other[0]).abs() > 1.0
+                    || (nine[2] - other[2]).abs() >= SPAWN_SPACING - 1e-6,
+                "the wide body's footprint covers {other:?}"
+            );
+        }
+
+        // The pad has finitely many spots; when every one is taken - here by two-metre bodies,
+        // each covering a row of them - the rez is refused, by name, rather than stacked.
+        let mut crowd = Roster::with_the_guest();
+        let mut admitted = 0;
+        let mut refused = false;
+        for id in (10..(10 + Roster::capacity() as u32)).filter(|id| *id != GUEST_CREATURE_ID) {
+            match crowd.rez(1, wide(id)) {
+                Admission::Embodied => admitted += 1,
+                Admission::RefusedCrowded => {
+                    refused = true;
+                    break;
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(refused, "the pad never filled in {admitted} bodies");
+        assert!(
+            admitted > 30,
+            "the pad holds a crowd, not a handful: {admitted}"
+        );
+        // And a crowd of point proxies fills the roster before it crowds the pad.
+        let mut points = Roster::with_the_guest();
+        for id in (10..(10 + Roster::capacity() as u32)).filter(|id| *id != GUEST_CREATURE_ID) {
+            match points.rez(1, model(id)) {
+                Admission::Embodied | Admission::RefusedFull => {}
+                other => panic!("a point proxy never crowds the pad: {other:?}"),
+            }
+        }
+        assert_eq!(points.len(), Roster::capacity());
+    }
+
+    #[test]
     fn bounds_outside_the_world_are_refused_by_name() {
         let mut roster = Roster::with_the_guest();
         let mut fast = model(7);
@@ -697,6 +881,22 @@ mod tests {
         );
     }
 
+    /// A two-metre-wide box: a body with a real footprint, for crowding the pad.
+    fn wide(creature_id: u32) -> Model {
+        let mut model = Model::bodiless(creature_id, &FIRST_BODY);
+        for corner in 0..8u32 {
+            model.vertices.push(RezVertex {
+                position: [
+                    if corner & 1 == 0 { -1.0 } else { 1.0 },
+                    if corner & 2 == 0 { -0.05 } else { 0.25 },
+                    if corner & 4 == 0 { -0.1 } else { 0.1 },
+                ],
+            });
+        }
+        model.header.vertex_count = 8;
+        model
+    }
+
     fn shaped(creature_id: u32) -> Model {
         let mut model = Model::bodiless(creature_id, &FIRST_BODY);
         let h = 0.25f32;
@@ -739,6 +939,10 @@ mod tests {
             roster.resident(7).expect("7").body.hull.is_some(),
             "a shaped body has a hull"
         );
+        // The spawn rule seats them apart; the test is about what happens when they meet, so
+        // eight is put where seven stands - a crash of bodies the step must sort out.
+        let seven_at = roster.resident(7).expect("7").body.position;
+        roster.residents.get_mut(&8).expect("8").body.position = seven_at;
         let telling = roster.step(1, |_| Intent::default());
         let seven = roster.resident(7).expect("7").body.clone();
         let eight = roster.resident(8).expect("8").body.clone();
@@ -844,6 +1048,7 @@ mod tests {
         let mut slow = model(7);
         slow.header.max_forward_speed = 0.25;
         roster.rez(1, slow);
+        let seven_spawned_z = roster.resident(7).expect("7").body.position[2];
         let Telling {
             rows,
             events,
@@ -857,7 +1062,7 @@ mod tests {
         assert_eq!(rows[0].creature_id, 7, "roster order is id order");
         assert_eq!(rows[1].creature_id, GUEST_CREATURE_ID);
         assert!(
-            (rows[0].position[2] - (SPAWN_PAD_Z - 0.25 * TICK_SECONDS)).abs() < 1e-6,
+            (rows[0].position[2] - (seven_spawned_z - 0.25 * TICK_SECONDS)).abs() < 1e-6,
             "the slow body walked its own clamp, not the guest's"
         );
         assert!(
