@@ -310,10 +310,34 @@ impl Roster {
         let mut rows = Vec::with_capacity(self.residents.len());
         let mut events = Vec::new();
         let mut letters = Vec::new();
+        // Every body steps alone against the world first; then every pair that could touch
+        // is judged, in id order - the pairs are replayed state too - and stood apart.
+        let mut previous_voices: BTreeMap<u32, f32> = BTreeMap::new();
         for (id, resident) in &mut self.residents {
             let intent = sanitise_and_clamp(intent_for(*id), &resident.body.bounds);
-            let previous_voice = resident.body.vocalisation;
+            previous_voices.insert(*id, resident.body.vocalisation);
             crate::physics::step_body(&mut resident.body, intent, floor);
+        }
+        let ids: Vec<u32> = self.residents.keys().copied().collect();
+        for (i, &first) in ids.iter().enumerate() {
+            for &second in &ids[i + 1..] {
+                let touching = {
+                    let a = &self.residents[&first].body;
+                    let b = &self.residents[&second].body;
+                    crate::physics::boxes_touch(a, b)
+                };
+                if touching {
+                    let mut a = self.residents[&first].body.clone();
+                    let mut b = self.residents[&second].body.clone();
+                    if crate::physics::separate(&mut a, &mut b) {
+                        self.residents.get_mut(&first).expect("resident").body = a;
+                        self.residents.get_mut(&second).expect("resident").body = b;
+                    }
+                }
+            }
+        }
+        for (id, resident) in &mut self.residents {
+            let previous_voice = previous_voices[id];
             let body = &resident.body;
             rows.push(CreatureState {
                 creature_id: *id,
@@ -547,6 +571,89 @@ mod tests {
             roster.len() as u32 + SET_DRESSING_ROWS,
             TICK_STATE_MAX_CREATURES,
             "every row the wire can carry, and not one more"
+        );
+    }
+
+    fn shaped(creature_id: u32) -> Model {
+        let mut model = Model::bodiless(creature_id, &FIRST_BODY);
+        let h = 0.25f32;
+        model.vertices = vec![
+            RezVertex {
+                position: [-h, -0.05, -h],
+            },
+            RezVertex {
+                position: [h, -0.05, -h],
+            },
+            RezVertex {
+                position: [-h, 0.45, -h],
+            },
+            RezVertex {
+                position: [h, 0.45, -h],
+            },
+            RezVertex {
+                position: [-h, -0.05, h],
+            },
+            RezVertex {
+                position: [h, -0.05, h],
+            },
+            RezVertex {
+                position: [-h, 0.45, h],
+            },
+            RezVertex {
+                position: [h, 0.45, h],
+            },
+        ];
+        model.header.vertex_count = 8;
+        model
+    }
+
+    #[test]
+    fn two_shaped_bodies_on_one_pad_are_stood_apart_and_feel_each_other() {
+        let mut roster = Roster::with_the_guest();
+        assert_eq!(roster.rez(1, shaped(7)), Admission::Embodied);
+        assert_eq!(roster.rez(2, shaped(8)), Admission::Embodied);
+        assert!(
+            roster.resident(7).expect("7").body.hull.is_some(),
+            "a shaped body has a hull"
+        );
+        let telling = roster.step(1, |_| Intent::default());
+        let seven = roster.resident(7).expect("7").body.clone();
+        let eight = roster.resident(8).expect("8").body.clone();
+        let apart = (seven.position[0] - eight.position[0])
+            .abs()
+            .max((seven.position[2] - eight.position[2]).abs());
+        assert!(
+            apart >= 0.5 - 1e-4,
+            "stood apart to touching, not left inside each other: {:?} {:?}",
+            seven.position,
+            eight.position
+        );
+        assert!(
+            seven.contacts.iter().any(|c| c.normal[1].abs() < 0.5),
+            "seven felt eight: {:?}",
+            seven.contacts
+        );
+        assert!(
+            eight.contacts.iter().any(|c| c.normal[1].abs() < 0.5),
+            "eight felt seven"
+        );
+        assert_eq!(
+            telling
+                .rows
+                .iter()
+                .filter(|row| row.creature_id == 7 || row.creature_id == 8)
+                .count(),
+            2
+        );
+        // And the guest, bodiless, is nobody's business: no hull, no pair.
+        assert!(
+            roster
+                .resident(GUEST_CREATURE_ID)
+                .expect("guest")
+                .body
+                .contacts
+                .iter()
+                .all(|c| c.normal == [0.0, 1.0, 0.0])
         );
     }
 
