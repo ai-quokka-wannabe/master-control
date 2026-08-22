@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The point proxy's foot slips too.** A bodiless creature's one floor contact reported no
+  slip, so a bodiless walker never scratched; it now carries the walk in the body's frame like
+  any foot, and the first live walker's footsteps reached the spectator (63 scratches in 64
+  ticks at strength 0.15). The goldens, which record no slip, are untouched.
 - **Exact contacts, third movement: friction, and the scratch (Link v6).** A walk into a riser
   no longer stops dead: the part of the move into the face is arrested and the part along it
   slides on, less what Coulomb takes of it (`FRICTION`, half of what the face arrested); the
