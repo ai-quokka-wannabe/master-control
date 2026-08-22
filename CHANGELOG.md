@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The owner's letter: PROPRIOCEPTION, every tick, to the one host that owns the body (Link
+  v5).** `link_dll.rs` mirrors the message, its contact rows and `LNK_CONTACTS_MAX` (now the
+  world's own contact cap). The roster's step tells, beside the rows and events for everyone,
+  a `Letter` per owned body - specific force, grounded, the tick's contacts as the physics
+  produced them - and the heartbeat sends each to its owner after that tick's `TICK_STATE`:
+  the first message composed per subscriber, through the seam built for it. An integration
+  test reads eight letters at the host (grounded on the spawn pad, a floor contact, an upward
+  specific force, each stamped with its own tick) while the spectator hears ticks and never a
+  letter. Found along the way, fixed in Link: a host's polite `BYE` was lost to the TCP reset
+  its slammed socket answered the server's next write with - and, belt and braces here, a
+  citizen whose socket fails while being written to is asked for a waiting `BYE` before it is
+  declared a crash.
 - **The roster of record: bodies arrive over the wire, and Etape 2 closes.** `src/roster.rs`
   keeps who is embodied, with what body, owned by whom - in creature-id order, so every telling
   lists them the same way on every run. A host's `REZ` is judged against the world's own bounds

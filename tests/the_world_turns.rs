@@ -601,6 +601,62 @@ fn a_rezzed_body_is_relayed_to_everyone_replayed_to_late_joiners_and_leaves_on_b
 }
 
 #[test]
+fn the_owner_gets_a_letter_every_tick_and_nobody_else_does() {
+    let world = World::stand_up(quick_config());
+    let wire = LinkDll::beside_executable().expect("wire");
+    let fingerprint = wire.world_fingerprint(&world_definition());
+
+    let (mut spectator, _) = wire
+        .connect(&world.address(), ROLE_SPECTATOR, fingerprint, 5_000)
+        .expect("spectator");
+    let (mut host, _) = wire
+        .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+        .expect("host");
+    rez(&mut host, 7);
+
+    // The host hears its body's feel every tick: grounded on the spawn pad, a floor contact,
+    // an upward specific force - and the letter follows the tick it belongs to.
+    let mut last_tick = 0;
+    let mut letters = 0;
+    let deadline = Instant::now() + PATIENCE;
+    while letters < 8 {
+        match host.poll().expect("healthy") {
+            Some(Message::TickState { header, .. }) => last_tick = header.tick,
+            Some(Message::Proprioception { header, contacts }) => {
+                assert_eq!(header.creature_id, 7);
+                assert_eq!(header.tick, last_tick, "the letter follows its own tick");
+                assert_eq!(header.grounded, 1);
+                assert_eq!(header.contact_count as usize, contacts.len());
+                assert!(!contacts.is_empty(), "a standing body feels the floor");
+                assert!(header.specific_force[1] > 0.0);
+                letters += 1;
+            }
+            Some(Message::Ping(ping)) => {
+                let _ = host.send_pong(ping.nonce);
+                let _ = host.flush();
+            }
+            Some(_) | None => std::thread::sleep(Duration::from_millis(1)),
+        }
+        assert!(Instant::now() < deadline, "the letters never came");
+    }
+
+    // The spectator, meanwhile, hears ticks and never a letter.
+    let (start, _) = await_tick(&mut spectator, 1);
+    let until = start + 8;
+    loop {
+        match spectator.poll().expect("healthy") {
+            Some(Message::Proprioception { .. }) => panic!("a spectator was written to"),
+            Some(Message::TickState { header, .. }) if header.tick >= until => break,
+            Some(Message::Ping(ping)) => {
+                let _ = spectator.send_pong(ping.nonce);
+                let _ = spectator.flush();
+            }
+            Some(_) | None => std::thread::sleep(Duration::from_millis(1)),
+        }
+    }
+}
+
+#[test]
 fn an_identity_another_host_wears_is_refused_and_an_unrezzed_one_cannot_be_steered() {
     let world = World::stand_up(quick_config());
     let wire = LinkDll::beside_executable().expect("wire");
