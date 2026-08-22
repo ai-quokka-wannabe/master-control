@@ -44,11 +44,21 @@ fn main() {
     // The wire is built release even under a debug build of this process: it is a consumed
     // artefact, the very same binary every TronGrid Lite runs beside, not a debuggee of ours.
     let link_target = out_dir.join("link-target");
+    // A plain build of the wire's own crate, whatever this process is doing: under `cargo
+    // clippy` the outer invocation hands clippy's driver down through RUSTC_WORKSPACE_WRAPPER
+    // and friends, and the nested cargo would then lint Link - with *this* crate's clippy.toml,
+    // found by walking up from external/link - against rules that are this crate's alone.
     let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()))
         .args(["build", "--release", "--manifest-path"])
         .arg(&link_manifest)
         .arg("--target-dir")
         .arg(&link_target)
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
+        .env_remove("RUSTC_WRAPPER")
+        .env_remove("CLIPPY_ARGS")
+        .env_remove("CLIPPY_CONF_DIR")
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env_remove("RUSTFLAGS")
         .status()
         .expect("cargo must be runnable to build the wire");
     assert!(status.success(), "building the Link cdylib failed");
