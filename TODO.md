@@ -98,11 +98,13 @@ Gated on the `REZ` payload (Link protocol v4) and on Etape 2's roster of record.
   representation keeps quads as quads, so no interior diagonal exists to catch on
   (internal-edge catching, the PhysX/Unity ghost-collision class); welding is only ever owed to
   a genuine triangle soup.
-- **Sliding, friction, and the scratch**: a contact persists across ticks as a sliding contact
-  along any face, the floor's traction applies to every face, and a sliding contact authors a
-  *scratch* acoustic `EVENT` (strength from slip speed against normal load, position at the
-  contact point) through the same acoustics the voice uses — creatures hear each other scrape,
-  spectators hear it Doppler-shifted.
+- [x] **Sliding, friction, and the scratch**: a walk into a riser or another body slides along
+  the face with what Coulomb leaves it (`physics::FRICTION` 0.5 of what the face arrested,
+  taken from the slide; the floor keeps the actuators' traction), and every body's loudest
+  slide per tick is a *scratch* `EVENT` (`LNK_EVENT_SCRATCH`, strength = slip × normal impulse
+  capped at one, above `SCRATCH_THRESHOLD`), sounded from the contact point — footsteps are
+  scratches. The letter's contacts carry normal, depth and slip (protocol v6). Owed: the
+  spectator's and the creatures' ears playing them (Etape 17 / spectator audio).
 - [x] **Creature proxy** = the convex hull of the `REZ` mesh (`src/hull.rs`: incremental, row
   order, bit-for-bit repeatable; a flat mesh has no hull and keeps the point proxy), computed
   once at rez; hull and axis enumeration are replayed state.
@@ -122,8 +124,8 @@ Gated on the `REZ` payload (Link protocol v4) and on Etape 2's roster of record.
   body rests *on* another only when its lowest point is above the other's middle (then it is
   stood up whole and grounded); two bodies in one spot go apart on the floor, never stacked.
   Kinematic throughout: no solver, as ruled.
-- **The report is the sense**: each contact is a point on the body, a world normal, a depth and
-  a slip velocity;
+- [x] **The report is the sense**: each contact is a point on the body, a world normal, a depth
+  and a slip velocity (on the wire since protocol v6);
   it extends the `TICK_STATE` creature-host debt (specific force plus contacts) and the
   `max_contact_count` truncation (discard the faintest) stays deterministic.
 - **Response stays kinematic**: minimal-translation separation and velocity projection, as the

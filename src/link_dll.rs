@@ -36,7 +36,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -70,6 +70,8 @@ pub const ROLE_SPECTATOR: u8 = 1;
 pub const ROLE_CREATURE_HOST: u8 = 2;
 
 pub const EVENT_VOCALISATION: u8 = 1;
+/// `LNK_EVENT_SCRATCH`: a body sliding along a face - the floor, a riser, another body.
+pub const EVENT_SCRATCH: u8 = 2;
 
 /// `LNK_REZ_MAX_*`: the three caps of the one variable-size client input. The wire judges them
 /// before any copy; this side restates them so a roster can size itself without asking.
@@ -87,6 +89,9 @@ pub const CONTACTS_MAX: u32 = 16;
 pub struct Contact {
     pub position: [f32; 3],
     pub impulse: [f32; 3],
+    pub normal: [f32; 3],
+    pub depth: f32,
+    pub slip: [f32; 3],
 }
 
 /// `LnkProprioception`: the owner's letter - the body's feel this tick, followed on the wire
@@ -246,7 +251,7 @@ const _: () = assert!(size_of::<Rez>() == 32);
 const _: () = assert!(size_of::<RezVertex>() == 12);
 const _: () = assert!(size_of::<RezTriangle>() == 16);
 const _: () = assert!(size_of::<RezMaterial>() == 32);
-const _: () = assert!(size_of::<Contact>() == 24);
+const _: () = assert!(size_of::<Contact>() == 52);
 const _: () = assert!(size_of::<Proprioception>() == 32);
 const _: () = assert!(size_of::<CreatureState>() == 40);
 const _: () = assert!(size_of::<TickStateHeader>() == 16);
@@ -1045,6 +1050,7 @@ mod tests {
             ("LNK_ROLE_SPECTATOR", u64::from(ROLE_SPECTATOR)),
             ("LNK_ROLE_CREATURE_HOST", u64::from(ROLE_CREATURE_HOST)),
             ("LNK_EVENT_VOCALISATION", u64::from(EVENT_VOCALISATION)),
+            ("LNK_EVENT_SCRATCH", u64::from(EVENT_SCRATCH)),
         ] {
             assert!(
                 PROTOCOL_HEADER.contains(&format!("#define {name} {value}u")),
