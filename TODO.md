@@ -64,3 +64,31 @@ world. The world replays; the minds do not. Added by the audit: the state log op
 header (protocol fingerprint, start metadata) and rotates (~55 MB per hour); each input record
 carries *which tick the action actually applied to*, and refused actions are logged too; a hash
 disagreement produces a state diff with floats serialised as hex.
+
+## Etape 5 — contacts, exact
+
+The owner's observation (2026-08-22), ruled in `TOPOLOGY.md` § Master Control's mechanics: the
+Grid and every creature are triangles and squares only, so contacts are closed-form and the
+capsule-against-height-function body in `src/physics.rs` is a placeholder that `REZ` retires.
+Gated on the `REZ` payload (Link protocol v4) and on Etape 2's roster of record.
+
+- **World collision geometry** = welded planar faces with adjacency, derived from the same
+  world-definition source as the mesh and the reflectors — never from a triangle soup, so no
+  interior edge between coplanar neighbours can ever author a contact normal (internal-edge
+  catching, the PhysX/Unity ghost-collision class).
+- **Creature proxy** = the convex hull of the `REZ` mesh, computed once at rez in a fixed vertex
+  order; hull and axis enumeration are replayed state.
+- **Body against world**: continuous, time-of-impact contacts of the hull's vertices and edges
+  against the faces — the contact time is a root of the same polynomial as the ballistic closed
+  form, so tunnelling is closed by construction, not by a tolerance.
+- **Body against body**: Separating-Axis Test over face normals and edge cross products, pairs
+  culled by an AABB sweep in roster order.
+- **The report is the sense**: each contact is a point on the body, a world normal and a depth;
+  it extends the `TICK_STATE` creature-host debt (specific force plus contacts) and the
+  `max_contact_count` truncation (discard the faintest) stays deterministic.
+- **Response stays kinematic**: minimal-translation separation and velocity projection, as the
+  port does today. A rigid-body constraint solver is a named non-goal with a trigger in
+  `TOPOLOGY.md`'s deferred table.
+- **Held by goldens**: a contact-golden life (slide across a welded diagonal without a hop;
+  corner, edge and face landings; two hulls meeting) joins `tests/data/`, with breakage rounds
+  that unweld the diagonal and that reorder the hull.
