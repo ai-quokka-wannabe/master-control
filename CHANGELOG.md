@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Exact contacts, first movement: a shaped body collides as its convex hull.** `src/hull.rs`
+  builds the hull of a REZ mesh at rez - incremental, in row order, so the same rows give the
+  same hull bit for bit; a flat mesh has no hull and keeps the point proxy, as does every
+  bodiless creature, which is what keeps the goldens the law. A hull stands on whichever vertex
+  reaches lowest over its own cell, every resting vertex is a contact of its own - the foot,
+  its world normal, its share of the support, its depth and its slip along the floor in the
+  body's frame - and a riser is met by the vertex that reaches it first, at the exact fraction
+  of the tick where its sweep crosses the lattice line, the body keeping the part of its move
+  before it and feeling the stop at that vertex. `Contact` gains `normal`, `depth` and `slip`
+  (the wire's letter still carries position and impulse; the protocol grows when the scratch
+  lands). Tests: a cube stands on four feet sharing the support, a keeled body on its keel, a
+  walk meets the riser 0.64 of the way through the tick and not a step short; four breakage
+  rounds, one of which first caught a test that could not tell a sign on a symmetric body.
 - **Clu: `master-control clu <log> [<disk>]` re-simulates a log and checks its hashes.** The
   input log now also records every `rez` with the body's bounds and every `derez`, so it is
   self-sufficient: Clu drives a roster from it alone - the same physics under the same build -

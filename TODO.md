@@ -103,11 +103,16 @@ Gated on the `REZ` payload (Link protocol v4) and on Etape 2's roster of record.
   *scratch* acoustic `EVENT` (strength from slip speed against normal load, position at the
   contact point) through the same acoustics the voice uses — creatures hear each other scrape,
   spectators hear it Doppler-shifted.
-- **Creature proxy** = the convex hull of the `REZ` mesh, computed once at rez in a fixed vertex
-  order; hull and axis enumeration are replayed state.
-- **Body against world**: continuous, time-of-impact contacts of the hull's vertices and edges
-  against the faces — the contact time is a root of the same polynomial as the ballistic closed
-  form, so tunnelling is closed by construction, not by a tolerance.
+- [x] **Creature proxy** = the convex hull of the `REZ` mesh (`src/hull.rs`: incremental, row
+  order, bit-for-bit repeatable; a flat mesh has no hull and keeps the point proxy), computed
+  once at rez; hull and axis enumeration are replayed state.
+- [x] **Body against world**, first half: the hull's vertices against the floor cells (standing
+  on the lowest vertex over its own cell; every resting vertex a contact with its normal, its
+  share of the support, its depth and its slip) and against the risers (the vertex that reaches
+  the wall first, at the exact fraction of the tick where its sweep crosses the lattice line -
+  a root, not a tolerance). Still owed: edges against faces, and the vertical time of impact
+  for a falling hull on a terrace edge (today the floor claim is the vertical root already, the
+  floor being horizontal).
 - **Body against body**: Separating-Axis Test over face normals and edge cross products, pairs
   culled by an AABB sweep in roster order.
 - **The report is the sense**: each contact is a point on the body, a world normal, a depth and
