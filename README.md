@@ -22,21 +22,37 @@ and why every delegation is the way it is, lives in the flagship's
 
 ## What Lives Here Today
 
-**The heartbeat**: a Rust world server that listens on the Grid's port, welcomes spectators and
-creature hosts through the very Link DLL every TronGrid Lite loads, and broadcasts a scripted
-world at a sacred 32 Hz — the pacing accumulator with its clamp and its loud lag counter, the
-acceptance window with idempotent dedupe, the three silence rules, keepalive reaping, and the
-minimal flood posture, all per the blueprint. The world it tells is still a script (two
-orbiters, a blinker, and one guest a creature host may steer); the *simulated* world arrives at
-Etape 2 as the port of the flagship's physics, per the placement ruling. [TODO.md](TODO.md)
-stages what remains.
+A Rust world server, std-only, that listens on the Grid's port, welcomes spectators and creature
+hosts through the very Link DLL every TronGrid Lite loads, and steps one simulated world at a
+sacred 32 Hz:
+
+- **The heartbeat** — the pacing accumulator with its clamp and its loud lag counter, the
+  acceptance window with idempotent dedupe, the silence rules, keepalive reaping, the minimal
+  flood posture.
+- **The roster of record** — a host's `REZ` embodies a creature (or adopts an orphan), `DEREZ`
+  and `BYE` are a leave, a crash leaves the body on the neutral reflex for the next host; every
+  body is seated by the spawn rule on a spot of its own.
+- **The validator, the only path in** — bounds refused by name, subnormals flushed or refused,
+  a body's extent capped, every malformed frame hung up on at the wire.
+- **The physics** — the flagship's body step ported here as the one implementation: convex-hull
+  proxies from the `REZ` mesh, exact contacts against the terraced floor and its risers,
+  hull-against-hull separation, Coulomb friction, and a scratch for every slide, felt by the
+  owner in a `PROPRIOCEPTION` letter every tick.
+- **The logs** — `--disk <path>` records the world in the wire's own bytes (rolling over to
+  `<stem>.0002.disk` and on at `--disk-roll <MiB>`, each file whole), `--log <path>` records
+  every intent judged and applied and a periodic state hash, and **Clu** (`master-control clu
+  <log> [<disk>]`) re-simulates a log and names the first bit that lies.
+
+[TODO.md](TODO.md) carries each etape's decisions and what is still owed.
 
 ```text
 git submodule update --init
 cargo run --release            # Greetings, Programs! Master Control listening on port 30702.
+# master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
 ```
 
-Then, from a tron-grid-lite build: `TronGridLite --window` — the constellation on one machine.
+Then, from a tron-grid-lite build: `TronGridLite --window` to watch, or `TronGridLite --program
+<name>` to host a creature — the constellation on one machine.
 
 ## The Doctrine
 
@@ -51,8 +67,11 @@ Then, from a tron-grid-lite build: `TronGridLite --window` — the constellation
 
 ## Building
 
-There is nothing to build yet. When the flesh arrives it brings the flagship's toolchain with
-it: C++20, CMake 3.25+ with Ninja Multi-Config, and the same warnings-as-errors presets.
+Stable Rust, no dependencies. `git submodule update --init` brings the wire
+(`external/link`); `build.rs` builds its cdylib and puts it beside the executable, which is the
+only place this server ever looks for it. `cargo test` runs the unit suite and the integration
+suite that stands whole worlds up on loopback; `cargo fmt --check` and `cargo clippy
+--all-targets -- -D warnings` are what CI gates on, both platforms.
 
 ## Licence
 
