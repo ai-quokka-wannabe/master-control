@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Exact contacts, third movement: friction, and the scratch (Link v6).** A walk into a riser
+  no longer stops dead: the part of the move into the face is arrested and the part along it
+  slides on, less what Coulomb takes of it (`FRICTION`, half of what the face arrested); the
+  same between two bodies, the loss split half each. Every contact the owner's letter carries
+  now names its face - the normal, the depth, the slip - as protocol v6 has it. And a slide
+  makes a sound: each body's loudest slide per tick is a `SCRATCH` event, strength the slip
+  against the normal impulse capped at one, sounded from the contact point on the floor, the
+  riser or the other body - so footsteps are scratches, quiet ones. Tests: a diagonal walk
+  slides along the riser at exactly the tangential speed less friction's share, a sidestep
+  along another body loses the coefficient's share half from each, a walking body scratches
+  from its foot and a standing one is silent; four breakage rounds discriminated.
 - **Exact contacts, second movement: creatures feel each other.** `physics::separate` is the
   separating-axis test between two hulls - both hulls' face normals and every edge-pair cross
   product, in a fixed order, because the axes are replayed state - run from the roster's step
