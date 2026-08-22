@@ -158,6 +158,18 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
 
 /// The re-simulation. `disk`, when given, supplies the rows to diff against at a divergence.
 pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Result<Verdict, String> {
+    // The operator names the paths; as for a Disk, they never climb.
+    for path in std::iter::once(log_path).chain(disk_path) {
+        if path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(format!(
+                "a path Clu reads never climbs - no .. component: {}",
+                path.display()
+            ));
+        }
+    }
     let text = std::fs::read_to_string(log_path)
         .map_err(|error| format!("could not read the log at {}: {error}", log_path.display()))?;
     let own_world = wire.world_fingerprint(&world_definition());
@@ -320,6 +332,14 @@ fn diff_against_disk(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_climbing_path_is_refused_before_anything_is_read() {
+        let wire = LinkDll::beside_executable().expect("wire");
+        let refusal =
+            check(Path::new("../elsewhere/world.log"), None, &wire).expect_err("climbing");
+        assert!(refusal.contains("never climbs"), "{refusal}");
+    }
 
     #[test]
     fn records_parse_and_the_unknown_is_named() {
