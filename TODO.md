@@ -46,8 +46,8 @@ this suite and per-creature seed substreams ready. What remains of this etape:
 - **The flagship's deletion movement**: its `stepBody`, physics tests, Etape-16 hash and the
   local `--program --ticks` mode go, its dev loop dialling a local Master Control instead.
 - **The REZ/DEREZ wire lifecycle**, gated on the REZ payload (Link Etape 6): real descriptors
-  replace `FIRST_BODY`, joins broadcast, the roster becomes plural, `WELCOME` grows the
-  world-definition fingerprint in the same protocol bump.
+  replace `FIRST_BODY`, joins broadcast, the roster becomes plural. (`WELCOME` already carries
+  the world-definition fingerprint since Link v4, and the door already judges by it.)
 
 ## Etape 3 — validation
 
