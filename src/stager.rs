@@ -42,6 +42,12 @@ pub enum Verdict {
     /// working as designed, idempotent, and not worth a line - a log that names every honest
     /// resend as a refusal buries the refusals that matter.
     AlreadyApplied { creature_id: u32, intent_tick: u64 },
+    /// The piggyback on a stream's first ACTIONS, naming the tick the creature stepped before
+    /// any intent could have reached it: a host learns of a tick from its telling, so its first
+    /// word is always about the tick after the first it was told, and the resend beside it
+    /// describes a step that was rightly coasted. Not a loss; on the record as what it is,
+    /// never as a refusal.
+    BeforeFirstIntent { creature_id: u32, intent_tick: u64 },
     /// Arrived after its tick was stepped, and was never applied: a real loss. Refused, on the
     /// record.
     RefusedStale {
@@ -83,6 +89,9 @@ struct CreatureStaging {
     repeat_budget: u32,
     /// The tick whose fresh intent was last applied, so a resend of it is known for what it is.
     last_applied_tick: Option<u64>,
+    /// Whether any intent has ever been accepted on this stream - before the first, a stale
+    /// piggyback is the first word's, not a loss.
+    ever_accepted: bool,
 }
 
 /// The stager for every steerable creature. Etape 1 has exactly one (the scripted guest), but
@@ -113,6 +122,7 @@ impl ActionStager {
                 last_accepted: None,
                 repeat_budget: 0,
                 last_applied_tick: None,
+                ever_accepted: false,
             });
         if staging.owner != sender {
             verdicts.push(Verdict::RefusedNotOwner {
@@ -122,9 +132,14 @@ impl ActionStager {
             return verdicts;
         }
 
-        let mut judge = |tick: u64, intent: Intent| {
+        let mut judge = |tick: u64, intent: Intent, piggybacked: bool| {
             let verdict = if staging.last_applied_tick == Some(tick) {
                 Verdict::AlreadyApplied {
+                    creature_id: actions.creature_id,
+                    intent_tick: tick,
+                }
+            } else if piggybacked && tick < next_tick && !staging.ever_accepted {
+                Verdict::BeforeFirstIntent {
                     creature_id: actions.creature_id,
                     intent_tick: tick,
                 }
@@ -142,6 +157,7 @@ impl ActionStager {
                 }
             } else {
                 staging.staged.insert(tick, intent);
+                staging.ever_accepted = true;
                 Verdict::Accepted {
                     creature_id: actions.creature_id,
                     intent_tick: tick,
@@ -160,6 +176,7 @@ impl ActionStager {
                     turn_rate: actions.previous_turn_rate,
                     vocalisation: actions.previous_vocalisation,
                 },
+                true,
             );
         }
         judge(
@@ -169,6 +186,7 @@ impl ActionStager {
                 turn_rate: actions.desired_turn_rate,
                 vocalisation: actions.vocalisation_strength,
             },
+            false,
         );
 
         verdicts
@@ -213,6 +231,7 @@ impl ActionStager {
                 last_accepted: None,
                 repeat_budget: 0,
                 last_applied_tick: None,
+                ever_accepted: false,
             },
         );
     }
@@ -253,8 +272,11 @@ mod tests {
         let mut stager = ActionStager::default();
         let verdicts = stager.feed(1, &actions(10, 1.0, 0.5), 10);
         assert!(
-            matches!(verdicts[0], Verdict::RefusedStale { intent_tick: 9, .. }),
-            "the piggybacked 9 is stale at next tick 10"
+            matches!(
+                verdicts[0],
+                Verdict::BeforeFirstIntent { intent_tick: 9, .. }
+            ),
+            "the first word's piggyback names a tick no intent could have reached: not a loss"
         );
         assert!(matches!(
             verdicts[1],
@@ -284,6 +306,21 @@ mod tests {
                 }
             ),
             "one past the boundary is the host ahead of us, not the future"
+        );
+
+        // A first word that is itself late is a loss, whatever its piggyback is.
+        let mut late = ActionStager::default();
+        let verdicts = late.feed(1, &actions(8, 1.0, 0.5), 10);
+        assert!(
+            matches!(verdicts[1], Verdict::RefusedStale { intent_tick: 8, .. }),
+            "the grace is the piggyback's alone"
+        );
+
+        // Once a word has landed, a piggyback for a tick already stepped is a real loss again.
+        let verdicts = stager.feed(1, &actions(10, 1.0, 0.5), 11);
+        assert!(
+            matches!(verdicts[0], Verdict::RefusedStale { intent_tick: 9, .. }),
+            "after the first accepted intent, stale is stale"
         );
 
         let verdicts = stager.feed(1, &actions(500, 1.0, 1.0), 10);

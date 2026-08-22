@@ -106,6 +106,7 @@ impl InputLog {
         let word = match verdict {
             Verdict::Accepted { .. } => "accepted",
             Verdict::AlreadyApplied { .. } => "already_applied",
+            Verdict::BeforeFirstIntent { .. } => "before_first_intent",
             Verdict::RefusedStale { .. } => "refused_stale",
             Verdict::RefusedFuture { .. } => "refused_future",
             Verdict::RefusedNotOwner { .. } => "refused_not_owner",

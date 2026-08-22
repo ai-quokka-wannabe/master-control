@@ -186,6 +186,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The first word's piggyback is not a loss.** A host learns of a tick from its telling, so
+  its first `ACTIONS` is always about the tick after the first it was told, and the previous
+  intent riding beside it names a step the creature rightly coasted through before any word
+  could have reached it. The stager judged that resend stale and the log called it a refusal
+  at every embody; it is now `Verdict::BeforeFirstIntent`, recorded as `before_first_intent`
+  and logged as silence, with the grace the piggyback's alone - a first word that is itself
+  late is still refused stale, and once any intent has been accepted, stale is stale. Tested
+  both ways; one breakage round (the grace widened to the current intent) caught.
 - **The resend is silence.** The piggybacked previous intent - the honest host's every message
   carries one - was judged stale and logged as a refusal every tick once the first real host
   connected, burying the refusals that matter. The stager now remembers the tick it last
