@@ -45,10 +45,9 @@ replayed to every late joiner verbatim; a host's `DEREZ` or `BYE` is a leave and
 crash or a reap is not a leave - the body stays on the neutral reflex, ownerless, until the next
 host rezzes the same identity. Declared bounds are judged against the world's own (`WORLD_MAX_*`)
 and refused by name rather than clamped. The world's own guest remains as the first unowned
-resident, claimable by steering it. Two notes for later etapes: every body spawns on the one
-spawn pad until bodies feel each other (Etape 5 is the trigger for a spawn rule); and a refused
-`REZ` is a log line at the server only - the host learns by not hearing its body relayed, which
-a future `REFUSED` message could make explicit.
+resident, claimable by steering it. The spawn rule landed with Etape 5 (see there). One note for
+a later etape: a refused `REZ` is a log line at the server only - the host learns by not
+hearing its body relayed, which a future `REFUSED` message could make explicit.
 
 ## Etape 3 — validation
 
@@ -135,9 +134,24 @@ Gated on the `REZ` payload (Link protocol v4) and on Etape 2's roster of record.
   on the lowest vertex over its own cell; every resting vertex a contact with its normal, its
   share of the support, its depth and its slip) and against the risers (the vertex that reaches
   the wall first, at the exact fraction of the tick where its sweep crosses the lattice line -
-  a root, not a tolerance). Still owed: edges against faces, and the vertical time of impact
-  for a falling hull on a terrace edge (today the floor claim is the vertical root already, the
-  floor being horizontal).
+  a root, not a tolerance). Two things once listed as owed here are closed by argument, not
+  code, and the argument is the record: **edges against faces** - every face of the Grid is a
+  horizontal cell or a vertical riser, and the deepest point of a convex hull against a plane
+  is always a vertex, so vertex-against-face *is* the exact test for this world (edge-against-
+  edge is where a hull meets a hull, and the SAT carries those); **the vertical time of impact
+  on a terrace edge** - a landing is resolved at the end-of-tick pose, so a hull that crosses
+  a terrace edge in the air in the very tick it lands stands on the cell it ends over, not the
+  one it was over at the instant of touch; the error is bounded by one tick's horizontal
+  travel (three centimetres at a metre a second, thirty-one at the world's top speed), never
+  accumulates (the next tick stands the body on its true cell), and is a bounded, written-down
+  approximation rather than a hidden one. Both reopen the day the Grid grows a sloped face.
+- [x] **The spawn rule** (`Roster::spawn_spot`): the first free spot of a fixed square spiral
+  out from the pad, half a metre apart, eight rings on the pad's own terrace (289 spots, more
+  than the roster holds), where the newcomer's footprint - its hull's extents, or the point
+  proxy's half length - overlaps nobody's. A crowded pad refuses by name (`RefusedCrowded`)
+  rather than stacking bodies; a crowd of point proxies fills the roster before it crowds the
+  pad. The spiral is a fixed walk, so the same roster seats the same body on the same spot on
+  every run - a decision of the world, replayed like the rest.
 - [x] **Body against body**: Separating-Axis Test over both hulls' face normals and every
   edge-pair cross product in a fixed order, pairs culled by a bounding-box test in id order
   (`physics::separate`, called from `Roster::step` after every body has stepped alone). The

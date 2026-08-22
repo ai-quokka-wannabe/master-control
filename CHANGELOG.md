@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The spawn rule: every body gets a spot of its own.** `Roster::spawn_spot` walks a fixed
+  square spiral out from the pad - half a metre apart, eight rings on the pad's own terrace,
+  289 spots - and seats the newcomer on the first where its footprint (the hull's extents, or
+  the point proxy's half length) overlaps nobody's; a crowded pad refuses by name
+  (`Admission::RefusedCrowded`, a warning at the server) rather than stacking bodies, and a
+  crowd of point proxies fills the roster before it crowds the pad. The walk is fixed, so the
+  same roster seats the same body on the same spot on every run. Two Etape 5 items once owed
+  are closed by written argument instead: edges against faces (every face here is horizontal
+  or vertical, and a convex hull's deepest point against a plane is a vertex) and the vertical
+  time of impact on a terrace edge (resolved at the end-of-tick pose, an error bounded by one
+  tick's travel that never accumulates). Tested: three bodies, three spots on one terrace; a
+  wide body keeps its row; the spiral replays; a crowd of wide bodies is refused, a crowd of
+  points fills the roster. One breakage round (the spiral blind to the taken) caught.
 - **The Disk rolls over.** `--disk-roll <MiB>` (48 by default, 0 never): once the file reaches
   the size, the tick just told is its last - it closes with `BYE` as a world does - and
   `<stem>.0002.disk`, `.0003` and on open at that very tick with the live roster's `REZ` at
