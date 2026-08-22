@@ -776,3 +776,130 @@ fn a_reaped_hosts_body_stays_and_the_next_host_takes_it_up_by_rezzing_it() {
     );
     drop(silent);
 }
+
+#[test]
+fn a_world_with_a_disk_and_a_log_replays_what_it_said_and_logged_what_it_was_told() {
+    let mut disk_path = std::env::temp_dir();
+    disk_path.push(format!("master-control-test-{}.disk", std::process::id()));
+    let mut log_path = std::env::temp_dir();
+    log_path.push(format!("master-control-test-{}.log", std::process::id()));
+    let config = Config {
+        disk: Some(disk_path.clone()),
+        input_log: Some(log_path.clone()),
+        hash_every: 4,
+        ..quick_config()
+    };
+    let wire = LinkDll::beside_executable().expect("wire");
+    let fingerprint = wire.world_fingerprint(&world_definition());
+
+    // A short life: a host rezzes a body, steers it, leaves; a spectator watches throughout.
+    let (last_tick, rows_seen) = {
+        let world = World::stand_up(config);
+        let (mut spectator, _) = wire
+            .connect(&world.address(), ROLE_SPECTATOR, fingerprint, 5_000)
+            .expect("spectator");
+        let (mut host, _) = wire
+            .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+            .expect("host");
+        rez(&mut host, 7);
+        let (mut seen, _) = await_tick(&mut host, 1);
+        for _ in 0..6 {
+            steer_creature(&mut host, 7, seen + 1, 1.0);
+            let (tick, _) = await_tick(&mut host, seen + 1);
+            seen = tick;
+        }
+        drop(host);
+        let (tick, rows) = await_tick(&mut spectator, seen + 4);
+        (tick, rows)
+    };
+    // The world is down: the Disk closed with BYE, the log flushed.
+
+    // Replay the Disk through the same DLL: the header is the world's, the frames are the
+    // world's, the body that lived is in them, and it ends with BYE then the end of the file.
+    let (mut replay, welcome) = wire.replay_open(&disk_path, fingerprint).expect("replay");
+    assert_eq!(welcome.world_fingerprint, fingerprint);
+    assert_eq!(welcome.current_tick, 0);
+    let mut saw_rez_7 = false;
+    let mut saw_letter_7 = false;
+    let mut saw_derez_7 = false;
+    let mut last_replayed_tick = 0;
+    let mut replayed_rows_at_last: Vec<master_control::link_dll::CreatureState> = Vec::new();
+    let mut ended_with_bye = false;
+    loop {
+        match replay.poll() {
+            Ok(Some(Message::Rez { header, .. })) if header.creature_id == 7 => saw_rez_7 = true,
+            Ok(Some(Message::Proprioception { header, .. })) if header.creature_id == 7 => {
+                saw_letter_7 = true
+            }
+            Ok(Some(Message::Derez(derez))) if derez.creature_id == 7 => saw_derez_7 = true,
+            Ok(Some(Message::TickState { header, states })) => {
+                assert!(
+                    header.tick > last_replayed_tick,
+                    "the Disk tells ticks in order, never twice"
+                );
+                last_replayed_tick = header.tick;
+                if header.tick == last_tick {
+                    replayed_rows_at_last = states;
+                }
+            }
+            Ok(Some(Message::Bye)) => ended_with_bye = true,
+            Ok(Some(_)) => {}
+            Ok(None) => {}
+            Err(master_control::link_dll::LNK_PEER_CLOSED) => break,
+            Err(status) => panic!("the replay failed: status {status}"),
+        }
+    }
+    assert!(
+        saw_rez_7 && saw_letter_7 && saw_derez_7,
+        "the body's whole life is on the Disk"
+    );
+    assert!(ended_with_bye, "the Disk ends as a world does");
+    assert!(last_replayed_tick >= last_tick);
+    assert_eq!(
+        replayed_rows_at_last.len(),
+        rows_seen.len(),
+        "what the spectator saw at tick {last_tick} is on the Disk, bit for bit"
+    );
+    for (replayed, seen) in replayed_rows_at_last.iter().zip(rows_seen.iter()) {
+        assert_eq!(replayed.creature_id, seen.creature_id);
+        assert_eq!(replayed.position, seen.position);
+        assert_eq!(replayed.yaw.to_bits(), seen.yaw.to_bits());
+    }
+    // The replay itself is a client: it has nobody to talk to.
+    assert_eq!(
+        replay.send_ping(1),
+        master_control::link_dll::LNK_BAD_ARGUMENT
+    );
+    drop(replay);
+
+    // The input log: the world it speaks, the host's intents judged and applied, hashes on the
+    // beat.
+    let text = std::fs::read_to_string(&log_path).expect("log");
+    assert!(text.contains(&format!("world {fingerprint:016X}\n")));
+    assert!(text.lines().any(|line| line.starts_with("judged ")
+        && line.contains(" 7 ")
+        && line.ends_with(" accepted")));
+    assert!(
+        text.lines()
+            .any(|line| line.starts_with("applied ") && line.contains(" 7 fresh 3F800000 ")),
+        "the applied intent is the bit pattern of 1.0"
+    );
+    assert!(
+        text.lines()
+            .any(|line| line.starts_with("applied ") && line.contains(" coasted "))
+    );
+    let hashes: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with("hash "))
+        .collect();
+    assert!(hashes.len() >= 2, "hashes on the beat: {}", hashes.len());
+    assert!(hashes.iter().all(|line| {
+        line.split(' ')
+            .nth(1)
+            .and_then(|tick| tick.parse::<u64>().ok())
+            .is_some_and(|tick| tick.is_multiple_of(4))
+    }));
+
+    let _ = std::fs::remove_file(&disk_path);
+    let _ = std::fs::remove_file(&log_path);
+}

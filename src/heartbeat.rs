@@ -24,10 +24,11 @@
 //! never stretches, and the log is tick-indexed either way.
 
 use crate::link_dll::{
-    Connection, Derez, Hello, LNK_OK, LinkDll, Listener, Message, ROLE_CREATURE_HOST,
-    ROLE_SPECTATOR, TickStateHeader, Welcome,
+    Actions, Connection, Derez, Hello, LNK_OK, LinkDll, Listener, Message, PROTOCOL_VERSION,
+    ROLE_CREATURE_HOST, ROLE_SPECTATOR, TickStateHeader, Welcome,
 };
-use crate::physics::{TICK_SECONDS, world_definition};
+use crate::physics::{TICK_SECONDS, state_hash, world_definition};
+use crate::record::InputLog;
 use crate::roster::{Admission, DerezRefusal, Model, Roster};
 use crate::script::{blinker_derezzes_at, set_dressing};
 use crate::stager::{ActionStager, Applied, Intent, Verdict};
@@ -49,6 +50,13 @@ pub struct Config {
     /// handshake blocks this loop, so a slow talker buys at most this much of a tick.
     pub handshake_timeout: Duration,
     pub verbose: bool,
+    /// Where to write the Disk - the state log, what the world said in the wire's own bytes.
+    /// None records nothing.
+    pub disk: Option<std::path::PathBuf>,
+    /// Where to write the input log - every intent judged and applied, and the periodic hash.
+    pub input_log: Option<std::path::PathBuf>,
+    /// Ticks between hashes in the input log: 32 is once a second.
+    pub hash_every: u32,
 }
 
 impl Default for Config {
@@ -60,6 +68,9 @@ impl Default for Config {
             max_catch_up: 4,
             handshake_timeout: Duration::from_millis(250),
             verbose: false,
+            disk: None,
+            input_log: None,
+            hash_every: 32,
         }
     }
 }
@@ -84,19 +95,74 @@ pub struct Heartbeat {
     overruns: u64,
     /// This world's fingerprint, as the DLL computed it: the door judges by it, WELCOME says it.
     world_fingerprint: u64,
+    /// The Disk: a citizen whose socket is a file, told everything every citizen is told.
+    disk: Option<Connection>,
+    /// The input log, when one was asked for.
+    input_log: Option<InputLog>,
 }
 
 impl Heartbeat {
     /// Listen and stand ready. Port 0 asks the operating system; [`Heartbeat::port`] answers.
     pub fn new(wire: &LinkDll, port: u16, config: Config) -> Result<Heartbeat, String> {
         let world_fingerprint = wire.world_fingerprint(&world_definition());
+        let start_unix_seconds = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_secs())
+            .unwrap_or(0);
+
+        // The Disk opens with the world's own facts, as a WELCOME would state them; the roster
+        // as it opens - the guest - is told to it first, exactly as to a late joiner.
+        let roster = Roster::with_the_guest();
+        let disk = match &config.disk {
+            Some(path) => {
+                let mut disk =
+                    wire.record_open(path, world_fingerprint, 0, TICK_SECONDS, start_unix_seconds)?;
+                for model in roster.models() {
+                    if !send_model(&mut disk, model) {
+                        return Err("the Disk refused the opening roster".to_string());
+                    }
+                }
+                disk.flush()
+                    .map_err(|status| format!("the Disk could not be written: status {status}"))?;
+                log_info(&format!("recording the world to {}.", path.display()));
+                Some(disk)
+            }
+            None => None,
+        };
+        let input_log = match &config.input_log {
+            Some(path) => {
+                let mut fingerprint = [0u8; 32];
+                (wire.vtable().protocol_fingerprint)(fingerprint.as_mut_ptr());
+                let log = InputLog::create(
+                    path,
+                    PROTOCOL_VERSION,
+                    &fingerprint,
+                    world_fingerprint,
+                    0,
+                    start_unix_seconds,
+                    config.hash_every,
+                )
+                .map_err(|error| {
+                    format!(
+                        "could not open the input log at {}: {error}",
+                        path.display()
+                    )
+                })?;
+                log_info(&format!("logging every intent to {}.", path.display()));
+                Some(log)
+            }
+            None => None,
+        };
+
         Ok(Heartbeat {
             listener: wire.listen(port, world_fingerprint)?,
             world_fingerprint,
+            disk,
+            input_log,
             config,
             citizens: Vec::new(),
             stager: ActionStager::default(),
-            roster: Roster::with_the_guest(),
+            roster,
             tick: 0,
             next_client_id: 1,
             overruns: 0,
@@ -200,6 +266,7 @@ impl Heartbeat {
         let tick = self.tick;
         let stager = &mut self.stager;
         let roster = &mut self.roster;
+        let input_log = &mut self.input_log;
         let mut rezzed: Vec<Model> = Vec::new();
         let mut derezzed: Vec<u32> = Vec::new();
 
@@ -216,14 +283,16 @@ impl Heartbeat {
                             Message::Actions(actions) if citizen.role == ROLE_CREATURE_HOST => {
                                 let sender = citizen.client_id;
                                 match roster.owner_of(actions.creature_id) {
-                                    None => record_verdict(
-                                        sender,
-                                        Verdict::RefusedNotEmbodied {
+                                    None => {
+                                        let verdict = Verdict::RefusedNotEmbodied {
                                             creature_id: actions.creature_id,
                                             sender,
-                                        },
-                                        verbose,
-                                    ),
+                                        };
+                                        if let Some(log) = input_log.as_mut() {
+                                            log_judged(log, sender, &actions, next_tick, &[verdict]);
+                                        }
+                                        record_verdict(sender, verdict, verbose);
+                                    }
                                     Some(owner) => {
                                         if owner.is_none() && roster.claim(actions.creature_id, sender) {
                                             stager.reassign(actions.creature_id, sender);
@@ -232,7 +301,11 @@ impl Heartbeat {
                                                 actions.creature_id
                                             ));
                                         }
-                                        for verdict in stager.feed(sender, &actions, next_tick) {
+                                        let verdicts = stager.feed(sender, &actions, next_tick);
+                                        if let Some(log) = input_log.as_mut() {
+                                            log_judged(log, sender, &actions, next_tick, &verdicts);
+                                        }
+                                        for verdict in verdicts {
                                             record_verdict(sender, verdict, verbose);
                                         }
                                     }
@@ -353,6 +426,24 @@ impl Heartbeat {
             return;
         }
         let tick = self.tick;
+        if let Some(disk) = self.disk.as_mut() {
+            let mut told = true;
+            for model in rezzed {
+                told = told && send_model(disk, model);
+            }
+            for creature_id in derezzed {
+                let derez = Derez {
+                    tick,
+                    creature_id: *creature_id,
+                    reserved0: [0; 4],
+                };
+                told = told && disk.send_derez(&derez) == LNK_OK;
+            }
+            if !(told && disk.flush().is_ok()) {
+                log_warn("the Disk could not be written - recording stops here.");
+                self.disk = None;
+            }
+        }
         let roster = &mut self.roster;
         let stager = &mut self.stager;
         let mut late_leaves: Vec<u32> = Vec::new();
@@ -421,12 +512,24 @@ impl Heartbeat {
         // The validator is the only path into the world: whatever the stager applied is
         // sanitised and clamped against each body's own bounds inside the roster's step.
         let stager = &mut self.stager;
+        let input_log = &mut self.input_log;
         let telling = self.roster.step(tick, |creature_id| {
-            match stager.intent_for(creature_id, tick) {
+            let applied = stager.intent_for(creature_id, tick);
+            if let Some(log) = input_log.as_mut() {
+                log.applied(tick, creature_id, applied);
+            }
+            match applied {
                 Applied::Fresh(intent) | Applied::Repeated(intent) => intent,
                 Applied::Coasted => Intent::default(),
             }
         });
+        if let Some(log) = input_log.as_mut() {
+            if self.config.hash_every > 0 && tick.is_multiple_of(u64::from(self.config.hash_every))
+            {
+                log.hash(tick, state_hash(self.roster.bodies()));
+            }
+            log.flush();
+        }
         let dressing = set_dressing(tick);
         let mut rows = dressing.rows;
         rows.extend(telling.rows);
@@ -445,6 +548,24 @@ impl Heartbeat {
             creature_id: 3,
             reserved0: [0; 4],
         });
+
+        // The Disk first: it is told everything, every letter included - the record is whole.
+        if let Some(disk) = self.disk.as_mut() {
+            let mut told = disk.send_tick_state(&header, &rows) == LNK_OK;
+            if told && let Some(derez) = &derez {
+                told = disk.send_derez(derez) == LNK_OK;
+            }
+            for event in &events {
+                told = told && disk.send_event(event) == LNK_OK;
+            }
+            for letter in &letters {
+                told = told && disk.send_proprioception(&letter.header, &letter.contacts) == LNK_OK;
+            }
+            if !(told && disk.flush().is_ok()) {
+                log_warn("the Disk could not be written - recording stops here.");
+                self.disk = None;
+            }
+        }
 
         // Per-subscriber sends, per the composable-broadcast rule: the loop is the seam
         // interest management drops into, even while everyone still hears everything.
@@ -552,6 +673,49 @@ fn role_name(hello: &Hello) -> &'static str {
         ROLE_SPECTATOR => "a spectator",
         ROLE_CREATURE_HOST => "a creature host",
         _ => "an unknown role the wire should have refused",
+    }
+}
+
+/// The judged records for one ACTIONS message: the piggybacked previous (when the message
+/// carries one) and the current, in the order the stager judged them.
+fn log_judged(
+    log: &mut InputLog,
+    sender: u64,
+    actions: &Actions,
+    next_tick: u64,
+    verdicts: &[Verdict],
+) {
+    let mut verdict = verdicts.iter().copied();
+    if actions.tick > 0
+        && verdicts.len() == 2
+        && let Some(previous) = verdict.next()
+    {
+        log.judged(
+            sender,
+            actions.creature_id,
+            actions.tick - 1,
+            next_tick,
+            Intent {
+                forward_speed: actions.previous_forward_speed,
+                turn_rate: actions.previous_turn_rate,
+                vocalisation: actions.previous_vocalisation,
+            },
+            previous,
+        );
+    }
+    if let Some(current) = verdict.next() {
+        log.judged(
+            sender,
+            actions.creature_id,
+            actions.tick,
+            next_tick,
+            Intent {
+                forward_speed: actions.desired_forward_speed,
+                turn_rate: actions.desired_turn_rate,
+                vocalisation: actions.vocalisation_strength,
+            },
+            current,
+        );
     }
 }
 
