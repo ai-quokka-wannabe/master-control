@@ -990,6 +990,45 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
         other => panic!("a lie must be found: {other:?}"),
     }
 
+    // Given a later file of a rollover - a Disk that begins after the divergence - Clu names
+    // it and asks for the earlier one, rather than claiming the Disk ends early.
+    let mut later_path = std::env::temp_dir();
+    later_path.push(format!(
+        "master-control-clu-{}-later.disk",
+        std::process::id()
+    ));
+    {
+        let roster = master_control::roster::Roster::with_the_guest();
+        let mut later = wire
+            .record_open(&later_path, fingerprint, 1_000, 0.031_25, 0)
+            .expect("a later Disk opens");
+        for model in roster.models() {
+            assert_eq!(
+                later.send_rez(
+                    &model.header,
+                    &model.vertices,
+                    &model.triangles,
+                    &model.materials
+                ),
+                master_control::link_dll::LNK_OK
+            );
+        }
+        let _ = later.flush();
+    }
+    match master_control::clu::check(&lie_path, Some(&later_path), &wire)
+        .expect("clu reads the lie")
+    {
+        master_control::clu::Verdict::Diverged { diff, .. } => {
+            assert!(
+                diff.iter().any(|line| line.contains("begins at tick 1000")
+                    && line.contains("give the earlier file")),
+                "a later rollover file is named: {diff:?}"
+            );
+        }
+        other => panic!("the lie is still a lie: {other:?}"),
+    }
+    let _ = std::fs::remove_file(&later_path);
+
     // Another world's log is refused in words, never re-simulated.
     let other_world = text.replacen(
         &format!("world {fingerprint:016X}"),
@@ -1394,4 +1433,101 @@ fn a_body_reaching_too_far_or_subnormal_is_refused_by_the_world_and_a_cap_sized_
         "eight ticks with a thousand-vertex hull took {:?}",
         started.elapsed()
     );
+}
+
+#[test]
+fn a_disk_rolls_over_at_a_size_and_every_file_is_whole() {
+    let mut disk_path = std::env::temp_dir();
+    disk_path.push(format!("master-control-roll-{}.disk", std::process::id()));
+    let config = Config {
+        disk: Some(disk_path.clone()),
+        disk_roll_bytes: 4 * 1024,
+        ..quick_config()
+    };
+    let wire = LinkDll::beside_executable().expect("wire");
+    let fingerprint = wire.world_fingerprint(&world_definition());
+
+    let last_tick = {
+        let world = World::stand_up(config);
+        let (mut spectator, _) = wire
+            .connect(&world.address(), ROLE_SPECTATOR, fingerprint, 5_000)
+            .expect("spectator");
+        let (mut host, _) = wire
+            .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+            .expect("host");
+        rez(&mut host, 7);
+        // Three orbiters, the guest and a body, a letter a tick: some 300 bytes a tick, so a
+        // 4 KiB limit rolls every dozen or so - several files in sixty ticks.
+        let (tick, _) = await_tick(&mut spectator, 60);
+        drop(host);
+        tick
+    };
+
+    // The files: the named one, then .0002, .0003 ... each one a Disk of its own.
+    let stem = disk_path.with_extension("");
+    let second = stem.with_extension("0002.disk");
+    let third = stem.with_extension("0003.disk");
+    assert!(second.exists(), "the Disk rolled over at least once");
+    assert!(third.exists(), "and again");
+    let mut files = vec![disk_path.clone(), second, third];
+    let mut number = 4;
+    loop {
+        let next = stem.with_extension(format!("{number:04}.disk"));
+        if !next.exists() {
+            break;
+        }
+        files.push(next);
+        number += 1;
+    }
+    let mut previous_end = None;
+    for (index, file) in files.iter().enumerate() {
+        let (mut replay, welcome) = wire.replay_open(file, fingerprint).expect("each replays");
+        if let Some(end) = previous_end {
+            assert_eq!(
+                welcome.current_tick, end,
+                "a file begins at the tick the one before it ended with"
+            );
+        } else {
+            assert_eq!(welcome.current_tick, 0);
+        }
+        let mut rezzed_before_rows: Vec<u32> = Vec::new();
+        let mut first_row_tick = None;
+        let mut last_row_tick = 0;
+        let mut ended_with_bye = false;
+        loop {
+            match replay.poll() {
+                Ok(Some(Message::Rez { header, .. })) if first_row_tick.is_none() => {
+                    rezzed_before_rows.push(header.creature_id);
+                }
+                Ok(Some(Message::TickState { header, .. })) => {
+                    first_row_tick.get_or_insert(header.tick);
+                    last_row_tick = header.tick;
+                }
+                Ok(Some(Message::Bye)) => ended_with_bye = true,
+                Ok(Some(_)) | Ok(None) => {}
+                Err(master_control::link_dll::LNK_PEER_CLOSED) => break,
+                Err(status) => panic!("replay of {} failed: status {status}", file.display()),
+            }
+        }
+        assert!(ended_with_bye, "file {index} ends as a world does");
+        assert_eq!(
+            first_row_tick.expect("every file tells at least one tick"),
+            welcome.current_tick + 1,
+            "the first row is the tick after the header's"
+        );
+        assert!(
+            rezzed_before_rows.contains(&GUEST_CREATURE_ID),
+            "file {index} opens with the live roster, as a late joiner is told"
+        );
+        if index > 0 && last_row_tick < last_tick - 8 {
+            assert!(
+                rezzed_before_rows.contains(&7),
+                "the body that lived is rezzed at the head of file {index}, not only in the first"
+            );
+        }
+        previous_end = Some(last_row_tick);
+    }
+    for file in &files {
+        let _ = std::fs::remove_file(file);
+    }
 }

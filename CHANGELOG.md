@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Disk rolls over.** `--disk-roll <MiB>` (48 by default, 0 never): once the file reaches
+  the size, the tick just told is its last - it closes with `BYE` as a world does - and
+  `<stem>.0002.disk`, `.0003` and on open at that very tick with the live roster's `REZ` at
+  their head, exactly as a late joiner is told, so any one file replays alone through the same
+  DLL. Judged every eighth tick, a size being a syscall. Clu, handed a later file than the
+  divergence, names it and asks for the earlier one rather than claiming the Disk ends early.
+  The roll is logged with the tick, the bytes, the file closed and the file opened. Tested:
+  a 4 KiB limit over sixty ticks yields four files, each ending in `BYE`, each beginning at the
+  tick the one before ended with, each opening with the roster and its first row the tick
+  after its header; one breakage round (rollover files opened bare) caught.
 - **Etape 3, validation: the adversarial suite, and the three things it found.** Subnormals are
   finite, so `is_finite` let them through, and a machine stepping with flush-to-zero reads
   them as zero where another reads them as themselves - a world that replays bit for bit on
