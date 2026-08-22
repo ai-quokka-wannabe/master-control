@@ -782,7 +782,20 @@ mod tests {
             (rows[1].position[2] - (SPAWN_PAD_Z - TICK_SECONDS)).abs() < 1e-6,
             "the guest walked a metre a second"
         );
-        assert_eq!(events.len(), 2, "two voices started");
+        // Two voices started - and two scratches, because both walked and feet are scratches.
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e.kind == EVENT_VOCALISATION)
+                .count(),
+            2,
+            "two voices started"
+        );
+        assert_eq!(
+            events.iter().filter(|e| e.kind == EVENT_SCRATCH).count(),
+            2,
+            "two walkers scratch"
+        );
         // One letter: the guest is nobody's, and nobody is written to about it.
         assert_eq!(letters.len(), 1);
         assert_eq!(letters[0].owner, 1);
@@ -806,7 +819,7 @@ mod tests {
             vocalisation: 0.5,
         });
         assert!(
-            later.events.is_empty(),
+            later.events.iter().all(|e| e.kind != EVENT_VOCALISATION),
             "a continuing call is already in the rows"
         );
         roster.claim(GUEST_CREATURE_ID, 2);

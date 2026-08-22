@@ -432,13 +432,27 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
             };
         let depth = standing - y;
         match body.hull.as_ref() {
-            None => body.contacts.push(Contact {
-                position: [0.0, -BODY_HALF_HEIGHT, 0.0],
-                impulse: [0.0, support, 0.0],
-                normal: [0.0, 1.0, 0.0],
-                depth,
-                slip: [0.0; 3],
-            }),
+            None => {
+                // The point proxy's one foot slips as any foot does: the walk, in the body's
+                // frame - straight down -Z when grounded, the carried velocity when landing.
+                let forward = forward_for(yaw_after);
+                let slip_world = if body.grounded || arrested >= 0.0 {
+                    [
+                        forward[0] * body.forward_speed,
+                        0.0,
+                        forward[2] * body.forward_speed,
+                    ]
+                } else {
+                    [velocity_before[0], 0.0, velocity_before[2]]
+                };
+                body.contacts.push(Contact {
+                    position: [0.0, -BODY_HALF_HEIGHT, 0.0],
+                    impulse: [0.0, support, 0.0],
+                    normal: [0.0, 1.0, 0.0],
+                    depth,
+                    slip: world_to_body_direction(slip_world, yaw_after),
+                });
+            }
             Some(hull) => {
                 // The vertices resting on their floors once the body stands: within a hair of
                 // their own ground, in a fixed order - the hull's.
