@@ -19,9 +19,12 @@
 //! observed from outside, which is the only place they are real.
 
 use master_control::heartbeat::{Config, Heartbeat};
-use master_control::link_dll::{Actions, LinkDll, Message, ROLE_CREATURE_HOST, ROLE_SPECTATOR};
+use master_control::link_dll::{
+    Actions, LinkDll, Message, ROLE_CREATURE_HOST, ROLE_SPECTATOR, Rez, RezMaterial, RezTriangle,
+    RezVertex,
+};
 use master_control::physics::world_definition;
-use master_control::script::GUEST_CREATURE_ID;
+use master_control::roster::GUEST_CREATURE_ID;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -396,4 +399,324 @@ fn a_citizen_of_another_world_is_refused_at_the_door() {
         welcome.world_fingerprint,
         wire.world_fingerprint(&world_definition())
     );
+}
+
+/// Poll until a message matching `wanted` arrives, answering PINGs on the way.
+fn await_message(
+    connection: &mut master_control::link_dll::Connection,
+    what: &str,
+    mut wanted: impl FnMut(&Message) -> bool,
+) -> Message {
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        match connection.poll().expect("the wire stays healthy") {
+            Some(Message::Ping(ping)) => {
+                let _ = connection.send_pong(ping.nonce);
+                let _ = connection.flush();
+            }
+            Some(message) if wanted(&message) => return message,
+            Some(_) | None => {}
+        }
+        assert!(Instant::now() < deadline, "{what} never arrived");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn a_body(creature_id: u32) -> (Rez, Vec<RezVertex>, Vec<RezTriangle>, Vec<RezMaterial>) {
+    let header = Rez {
+        creature_id,
+        max_forward_speed: 2.0,
+        max_turn_rate: 1.0,
+        max_vocalisation_strength: 1.0,
+        max_contact_count: 4,
+        vertex_count: 3,
+        triangle_count: 1,
+        material_count: 1,
+    };
+    let vertices = vec![
+        RezVertex {
+            position: [0.0, 0.0, 0.0],
+        },
+        RezVertex {
+            position: [0.1, 0.0, 0.0],
+        },
+        RezVertex {
+            position: [0.0, 0.1, 0.0],
+        },
+    ];
+    let triangles = vec![RezTriangle {
+        vertices: [0, 1, 2],
+        material: 0,
+    }];
+    let materials = vec![RezMaterial {
+        colour: [0.2, 0.9, 0.4],
+        index_of_refraction: 1.5,
+        emission: [0.0, 0.5, 0.0],
+        transmission: 0.0,
+    }];
+    (header, vertices, triangles, materials)
+}
+
+fn rez(connection: &mut master_control::link_dll::Connection, creature_id: u32) {
+    let (header, vertices, triangles, materials) = a_body(creature_id);
+    assert_eq!(
+        connection.send_rez(&header, &vertices, &triangles, &materials),
+        master_control::link_dll::LNK_OK
+    );
+    let _ = connection.flush().expect("flush");
+}
+
+fn steer_creature(
+    connection: &mut master_control::link_dll::Connection,
+    creature_id: u32,
+    tick: u64,
+    forward: f32,
+) {
+    let actions = Actions {
+        tick,
+        creature_id,
+        desired_forward_speed: forward,
+        desired_turn_rate: 0.0,
+        vocalisation_strength: 0.0,
+        previous_forward_speed: 0.0,
+        previous_turn_rate: 0.0,
+        previous_vocalisation: 0.0,
+        reserved0: [0; 4],
+    };
+    assert_eq!(
+        connection.send_actions(&actions),
+        master_control::link_dll::LNK_OK
+    );
+    let _ = connection.flush().expect("flush");
+}
+
+#[test]
+fn a_rezzed_body_is_relayed_to_everyone_replayed_to_late_joiners_and_leaves_on_bye() {
+    let world = World::stand_up(quick_config());
+    let wire = LinkDll::beside_executable().expect("wire");
+    let fingerprint = wire.world_fingerprint(&world_definition());
+
+    let (mut spectator, _) = wire
+        .connect(&world.address(), ROLE_SPECTATOR, fingerprint, 5_000)
+        .expect("spectator");
+    // The world opens with its own guest, bodiless: even the first joiner is told it.
+    let guest = await_message(
+        &mut spectator,
+        "the guest REZ",
+        |message| matches!(message, Message::Rez { header, .. } if header.creature_id == GUEST_CREATURE_ID),
+    );
+    let Message::Rez { header, .. } = guest else {
+        unreachable!()
+    };
+    assert_eq!(header.vertex_count, 0, "the world's own guest is bodiless");
+
+    let (mut host, _) = wire
+        .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+        .expect("host");
+    rez(&mut host, 7);
+
+    // Relayed to the spectator verbatim - and to the host itself, which is its acknowledgement.
+    for (who, connection) in [("spectator", &mut spectator), ("host", &mut host)] {
+        let heard = await_message(
+            connection,
+            &format!("creature 7 REZ at the {who}"),
+            |m| matches!(m, Message::Rez { header, .. } if header.creature_id == 7),
+        );
+        let Message::Rez {
+            header,
+            vertices,
+            triangles,
+            materials,
+        } = heard
+        else {
+            unreachable!()
+        };
+        let (sent_header, sent_vertices, sent_triangles, sent_materials) = a_body(7);
+        assert_eq!(header, sent_header);
+        assert_eq!(vertices, sent_vertices);
+        assert_eq!(triangles, sent_triangles);
+        assert_eq!(materials, sent_materials);
+    }
+    let (tick, states) = await_tick(&mut spectator, 1);
+    assert!(
+        states.iter().any(|state| state.creature_id == 7),
+        "the body stands in the world at tick {tick}"
+    );
+
+    // A late joiner is told the roster before its first tick: 7 then the guest, in id order.
+    let (mut late, _) = wire
+        .connect(&world.address(), ROLE_SPECTATOR, fingerprint, 5_000)
+        .expect("late joiner");
+    let mut told = Vec::new();
+    loop {
+        match await_message(&mut late, "the replay", |m| {
+            matches!(m, Message::Rez { .. } | Message::TickState { .. })
+        }) {
+            Message::Rez { header, .. } => told.push(header.creature_id),
+            Message::TickState { .. } => break,
+            _ => unreachable!(),
+        }
+    }
+    assert_eq!(
+        told,
+        vec![7, GUEST_CREATURE_ID],
+        "roster order, before the first tick"
+    );
+
+    // The host steers its own body for a stretch: it walks at its own bound, not the guest's.
+    let (mut seen, _) = await_tick(&mut host, 1);
+    for _ in 0..8 {
+        steer_creature(&mut host, 7, seen + 1, 5.0);
+        let (tick, _) = await_tick(&mut host, seen + 1);
+        seen = tick;
+    }
+    let (_, states) = await_tick(&mut host, seen);
+    let body = states
+        .iter()
+        .find(|state| state.creature_id == 7)
+        .expect("embodied");
+    assert!(
+        (body.velocity[2] + 2.0).abs() < 1e-3,
+        "clamped to the body's own 2 m/s, got {:?}",
+        body.velocity
+    );
+
+    // BYE is a leave: the body goes, and every citizen hears the DEREZ.
+    drop(host);
+    for (who, connection) in [("spectator", &mut spectator), ("late joiner", &mut late)] {
+        let gone = await_message(
+            connection,
+            &format!("creature 7 DEREZ at the {who}"),
+            |m| matches!(m, Message::Derez(derez) if derez.creature_id == 7),
+        );
+        let Message::Derez(derez) = gone else {
+            unreachable!()
+        };
+        let (_, states) = await_tick(connection, derez.tick + 1);
+        assert!(
+            !states.iter().any(|state| state.creature_id == 7),
+            "the body left with its host"
+        );
+    }
+}
+
+#[test]
+fn an_identity_another_host_wears_is_refused_and_an_unrezzed_one_cannot_be_steered() {
+    let world = World::stand_up(quick_config());
+    let wire = LinkDll::beside_executable().expect("wire");
+    let fingerprint = wire.world_fingerprint(&world_definition());
+
+    let (mut first, _) = wire
+        .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+        .expect("first host");
+    let (mut second, _) = wire
+        .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+        .expect("second host");
+    rez(&mut first, 7);
+    // Both hear the one legitimate relay - the first host's being its acknowledgement.
+    for connection in [&mut second, &mut first] {
+        await_message(
+            connection,
+            "creature 7 REZ",
+            |m| matches!(m, Message::Rez { header, .. } if header.creature_id == 7),
+        );
+    }
+
+    // The second host tries to wear 7 too, and steers 9, which nobody wears.
+    rez(&mut second, 7);
+    steer_creature(&mut second, 9, 0, 1.0);
+
+    // Neither changes the world: no second REZ of 7 is relayed within a few ticks, and 9
+    // never stands. Watched from the very first message - a helper that waits for a tick
+    // would swallow the relay this test exists to not hear.
+    let mut until: Option<u64> = None;
+    let mut relayed_again = false;
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        match first.poll().expect("healthy") {
+            Some(Message::Rez { header, .. }) if header.creature_id == 7 => {
+                relayed_again = true;
+            }
+            Some(Message::TickState { header, states }) => {
+                assert!(
+                    !states.iter().any(|s| s.creature_id == 9),
+                    "9 was never rezzed"
+                );
+                let stop_at = *until.get_or_insert(header.tick + 8);
+                if header.tick >= stop_at {
+                    break;
+                }
+            }
+            Some(Message::Ping(ping)) => {
+                let _ = first.send_pong(ping.nonce);
+                let _ = first.flush();
+            }
+            Some(_) | None => std::thread::sleep(Duration::from_millis(1)),
+        }
+        assert!(Instant::now() < deadline, "the world stopped talking");
+    }
+    assert!(!relayed_again, "a refused REZ is not relayed");
+    drop(second);
+}
+
+#[test]
+fn a_reaped_hosts_body_stays_and_the_next_host_takes_it_up_by_rezzing_it() {
+    let config = Config {
+        keepalive_ping: Duration::from_millis(100),
+        keepalive_dead: Duration::from_millis(400),
+        ..quick_config()
+    };
+    let world = World::stand_up(config);
+    let wire = LinkDll::beside_executable().expect("wire");
+    let fingerprint = wire.world_fingerprint(&world_definition());
+
+    let (mut spectator, _) = wire
+        .connect(&world.address(), ROLE_SPECTATOR, fingerprint, 5_000)
+        .expect("spectator");
+    let (mut silent, _) = wire
+        .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+        .expect("a host that will fall silent");
+    rez(&mut silent, 7);
+    await_message(
+        &mut spectator,
+        "creature 7 REZ",
+        |m| matches!(m, Message::Rez { header, .. } if header.creature_id == 7),
+    );
+
+    // The host says nothing - not even PONG - and is reaped; the spectator keeps answering
+    // its pings meanwhile (await_tick does), so only the silent one goes. The body stays.
+    let (start, _) = await_tick(&mut spectator, 1);
+    let (tick, states) = await_tick(&mut spectator, start + 24);
+    assert!(
+        states.iter().any(|state| state.creature_id == 7),
+        "a reaped host's body stays embodied at tick {tick}"
+    );
+
+    // The successor rezzes the same identity and takes it up: relayed again, and steerable.
+    let (mut successor, _) = wire
+        .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+        .expect("successor");
+    rez(&mut successor, 7);
+    await_message(
+        &mut spectator,
+        "creature 7 REZ from the successor",
+        |m| matches!(m, Message::Rez { header, .. } if header.creature_id == 7),
+    );
+    let (mut seen, _) = await_tick(&mut successor, 1);
+    for _ in 0..8 {
+        steer_creature(&mut successor, 7, seen + 1, 1.0);
+        let (tick, _) = await_tick(&mut successor, seen + 1);
+        seen = tick;
+    }
+    let (_, states) = await_tick(&mut successor, seen);
+    let body = states
+        .iter()
+        .find(|s| s.creature_id == 7)
+        .expect("embodied");
+    assert!(
+        body.velocity[2] < -0.5,
+        "the successor steers it: {:?}",
+        body.velocity
+    );
+    drop(silent);
 }

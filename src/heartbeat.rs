@@ -27,10 +27,9 @@ use crate::link_dll::{
     Connection, Derez, Hello, LNK_OK, LinkDll, Listener, Message, ROLE_CREATURE_HOST,
     ROLE_SPECTATOR, TickStateHeader, Welcome,
 };
-use crate::physics::{Body, FIRST_BODY, TICK_SECONDS, sanitise_and_clamp, world_definition};
-use crate::script::{
-    GUEST_CREATURE_ID, GUEST_SPAWN_X, GUEST_SPAWN_Z, blinker_derezzes_at, floor, tell,
-};
+use crate::physics::{TICK_SECONDS, world_definition};
+use crate::roster::{Admission, DerezRefusal, Model, Roster};
+use crate::script::{blinker_derezzes_at, set_dressing};
 use crate::stager::{ActionStager, Applied, Intent, Verdict};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -79,7 +78,7 @@ pub struct Heartbeat {
     config: Config,
     citizens: Vec<Citizen>,
     stager: ActionStager,
-    guest: Body,
+    roster: Roster,
     tick: u64,
     next_client_id: u64,
     overruns: u64,
@@ -97,12 +96,7 @@ impl Heartbeat {
             config,
             citizens: Vec::new(),
             stager: ActionStager::default(),
-            guest: Body::standing_at(
-                GUEST_SPAWN_X,
-                GUEST_SPAWN_Z,
-                floor(GUEST_SPAWN_X, GUEST_SPAWN_Z),
-                FIRST_BODY,
-            ),
+            roster: Roster::with_the_guest(),
             tick: 0,
             next_client_id: 1,
             overruns: 0,
@@ -172,10 +166,17 @@ impl Heartbeat {
                 client_id: client_id as u32,
                 world_fingerprint: self.world_fingerprint,
             };
-            if connection.send_welcome(&welcome) == LNK_OK && connection.flush().is_ok() {
+            // The late joiner is told every body before its first tick, verbatim - the same
+            // REZ the first citizen heard, so an hour's lateness costs nothing but the hour.
+            let mut told = connection.send_welcome(&welcome) == LNK_OK;
+            for model in self.roster.models() {
+                told = told && send_model(&mut connection, model);
+            }
+            if told && connection.flush().is_ok() {
                 log_info(&format!(
-                    "client {client_id} joined as {}.",
-                    role_name(&hello)
+                    "client {client_id} joined as {} and was told {} body(ies).",
+                    role_name(&hello),
+                    self.roster.len()
                 ));
                 let now = Instant::now();
                 self.citizens.push(Citizen {
@@ -189,12 +190,18 @@ impl Heartbeat {
         }
     }
 
-    /// Drain every citizen up to the quota; judge ACTIONS; answer PINGs; note who spoke.
+    /// Drain every citizen up to the quota; judge ACTIONS, REZ and DEREZ; answer PINGs; note
+    /// who spoke. Relays owed to everyone (a body rezzed, a creature gone) are collected and
+    /// sent after the drain, so a citizen is never written to while another is being read.
     fn listen_to_citizens(&mut self) {
         let next_tick = self.tick + 1;
         let verbose = self.config.verbose;
         let quota = self.config.quota_per_tick;
+        let tick = self.tick;
         let stager = &mut self.stager;
+        let roster = &mut self.roster;
+        let mut rezzed: Vec<Model> = Vec::new();
+        let mut derezzed: Vec<u32> = Vec::new();
 
         self.citizens.retain_mut(|citizen| {
             for _ in 0..quota {
@@ -204,18 +211,112 @@ impl Heartbeat {
                         citizen.last_heard = Instant::now();
                         match message {
                             // The role guard is belt on top of the wire's braces: a spectator's
-                            // ACTIONS never reach here, because the DLL's server half already
-                            // refused them and the poll error dropped the connection.
+                            // ACTIONS or REZ never reach here, because the DLL's server half
+                            // already refused them and the poll error dropped the connection.
                             Message::Actions(actions) if citizen.role == ROLE_CREATURE_HOST => {
-                                for verdict in stager.feed(citizen.client_id, &actions, next_tick) {
-                                    record_verdict(citizen.client_id, verdict, verbose);
+                                let sender = citizen.client_id;
+                                match roster.owner_of(actions.creature_id) {
+                                    None => record_verdict(
+                                        sender,
+                                        Verdict::RefusedNotEmbodied {
+                                            creature_id: actions.creature_id,
+                                            sender,
+                                        },
+                                        verbose,
+                                    ),
+                                    Some(owner) => {
+                                        if owner.is_none() && roster.claim(actions.creature_id, sender) {
+                                            stager.reassign(actions.creature_id, sender);
+                                            log_info(&format!(
+                                                "client {sender} took up creature {} by steering it.",
+                                                actions.creature_id
+                                            ));
+                                        }
+                                        for verdict in stager.feed(sender, &actions, next_tick) {
+                                            record_verdict(sender, verdict, verbose);
+                                        }
+                                    }
+                                }
+                            }
+                            Message::Rez {
+                                header,
+                                vertices,
+                                triangles,
+                                materials,
+                            } if citizen.role == ROLE_CREATURE_HOST => {
+                                let sender = citizen.client_id;
+                                let creature_id = header.creature_id;
+                                let model = Model {
+                                    header,
+                                    vertices,
+                                    triangles,
+                                    materials,
+                                };
+                                match roster.rez(sender, model.clone()) {
+                                    Admission::Embodied => {
+                                        stager.reassign(creature_id, sender);
+                                        log_info(&format!(
+                                            "client {sender} rezzed creature {creature_id} ({} vertices, {} triangles, {} materials) - embodied at tick {tick}.",
+                                            model.header.vertex_count, model.header.triangle_count, model.header.material_count
+                                        ));
+                                        rezzed.push(model);
+                                    }
+                                    Admission::Adopted => {
+                                        stager.reassign(creature_id, sender);
+                                        log_info(&format!(
+                                            "client {sender} rezzed creature {creature_id} again - taken up where it stands, wearing the new body."
+                                        ));
+                                        rezzed.push(model);
+                                    }
+                                    Admission::RefusedOwned { owner } => log_info(&format!(
+                                        "client {sender} tried to rez creature {creature_id}, which client {owner} wears - refused."
+                                    )),
+                                    Admission::RefusedFull => log_warn(&format!(
+                                        "client {sender} tried to rez creature {creature_id} into a full world ({} bodies) - refused.",
+                                        roster.len()
+                                    )),
+                                    Admission::RefusedBounds(reason) => log_info(&format!(
+                                        "client {sender} tried to rez creature {creature_id} with bounds outside the world - {reason} - refused."
+                                    )),
+                                }
+                            }
+                            Message::Derez(derez) if citizen.role == ROLE_CREATURE_HOST => {
+                                let sender = citizen.client_id;
+                                match roster.derez(sender, derez.creature_id) {
+                                    Ok(()) => {
+                                        stager.release(derez.creature_id);
+                                        log_info(&format!(
+                                            "client {sender} derezzed creature {} - it leaves the world at tick {tick}.",
+                                            derez.creature_id
+                                        ));
+                                        derezzed.push(derez.creature_id);
+                                    }
+                                    Err(DerezRefusal::NotResident) => log_info(&format!(
+                                        "client {sender} tried to derez creature {}, which nobody wears - ignored.",
+                                        derez.creature_id
+                                    )),
+                                    Err(DerezRefusal::NotOwner { owner }) => log_info(&format!(
+                                        "client {sender} tried to derez creature {}, which it does not own (owner {owner:?}) - refused.",
+                                        derez.creature_id
+                                    )),
                                 }
                             }
                             Message::Ping(ping) => {
                                 let _ = citizen.connection.send_pong(ping.nonce);
                             }
                             Message::Bye => {
-                                log_info(&format!("client {} said BYE.", citizen.client_id));
+                                // A leave, not a crash: the host's creatures leave with it,
+                                // and every citizen hears each DEREZ.
+                                let leaving = roster.leave(citizen.client_id);
+                                for id in &leaving {
+                                    stager.release(*id);
+                                }
+                                log_info(&format!(
+                                    "client {} said BYE - {} creature(s) leave with it.",
+                                    citizen.client_id,
+                                    leaving.len()
+                                ));
+                                derezzed.extend(leaving);
                                 stager.owner_died(citizen.client_id);
                                 return false;
                             }
@@ -226,13 +327,58 @@ impl Heartbeat {
                         }
                     }
                     Err(status) => {
-                        log_info(&format!("client {} is gone (status {status}).", citizen.client_id));
+                        // A crash, not a leave: the creatures stay embodied on the neutral
+                        // reflex, ownerless, for the next host that rezzes them.
+                        let orphaned = roster.orphan(citizen.client_id);
+                        log_info(&format!(
+                            "client {} is gone (status {status}) - {} creature(s) stay embodied, ownerless.",
+                            citizen.client_id,
+                            orphaned.len()
+                        ));
                         stager.owner_died(citizen.client_id);
                         return false;
                     }
                 }
             }
             true
+        });
+
+        self.relay(&rezzed, &derezzed);
+    }
+
+    /// Tell every citizen what changed in the roster: each rezzed body verbatim, each leave as
+    /// a DEREZ stamped with the current tick. A citizen that cannot be told is dropped.
+    fn relay(&mut self, rezzed: &[Model], derezzed: &[u32]) {
+        if rezzed.is_empty() && derezzed.is_empty() {
+            return;
+        }
+        let tick = self.tick;
+        let roster = &mut self.roster;
+        let stager = &mut self.stager;
+        self.citizens.retain_mut(|citizen| {
+            let mut alive = true;
+            for model in rezzed {
+                alive = alive && send_model(&mut citizen.connection, model);
+            }
+            for creature_id in derezzed {
+                let derez = Derez {
+                    tick,
+                    creature_id: *creature_id,
+                    reserved0: [0; 4],
+                };
+                alive = alive && citizen.connection.send_derez(&derez) == LNK_OK;
+            }
+            alive = alive && citizen.connection.flush().is_ok();
+            if !alive {
+                let orphaned = roster.orphan(citizen.client_id);
+                log_info(&format!(
+                    "client {} could not be told the roster - dropped; {} creature(s) stay embodied, ownerless.",
+                    citizen.client_id,
+                    orphaned.len()
+                ));
+                stager.owner_died(citizen.client_id);
+            }
+            alive
         });
     }
 
@@ -243,11 +389,13 @@ impl Heartbeat {
         let ping_after = self.config.keepalive_ping;
         let dead_after = self.config.keepalive_dead;
         let stager = &mut self.stager;
+        let roster = &mut self.roster;
 
         self.citizens.retain_mut(|citizen| {
             let silence = now.duration_since(citizen.last_heard);
             if silence >= dead_after {
-                log_info(&format!("client {} fell silent for {silence:?} - reaped; its creatures stay embodied on the neutral reflex.", citizen.client_id));
+                let orphaned = roster.orphan(citizen.client_id);
+                log_info(&format!("client {} fell silent for {silence:?} - reaped; {} creature(s) stay embodied on the neutral reflex.", citizen.client_id, orphaned.len()));
                 stager.owner_died(citizen.client_id);
                 return false;
             }
@@ -260,55 +408,75 @@ impl Heartbeat {
         });
     }
 
-    /// One tick: intents settle, the script tells the world, every subscriber hears it.
+    /// One tick: intents settle, every body steps by its own bounds, the set dressing moves,
+    /// and every subscriber hears it.
     fn step_one_tick(&mut self) {
         self.tick += 1;
+        let tick = self.tick;
 
         // The validator is the only path into the world: whatever the stager applied is
-        // sanitised and clamped against the guest's own body before physics ever sees it.
-        let intent = match self.stager.intent_for(GUEST_CREATURE_ID, self.tick) {
-            Applied::Fresh(intent) | Applied::Repeated(intent) => {
-                sanitise_and_clamp(intent, &self.guest.bounds)
+        // sanitised and clamped against each body's own bounds inside the roster's step.
+        let stager = &mut self.stager;
+        let (body_rows, body_events) = self.roster.step(tick, |creature_id| {
+            match stager.intent_for(creature_id, tick) {
+                Applied::Fresh(intent) | Applied::Repeated(intent) => intent,
+                Applied::Coasted => Intent::default(),
             }
-            Applied::Coasted => Intent::default(),
-        };
-        let telling = tell(self.tick, &mut self.guest, intent);
+        });
+        let dressing = set_dressing(tick);
+        let mut rows = dressing.rows;
+        rows.extend(body_rows);
+        let mut events = dressing.events;
+        events.extend(body_events);
 
         #[allow(clippy::cast_possible_truncation)]
         let header = TickStateHeader {
-            tick: self.tick,
-            creature_count: telling.rows.len() as u32,
+            tick,
+            creature_count: rows.len() as u32,
             reserved0: [0; 4],
         };
-        let derez = blinker_derezzes_at(self.tick).then_some(Derez {
-            tick: self.tick,
+        let derez = blinker_derezzes_at(tick).then_some(Derez {
+            tick,
             creature_id: 3,
             reserved0: [0; 4],
         });
 
         // Per-subscriber sends, per the composable-broadcast rule: the loop is the seam
         // interest management drops into, even while everyone still hears everything.
+        let roster = &mut self.roster;
         self.citizens.retain_mut(|citizen| {
-            let mut alive = citizen.connection.send_tick_state(&header, &telling.rows) == LNK_OK;
+            let mut alive = citizen.connection.send_tick_state(&header, &rows) == LNK_OK;
             if alive && let Some(derez) = &derez {
                 alive = citizen.connection.send_derez(derez) == LNK_OK;
             }
-            for event in &telling.events {
+            for event in &events {
                 if alive {
                     alive = citizen.connection.send_event(event) == LNK_OK;
                 }
             }
             alive = alive && citizen.connection.flush().is_ok();
             if !alive {
+                let orphaned = roster.orphan(citizen.client_id);
                 log_info(&format!(
-                    "client {} could not be told tick {} - dropped.",
-                    citizen.client_id, header.tick
+                    "client {} could not be told tick {} - dropped; {} creature(s) stay embodied, ownerless.",
+                    citizen.client_id, header.tick, orphaned.len()
                 ));
-                self.stager.owner_died(citizen.client_id);
+                stager.owner_died(citizen.client_id);
             }
             alive
         });
     }
+}
+
+/// One body over one connection, the host's own rows. Queued, not flushed: the caller
+/// flushes once it has said everything.
+fn send_model(connection: &mut Connection, model: &Model) -> bool {
+    connection.send_rez(
+        &model.header,
+        &model.vertices,
+        &model.triangles,
+        &model.materials,
+    ) == LNK_OK
 }
 
 impl Citizen {
@@ -365,6 +533,14 @@ fn record_verdict(sender: u64, verdict: Verdict, verbose: bool) {
         } => {
             log_info(&format!(
                 "client {refused}: creature {creature_id} has one intent stream and this is not it - refused."
+            ));
+        }
+        Verdict::RefusedNotEmbodied {
+            creature_id,
+            sender: refused,
+        } => {
+            log_info(&format!(
+                "client {refused}: creature {creature_id} is nobody's body - rez it first; intent refused."
             ));
         }
     }

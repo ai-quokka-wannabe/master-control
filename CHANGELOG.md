@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The roster of record: bodies arrive over the wire, and Etape 2 closes.** `src/roster.rs`
+  keeps who is embodied, with what body, owned by whom - in creature-id order, so every telling
+  lists them the same way on every run. A host's `REZ` is judged against the world's own bounds
+  (`WORLD_MAX_*`, refused by name rather than clamped), then embodied on the spawn pad or,
+  for an identity a dead host left behind, taken up where it stands; it is relayed to every
+  citizen - the host's own copy being its acknowledgement - and replayed to every late joiner
+  before its first tick, verbatim. A host's `DEREZ` or `BYE` is a leave, broadcast as `DEREZ`;
+  a crash or a reap orphans the body on the neutral reflex, embodied. Intents for an identity
+  nobody wears are refused (`RefusedNotEmbodied`); steering an orphan takes it up. Every body
+  now steps by real physics under its own bounds - `FIRST_BODY` is only the guest's - and the
+  script keeps just the set dressing. Three integration tests walk the lifecycle end to end
+  (relay, late-join replay, own-bound clamp, BYE; refused second host and unrezzed identity;
+  reap then adoption by re-rez); five breakage rounds discriminated.
 - **Link v4: the door judges worlds, and bodies can arrive.** The submodule advances to
   protocol v4 and `link_dll.rs` mirrors it field for field: `WorldDefinition`, the `REZ` header
   and its three row types with their caps (twin-checked against the header), the
