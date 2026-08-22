@@ -75,6 +75,16 @@ pub const BODY_HALF_LENGTH: f32 = 0.215;
 /// height. A terrace riser above this is a wall.
 pub const CLIMB_LIMIT_METRES: f32 = 0.1;
 
+/// Coulomb friction on every face but the floor's own traction: a body sliding along a riser
+/// or another body loses, along the face, as much speed as the coefficient says of what the
+/// face arrested - and keeps the rest, which is the slide. The floor keeps the actuators'
+/// traction: there the command is the velocity, as it has always been.
+pub const FRICTION: f32 = 0.5;
+
+/// A scratch quieter than this is not sounded - a threshold, not a rounding: the contact still
+/// carries its slip for the owner's letter.
+pub const SCRATCH_THRESHOLD: f32 = 0.01;
+
 /// The bounds the server clamps every intent against - the slice of `TglCreatureDesc` the
 /// validator needs. The full descriptor arrives over the wire with REZ (Link Etape 6); until
 /// then every creature wears the first body's numbers.
@@ -197,7 +207,7 @@ fn forward_for(yaw: f32) -> [f32; 3] {
 
 /// A body-frame point carried into the world by a pose: the yaw about +Y, then the translation
 /// - the flagship's `worldFromBody`, clause for clause.
-fn body_to_world(point: &[f32; 3], position: [f32; 3], yaw: f32) -> [f32; 3] {
+pub fn body_to_world(point: &[f32; 3], position: [f32; 3], yaw: f32) -> [f32; 3] {
     let (sin, cos) = yaw.sin_cos();
     [
         position[0] + point[0].mul_add(cos, point[2] * sin),
@@ -349,18 +359,37 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
                     }
                 }
                 if let Some((fraction, index, normal)) = earliest {
-                    let arrested = body.forward_speed;
-                    x = position_before[0] + move_x * fraction;
-                    z = position_before[2] + move_z * fraction;
-                    body.forward_speed = 0.0;
-                    if arrested != 0.0 {
+                    // The move up to the wall, then the rest of it along the wall: the part
+                    // into the face is arrested, the part along it slides on, less what
+                    // friction takes of it - Coulomb, from what the face arrested.
+                    let into = -(move_x * normal[0] + move_z * normal[2]);
+                    let tangential = [move_x + normal[0] * into, move_z + normal[2] * into];
+                    let tangential_speed =
+                        (tangential[0] * tangential[0] + tangential[1] * tangential[1]).sqrt() / DT;
+                    let arrested_speed = into.max(0.0) / DT;
+                    let sliding_speed = (tangential_speed - FRICTION * arrested_speed).max(0.0);
+                    let slide = if tangential_speed > 0.0 {
+                        sliding_speed / tangential_speed
+                    } else {
+                        0.0
+                    };
+                    let remainder = 1.0 - fraction;
+                    x = position_before[0] + move_x * fraction + tangential[0] * remainder * slide;
+                    z = position_before[2] + move_z * fraction + tangential[1] * remainder * slide;
+                    // The actuator keeps only what slides, along the body's own facing.
+                    let forward = forward_for(yaw_before);
+                    let slide_velocity =
+                        [tangential[0] * slide / DT, 0.0, tangential[1] * slide / DT];
+                    body.forward_speed =
+                        slide_velocity[0] * forward[0] + slide_velocity[2] * forward[2];
+                    if arrested_speed > 0.0 {
                         // The stop is felt at the vertex that met the wall, body frame, along
-                        // the wall's normal turned into the body's frame.
+                        // the wall's normal turned into the body's frame; the slip is the slide.
                         let push = world_to_body_direction(
                             [
-                                normal[0] * BODY_MASS_KG * arrested,
+                                normal[0] * BODY_MASS_KG * arrested_speed,
                                 0.0,
-                                normal[2] * BODY_MASS_KG * arrested,
+                                normal[2] * BODY_MASS_KG * arrested_speed,
                             ],
                             yaw_before,
                         );
@@ -369,7 +398,7 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
                             impulse: push,
                             normal,
                             depth: 0.0,
-                            slip: [0.0; 3],
+                            slip: world_to_body_direction(slide_velocity, yaw_before),
                         });
                     }
                 }
@@ -700,10 +729,38 @@ pub fn separate(a: &mut Body, b: &mut Body) -> bool {
         a.velocity[2] - b.velocity[2],
     ];
     let closing = dot3(relative, axis).max(0.0);
-    let tangential = [
+    let raw_tangential = [
         relative[0] - axis[0] * dot3(relative, axis),
         relative[1] - axis[1] * dot3(relative, axis),
         relative[2] - axis[2] * dot3(relative, axis),
+    ];
+    // Friction between the two: the relative slide loses what the coefficient says of the
+    // closing that was arrested, taken half from each; what remains is the slip both feel.
+    let tangential_speed = dot3(raw_tangential, raw_tangential).sqrt();
+    let kept = if tangential_speed > 0.0 {
+        ((tangential_speed - FRICTION * closing).max(0.0)) / tangential_speed
+    } else {
+        0.0
+    };
+    let tangential = [
+        raw_tangential[0] * kept,
+        raw_tangential[1] * kept,
+        raw_tangential[2] * kept,
+    ];
+    let friction_loss = [
+        raw_tangential[0] - tangential[0],
+        raw_tangential[1] - tangential[1],
+        raw_tangential[2] - tangential[2],
+    ];
+    a.velocity = [
+        a.velocity[0] - friction_loss[0] * 0.5,
+        a.velocity[1] - friction_loss[1] * 0.5,
+        a.velocity[2] - friction_loss[2] * 0.5,
+    ];
+    b.velocity = [
+        b.velocity[0] + friction_loss[0] * 0.5,
+        b.velocity[1] + friction_loss[1] * 0.5,
+        b.velocity[2] + friction_loss[2] * 0.5,
     ];
 
     // Resting on the other is a vertical matter only when the upper body is actually above:
@@ -1171,6 +1228,81 @@ mod hull_tests {
             above.position
         );
         assert!(above.grounded);
+    }
+
+    #[test]
+    fn a_diagonal_walk_into_a_riser_slides_along_it_less_what_friction_takes() {
+        // Facing 45 degrees left of -Z: the walk goes -X and -Z alike. The riser at z = -2 runs
+        // along X, so the -Z half is arrested and the -X half slides, minus friction's share.
+        // Turned 45 degrees the cube reaches 0.707 m forward at its corner: it starts with that
+        // corner 13 mm short of the line, and the tick's -Z share of the walk (22 mm) crosses.
+        let mut body = cube_body(1.0, 16);
+        body.position[2] = -1.28;
+        body.yaw = std::f32::consts::FRAC_PI_4;
+        step_body(
+            &mut body,
+            Intent {
+                forward_speed: 1.0,
+                turn_rate: 0.0,
+                vocalisation: 0.0,
+            },
+            terrace,
+        );
+        let wall = body
+            .contacts
+            .iter()
+            .find(|c| c.normal == [0.0, 0.0, 1.0])
+            .expect("the wall was met");
+        // Per tick: the walk is 1 m/s at 45 degrees, so 0.707 m/s into the wall... the cube's
+        // front corner reaches the line 0.64 of the way; of the rest, the -X component slides.
+        assert!(
+            body.position[0] < 0.0,
+            "slid along the wall towards -X: {:?}",
+            body.position
+        );
+        assert!(
+            body.forward_speed > 0.0 && body.forward_speed < 1.0,
+            "some walk kept, not all: {}",
+            body.forward_speed
+        );
+        let slip = (wall.slip[0] * wall.slip[0] + wall.slip[2] * wall.slip[2]).sqrt();
+        let expected_slip =
+            (std::f32::consts::FRAC_1_SQRT_2 - FRICTION * std::f32::consts::FRAC_1_SQRT_2).max(0.0);
+        assert!(
+            (slip - expected_slip).abs() < 1e-3,
+            "the slide is the tangential speed less friction's share of the arrested: {slip} vs {expected_slip}"
+        );
+        // The push is in the body's frame - at 45 degrees the 0.707 along +Z splits in two -
+        // so its magnitude is what the wall arrested.
+        let push = (wall.impulse[0] * wall.impulse[0] + wall.impulse[2] * wall.impulse[2]).sqrt();
+        assert!(
+            (push - BODY_MASS_KG * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3,
+            "what the wall arrested: {:?}",
+            wall.impulse
+        );
+
+        // Friction between bodies: a sidestep along another body loses the coefficient's share
+        // of the closing, half from each.
+        let mut e = cube_body(1.0, 16);
+        let mut f = cube_body(1.0, 16);
+        f.position[2] = -0.9;
+        e.velocity = [0.5, 0.0, -0.4];
+        assert!(separate(&mut e, &mut f));
+        let ce = e.contacts.last().expect("contact");
+        let expected = 0.5 - FRICTION * 0.4;
+        assert!(
+            (ce.slip[0] - expected).abs() < 1e-5,
+            "the slip less friction: {:?}",
+            ce.slip
+        );
+        assert!(
+            (e.velocity[0] - (0.5 - FRICTION * 0.4 * 0.5)).abs() < 1e-5,
+            "half the loss from e"
+        );
+        assert!(
+            (f.velocity[0] - FRICTION * 0.4 * 0.5).abs() < 1e-5,
+            "half the loss to f"
+        );
     }
 
     #[test]
