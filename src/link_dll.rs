@@ -259,7 +259,7 @@ const _: () = assert!(size_of::<Derez>() == 16);
 // ---------------------------------------------------------------------------------------------
 
 /// `LNK_CLIENT_ABI_VERSION` this binding was written against; the export refuses any other.
-pub const CLIENT_ABI_VERSION: u32 = 5;
+pub const CLIENT_ABI_VERSION: u32 = 6;
 
 pub type LnkStatus = i32;
 
@@ -498,6 +498,24 @@ pub struct LnkClientVTable {
         contacts: *const Contact,
     ) -> LnkStatus,
     pub close_server: extern "C" fn(server: *mut LnkServer),
+    pub record_open: extern "C" fn(
+        path_utf8: *const c_char,
+        world_fingerprint: u64,
+        start_tick: u64,
+        nominal_dt_seconds: f32,
+        start_unix_seconds: u64,
+        out_status: *mut LnkStatus,
+        out_detail_utf8: *mut c_char,
+        detail_capacity_bytes: u32,
+    ) -> *mut LnkClient,
+    pub replay_open: extern "C" fn(
+        path_utf8: *const c_char,
+        world_fingerprint: u64,
+        out_welcome: *mut Welcome,
+        out_status: *mut LnkStatus,
+        out_detail_utf8: *mut c_char,
+        detail_capacity_bytes: u32,
+    ) -> *mut LnkClient,
 }
 
 type GetClientVTableFn = extern "C" fn(abi_version: u32) -> *const LnkClientVTable;
@@ -692,6 +710,86 @@ impl LinkDll {
         if client.is_null() {
             Err(format!(
                 "no Master Control at {address}: {}",
+                detail_text(&detail, status)
+            ))
+        } else {
+            Ok((
+                Connection {
+                    vtable: self.vtable,
+                    client,
+                },
+                welcome,
+            ))
+        }
+    }
+
+    /// Open a Disk - a client whose socket is a file - as a server-held end: everything this
+    /// world tells its citizens is told to it too, and a replay viewer is a spectator that
+    /// opened it. The handle is a [`Connection`] like any citizen's, closed (BYE written) on drop.
+    pub fn record_open(
+        &self,
+        path: &std::path::Path,
+        world_fingerprint: u64,
+        start_tick: u64,
+        nominal_dt_seconds: f32,
+        start_unix_seconds: u64,
+    ) -> Result<Connection, String> {
+        let c_path = CString::new(path.to_string_lossy().as_bytes())
+            .map_err(|_| "the Disk path holds a NUL".to_string())?;
+        let mut status: LnkStatus = LNK_PANIC;
+        let mut detail = [0u8; 256];
+        let client = (self.vtable.record_open)(
+            c_path.as_ptr(),
+            world_fingerprint,
+            start_tick,
+            nominal_dt_seconds,
+            start_unix_seconds,
+            &raw mut status,
+            detail.as_mut_ptr().cast::<c_char>(),
+            detail.len() as u32,
+        );
+        if client.is_null() {
+            Err(format!(
+                "could not open the Disk at {}: {}",
+                path.display(),
+                detail_text(&detail, status)
+            ))
+        } else {
+            Ok(Connection {
+                vtable: self.vtable,
+                client,
+            })
+        }
+    }
+
+    /// Open a Disk for reading, as a client-held end: the WELCOME is the Disk's own header.
+    pub fn replay_open(
+        &self,
+        path: &std::path::Path,
+        world_fingerprint: u64,
+    ) -> Result<(Connection, Welcome), String> {
+        let c_path = CString::new(path.to_string_lossy().as_bytes())
+            .map_err(|_| "the Disk path holds a NUL".to_string())?;
+        let mut welcome = Welcome {
+            current_tick: 0,
+            nominal_dt_seconds: 0.0,
+            client_id: 0,
+            world_fingerprint: 0,
+        };
+        let mut status: LnkStatus = LNK_PANIC;
+        let mut detail = [0u8; 256];
+        let client = (self.vtable.replay_open)(
+            c_path.as_ptr(),
+            world_fingerprint,
+            &raw mut welcome,
+            &raw mut status,
+            detail.as_mut_ptr().cast::<c_char>(),
+            detail.len() as u32,
+        );
+        if client.is_null() {
+            Err(format!(
+                "could not open the Disk at {}: {}",
+                path.display(),
                 detail_text(&detail, status)
             ))
         } else {
