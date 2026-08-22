@@ -10,7 +10,7 @@
            ..\tron-grid-lite\src\geometry.cpp ..\tron-grid-lite\src\roster.cpp ^
            ..\tron-grid-lite\src\program_library.cpp ..\tron-grid-lite\src\loader_os.cpp ^
            /I..\tron-grid-lite\src /I..\tron-grid-lite\libs\math\include ^
-           /I..\tron-grid-lite\libs\program-abi\include ^
+           /I..\tron-grid-lite\libs\bvh\include /I..\tron-grid-lite\libs\program-abi\include ^
            /Fe:generate_physics_goldens.exe
         generate_physics_goldens.exe tests\data
 
