@@ -13,7 +13,8 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
-//! `master-control [port] [--verbose] [--version] [--disk <path>] [--log <path>]` - the world server of the Grid.
+//! `master-control [port] [--verbose] [--version] [--disk <path>] [--log <path>]` - the world server of the Grid;
+//! `master-control clu <log> [<disk>]` - Clu, the re-simulation and the hash check.
 //!
 //! The command line keeps the flagship's ruled shape: where the world listens is the plain
 //! positional argument, defaulting to the port Tron guards; `--version` states this build and
@@ -25,6 +26,49 @@ use std::sync::atomic::AtomicBool;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Clu's entry: re-simulate the input log, compare the hashes on the beat, and at the first
+/// divergence say where - in the state, with the Disk - or at least when.
+fn clu_main(arguments: Vec<String>) -> std::process::ExitCode {
+    let Some(log) = arguments.first() else {
+        eprintln!("[FATAL] clu needs a log: master-control clu <log> [<disk>]");
+        return std::process::ExitCode::FAILURE;
+    };
+    let disk = arguments.get(1).map(std::path::PathBuf::from);
+    let wire = match LinkDll::beside_executable() {
+        Ok(wire) => wire,
+        Err(refusal) => {
+            eprintln!("[FATAL] {refusal}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    match master_control::clu::check(std::path::Path::new(log), disk.as_deref(), &wire) {
+        Ok(master_control::clu::Verdict::Agreed { ticks, hashes }) => {
+            println!(
+                "[INFO] Clu: {ticks} ticks re-simulated, {hashes} hashes agreed - the log replays to the world it describes."
+            );
+            std::process::ExitCode::SUCCESS
+        }
+        Ok(master_control::clu::Verdict::Diverged {
+            tick,
+            logged,
+            resimulated,
+            diff,
+        }) => {
+            println!(
+                "[WARN] Clu: the world diverged by tick {tick} - logged hash {logged:016X}, re-simulated {resimulated:016X}."
+            );
+            for line in diff {
+                println!("[WARN]   {line}");
+            }
+            std::process::ExitCode::FAILURE
+        }
+        Err(words) => {
+            eprintln!("[FATAL] Clu: {words}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> std::process::ExitCode {
     let mut port = DEFAULT_PORT;
     let mut verbose = false;
@@ -33,6 +77,12 @@ fn main() -> std::process::ExitCode {
     let mut wants_version = false;
 
     let mut arguments = std::env::args().skip(1);
+
+    // Clu: `master-control clu <log> [<disk>]` re-simulates a log and checks its hashes.
+    if std::env::args().nth(1).as_deref() == Some("clu") {
+        return clu_main(std::env::args().skip(2).collect());
+    }
+
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--verbose" => verbose = true,
