@@ -116,6 +116,11 @@ function by design.
 link repository's cargo-flavoured shape - and the `CI Success` gate the ruleset requires by its
 exact name. CodeQL (rust, actions, c-cpp for the submodule) runs beside it.
 
+Quick-checks also run lychee offline over every markdown file (internal links and anchors; the
+external ones on a weekly schedule in `links.yml`), and `cargo doc --document-private-items`
+with warnings as errors; the toolchain is pinned in `rust-toolchain.toml` and every cargo step is
+`--locked`.
+
 ## Process
 
 - **Main is protected: PR + review, direct pushes rejected.** Branch, push, `gh pr create`; the
