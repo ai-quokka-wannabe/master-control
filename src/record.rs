@@ -73,6 +73,7 @@ impl InputLog {
             .collect();
         writeln!(file, "protocol {protocol_version} {hex}")?;
         writeln!(file, "world {world_fingerprint:016X}")?;
+        writeln!(file, "build {}", crate::build_info::build_hash_hex())?;
         writeln!(file, "start {start_tick} {start_unix_seconds}")?;
         writeln!(file, "hash_every {hash_every}")?;
         writeln!(

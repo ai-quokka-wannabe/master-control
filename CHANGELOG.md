@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Determinism hardening, the second half: the random walk and the build stamp.** Adopted from
+  the owner's `queen-of-towers-game` and `project_nimrod`. `tests/random_walk.rs` walks the
+  world at random from a seeded generator of its own (SplitMix64, std only) - hosts rezzing
+  boxed bodies, derezzing, claiming the guest, orphaning, and intents that are mostly sane and
+  sometimes NaN, infinite, subnormal or the largest float - and holds every invariant after
+  every step: every number finite, nobody through the floor, every body inside its own bounds
+  and its contact budget, every contact normal unit; then walks the same seed again and demands
+  the same state hash at every step. Four seeds of 250 steps on every run; twenty-four of two
+  thousand behind `--include-ignored` (eight minutes, 48,000 steps, clean). Every failure prints
+  its seed and step. And the build stamps itself: `build.rs` hashes every source it was built
+  from (std `DefaultHasher`, fixed walk, the file count mixed in, git-independent), `--version`
+  prints `build=<stamp>`, the input log records it in its header, and Clu reports a log made by
+  another build - on agreement as a warning, on divergence as the first line of the diff, so
+  "a different binary" is said before "a simulation bug". The real binary is asked `--version`
+  by a test.
 - **Determinism hardening, the first half: the hash, the lint, the profile, the diagnostic.**
   Adopted from the owner's `queen-of-towers-game` and `project_nimrod`. The state hash is
   rebuilt by the rules a replay hash needs: a domain tag, the body count and every creature's

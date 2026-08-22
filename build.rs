@@ -19,8 +19,79 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
+use std::hash::Hasher;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// The build's own provenance: a hash over every source this binary was compiled from - the
+/// crate's Rust, its manifests, this script, and the wire's sources - written into OUT_DIR as
+/// `build_info.rs`. Git-independent on purpose, so a tarball or a container build stamps as
+/// honestly as a checkout. `--version` prints it and the input log records it, so a replay that
+/// disagrees can say "a different binary" before anyone says "a simulation bug".
+///
+/// Adopted from the owner's `project_nimrod`: std only, `DefaultHasher` with its fixed keys, a
+/// fixed walk order, and the file count mixed in so a file lost is a change too.
+fn stamp_build(manifest_dir: &Path, out_dir: &Path) {
+    let mut files: Vec<PathBuf> = Vec::new();
+    for root in [
+        "src",
+        "tests",
+        "build.rs",
+        "Cargo.toml",
+        "Cargo.lock",
+        "external/link/src",
+        "external/link/Cargo.toml",
+    ] {
+        collect_sources(&manifest_dir.join(root), &mut files);
+    }
+    files.sort();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for file in &files {
+        let relative = file.strip_prefix(manifest_dir).unwrap_or(file);
+        hasher.write(relative.to_string_lossy().replace('\\', "/").as_bytes());
+        hasher.write(&std::fs::read(file).unwrap_or_default());
+        println!("cargo::rerun-if-changed={}", file.display());
+    }
+    hasher.write_usize(files.len());
+    let stamp = hasher.finish();
+    let generated = format!(
+        "/// A hash over every source this binary was built from; see build.rs.\npub const BUILD_HASH: u64 = {stamp:#018x};\n/// How many source files the hash covers.\npub const BUILD_FILES_HASHED: usize = {};\n",
+        files.len()
+    );
+    let mut out =
+        std::fs::File::create(out_dir.join("build_info.rs")).expect("OUT_DIR is writable");
+    out.write_all(generated.as_bytes())
+        .expect("build_info.rs written");
+}
+
+fn collect_sources(path: &Path, files: &mut Vec<PathBuf>) {
+    if path.is_file() {
+        files.push(path.to_path_buf());
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let entry = entry.path();
+        let name = entry
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if name == "target" || name == ".git" {
+            continue;
+        }
+        if entry.is_dir() {
+            collect_sources(&entry, files);
+        } else if matches!(
+            entry.extension().and_then(|e| e.to_str()),
+            Some("rs" | "toml" | "lock" | "h" | "txt")
+        ) {
+            files.push(entry);
+        }
+    }
+}
 
 fn main() {
     // Rebuild when the wire changes: the submodule's sources and its contract of record.
@@ -31,6 +102,8 @@ fn main() {
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR"));
+
+    stamp_build(&manifest_dir, &out_dir);
 
     let link_manifest = manifest_dir
         .join("external")

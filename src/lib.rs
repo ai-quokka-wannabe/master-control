@@ -17,6 +17,17 @@
 //! integration tests can stand a whole world up on a port of the operating system's choosing;
 //! the binary in `main.rs` is a thin caller.
 
+/// The build's provenance, stamped by build.rs: what sources this binary was compiled from.
+pub mod build_info {
+    include!(concat!(env!("OUT_DIR"), "/build_info.rs"));
+
+    /// The stamp as it is printed and logged: sixteen hex digits.
+    #[must_use]
+    pub fn build_hash_hex() -> String {
+        format!("{BUILD_HASH:016x}")
+    }
+}
+
 pub mod clu;
 pub mod ground;
 pub mod heartbeat;
