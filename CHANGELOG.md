@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Link v4: the door judges worlds, and bodies can arrive.** The submodule advances to
+  protocol v4 and `link_dll.rs` mirrors it field for field: `WorldDefinition`, the `REZ` header
+  and its three row types with their caps (twin-checked against the header), the
+  `world_fingerprint` and `send_rez` vtable entries, `Hello`/`Welcome` carrying the fingerprint,
+  `Message::Rez` with its rows copied out. `physics::world_definition()` states this server's
+  world — the floor it steps against, its tick, its body height — and the DLL fingerprints it;
+  the heartbeat listens as that world and says it in every `WELCOME`, so a client built from a
+  different floor or tick is refused at the door in words. A new integration test knocks from
+  another world and is refused, then proves the next honest citizen is still welcomed.
 - **The physics comes home: Etape 2's first half, the placement ruling executed on this side.**
   The flagship's `stepBody` and `sanitiseAndClamp` now live here, in Rust, as the one
   implementation of the simulated world — the companion flagship movement deletes the C++ copy.

@@ -27,7 +27,7 @@ use crate::link_dll::{
     Connection, Derez, Hello, LNK_OK, LinkDll, Listener, Message, ROLE_CREATURE_HOST,
     ROLE_SPECTATOR, TickStateHeader, Welcome,
 };
-use crate::physics::{Body, FIRST_BODY, TICK_SECONDS, sanitise_and_clamp};
+use crate::physics::{Body, FIRST_BODY, TICK_SECONDS, sanitise_and_clamp, world_definition};
 use crate::script::{
     GUEST_CREATURE_ID, GUEST_SPAWN_X, GUEST_SPAWN_Z, blinker_derezzes_at, floor, tell,
 };
@@ -83,13 +83,17 @@ pub struct Heartbeat {
     tick: u64,
     next_client_id: u64,
     overruns: u64,
+    /// This world's fingerprint, as the DLL computed it: the door judges by it, WELCOME says it.
+    world_fingerprint: u64,
 }
 
 impl Heartbeat {
     /// Listen and stand ready. Port 0 asks the operating system; [`Heartbeat::port`] answers.
     pub fn new(wire: &LinkDll, port: u16, config: Config) -> Result<Heartbeat, String> {
+        let world_fingerprint = wire.world_fingerprint(&world_definition());
         Ok(Heartbeat {
-            listener: wire.listen(port)?,
+            listener: wire.listen(port, world_fingerprint)?,
+            world_fingerprint,
             config,
             citizens: Vec::new(),
             stager: ActionStager::default(),
@@ -166,6 +170,7 @@ impl Heartbeat {
                 nominal_dt_seconds: TICK_SECONDS,
                 #[allow(clippy::cast_possible_truncation)]
                 client_id: client_id as u32,
+                world_fingerprint: self.world_fingerprint,
             };
             if connection.send_welcome(&welcome) == LNK_OK && connection.flush().is_ok() {
                 log_info(&format!(
