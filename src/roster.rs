@@ -58,6 +58,10 @@ pub const WORLD_MAX_TURN_RATE: f32 = std::f32::consts::TAU;
 pub const WORLD_MAX_VOCALISATION: f32 = 1.0;
 /// No more than the owner's letter can carry - the wire's cap is the world's.
 pub const WORLD_MAX_CONTACTS: u32 = CONTACTS_MAX;
+/// How far from its own origin a body may reach, in metres, on every axis. A creature is a
+/// few metres at the very most; a vertex farther out is not a body but a number, and a number
+/// like 1e30 overflows the hull's arithmetic into infinities the world could not replay.
+pub const BODY_MAX_EXTENT: f32 = 4.0;
 
 /// A body as it came over the wire, kept whole so the relay and the late-join replay are the
 /// host's own bytes and nothing this side reassembled.
@@ -212,6 +216,9 @@ impl Roster {
             Ok(bounds) => bounds,
             Err(reason) => return Admission::RefusedBounds(reason),
         };
+        if let Err(reason) = body_extent(&model) {
+            return Admission::RefusedBounds(reason);
+        }
         let creature_id = model.header.creature_id;
         match self.residents.get_mut(&creature_id) {
             Some(resident) => match resident.owner {
@@ -484,9 +491,28 @@ fn world_bounds(header: &Rez) -> Result<BodyBounds, &'static str> {
     })
 }
 
+/// Every vertex within [`BODY_MAX_EXTENT`] of the origin on every axis, and none of them a
+/// subnormal: the wire guarantees finite, and finite is not enough. A subnormal is a number that
+/// a machine running flush-to-zero reads as zero and another reads as itself, and a world that
+/// replays bit for bit on both can admit neither reading - so it admits no subnormal at all.
+fn body_extent(model: &Model) -> Result<(), &'static str> {
+    for vertex in &model.vertices {
+        for axis in vertex.position {
+            if axis != 0.0 && !axis.is_normal() {
+                return Err("a vertex coordinate is subnormal");
+            }
+            if axis.abs() > BODY_MAX_EXTENT {
+                return Err("a vertex lies farther than 4 m from the body origin");
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::link_dll::REZ_MAX_VERTICES;
     use crate::physics::TICK_SECONDS;
 
     fn model(creature_id: u32) -> Model {
@@ -567,6 +593,62 @@ mod tests {
         assert_eq!(roster.len(), 2);
         assert_eq!(roster.owner_of(8), Some(Some(2)));
         assert_eq!(roster.leave(3), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn a_body_reaching_past_its_extent_or_made_of_subnormals_is_refused_and_a_degenerate_one_is_a_point()
+     {
+        let mut roster = Roster::with_the_guest();
+        let mut far = model(7);
+        far.vertices.push(RezVertex {
+            position: [0.0, 0.0, 1.0e30],
+        });
+        far.header.vertex_count = 2;
+        assert!(
+            matches!(roster.rez(1, far), Admission::RefusedBounds(_)),
+            "a vertex at 1e30 m is not a body"
+        );
+        let mut just_past = model(7);
+        just_past.vertices.push(RezVertex {
+            position: [-(BODY_MAX_EXTENT + 0.001), 0.0, 0.0],
+        });
+        just_past.header.vertex_count = 2;
+        assert!(matches!(
+            roster.rez(1, just_past),
+            Admission::RefusedBounds(_)
+        ));
+        let mut subnormal = model(7);
+        subnormal.vertices.push(RezVertex {
+            position: [0.0, 1.0e-40, 0.0],
+        });
+        subnormal.header.vertex_count = 2;
+        assert!(
+            matches!(roster.rez(1, subnormal), Admission::RefusedBounds(_)),
+            "a subnormal coordinate rounds differently on different machines"
+        );
+        assert_eq!(roster.len(), 1, "nothing was admitted");
+
+        let mut at_the_edge = model(8);
+        at_the_edge.vertices.push(RezVertex {
+            position: [BODY_MAX_EXTENT, -BODY_MAX_EXTENT, BODY_MAX_EXTENT],
+        });
+        at_the_edge.header.vertex_count = 2;
+        assert_eq!(roster.rez(1, at_the_edge), Admission::Embodied);
+
+        // A thousand copies of one point span no volume: a point proxy, no panic, no hull.
+        let mut heap = Model::bodiless(9, &FIRST_BODY);
+        heap.header.vertex_count = REZ_MAX_VERTICES;
+        for _ in 0..REZ_MAX_VERTICES {
+            heap.vertices.push(RezVertex {
+                position: [0.25, 0.25, 0.25],
+            });
+        }
+        assert_eq!(roster.rez(1, heap), Admission::Embodied);
+        assert!(
+            roster.resident(9).expect("embodied").body.hull.is_none(),
+            "no volume, no hull"
+        );
+        assert_eq!(roster.len(), 3);
     }
 
     #[test]

@@ -58,6 +58,22 @@ property. Added by the audit: REZ's three named caps (vertex, triangle, **materi
 plus index-range checks, single-pass O(n) parsing of the model blob, and the validator's own
 adversarial tests (NaN, infinities, denormals, replayed ticks, out-of-range indices).
 
+**Done (2026-08-22).** The clamps and caps were already the only path in; the audit's suite is
+what landed, and it found three things. Subnormals: finite, so `is_finite` let them through,
+and a machine running flush-to-zero steps them differently from one that does not - the
+validator now flushes them from intents and the roster refuses them in bodies, so the world
+replays bit for bit on both. Extent: a vertex at 1e30 m was admitted; `BODY_MAX_EXTENT` (4 m
+on every axis) refuses it in a word. Direction: a raw citizen could send the world a WELCOME
+and be quietly ignored - Link now ends the connection for every message arriving at the end
+that only sends it. Plus the window's arithmetic at the top of u64, which wrapped. The suite:
+subnormal, negative-zero and largest-finite intents; replayed ticks and u64::MAX; a body past
+its extent, a subnormal body, a thousand copies of one point (a point proxy, no panic), a body
+at every cap stepped without stalling; and a citizen that speaks bytes, not the DLL, at the
+world's own door - NaN and infinite intents sanitised and the host kept, and fourteen
+malformed frames (reserved words, short frames, a spectator's ACTIONS, unknown and reserved
+types, the world's own messages sent back at it, out-of-range indices, lying counts, a NaN
+vertex, a BYE with a payload) each hung up on while the honest spectator never noticed.
+
 ## Etape 4 — the logs
 
 Dual state-and-input logs and the periodic state hash — the flagship's Etape 16 promoted to the

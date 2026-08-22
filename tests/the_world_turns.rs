@@ -1004,3 +1004,394 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
     let _ = std::fs::remove_file(&log_path);
     let _ = std::fs::remove_file(&lie_path);
 }
+
+// ---- The adversary with a socket: bytes the DLL would never send, at the world's own door ----
+
+/// A citizen that speaks bytes, not the DLL: the handshake by hand, then whatever frame the
+/// test wants the world to choke on. Every refusal the wire promises is real only here.
+struct RawCitizen {
+    stream: std::net::TcpStream,
+}
+
+impl RawCitizen {
+    fn dial(world: &World, wire: &LinkDll, role: u8) -> RawCitizen {
+        use std::io::Read;
+        let stream = std::net::TcpStream::connect(world.address()).expect("the door is open");
+        stream
+            .set_read_timeout(Some(PATIENCE))
+            .expect("a timeout is settable");
+        let mut fingerprint = [0u8; 32];
+        (wire.vtable().protocol_fingerprint)(fingerprint.as_mut_ptr());
+        let mut hello = Vec::with_capacity(48);
+        hello.extend_from_slice(&wire.protocol_version().to_le_bytes());
+        hello.extend_from_slice(&fingerprint);
+        hello.push(role);
+        hello.extend_from_slice(&[0u8; 3]);
+        hello.extend_from_slice(&wire.world_fingerprint(&world_definition()).to_le_bytes());
+        let mut citizen = RawCitizen { stream };
+        // The wire's opening word, before any frame: the port's own magic.
+        {
+            use std::io::Write;
+            citizen.stream.write_all(b"LNK1").expect("magic written");
+        }
+        citizen.frame(1, &hello);
+        let mut welcome = [0u8; 3 + 24];
+        citizen
+            .stream
+            .read_exact(&mut welcome)
+            .expect("WELCOME arrives whole");
+        assert_eq!(
+            welcome[2], 2,
+            "the answer to HELLO is WELCOME, not {welcome:?}"
+        );
+        citizen
+    }
+
+    /// One frame: the wire's own framing, any payload at all.
+    fn frame(&mut self, type_byte: u8, payload: &[u8]) {
+        use std::io::Write;
+        let mut bytes = Vec::with_capacity(3 + payload.len());
+        bytes.extend_from_slice(&u16::try_from(payload.len()).expect("fits").to_le_bytes());
+        bytes.push(type_byte);
+        bytes.extend_from_slice(payload);
+        self.stream.write_all(&bytes).expect("written");
+        self.stream.flush().expect("flushed");
+    }
+
+    /// Whether the world hung up on us within patience: a read that ends, or a reset. The
+    /// world keeps telling ticks to a citizen it has not dropped, so a healthy connection
+    /// never reaches end of stream within patience - it reads ticks until the timeout.
+    fn was_hung_up_on(&mut self) -> bool {
+        use std::io::Read;
+        let deadline = Instant::now() + PATIENCE;
+        let mut sink = [0u8; 4096];
+        while Instant::now() < deadline {
+            match self.stream.read(&mut sink) {
+                Ok(0) => return true,
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) if error.kind() == std::io::ErrorKind::TimedOut => return false,
+                Err(_) => return true,
+            }
+        }
+        false
+    }
+}
+
+impl RawCitizen {
+    /// Whether the world is still telling us ticks: one read that returns bytes within
+    /// `patience`. Short, so the honest spectator beside us is not reaped for missing PINGs.
+    fn is_still_spoken_to(&mut self, patience: Duration) -> bool {
+        use std::io::Read;
+        self.stream
+            .set_read_timeout(Some(patience))
+            .expect("a timeout is settable");
+        let mut sink = [0u8; 4096];
+        matches!(self.stream.read(&mut sink), Ok(read) if read > 0)
+    }
+}
+
+/// A well-formed 40-byte ACTIONS payload for the guest, to be corrupted.
+fn actions_bytes(tick: u64, forward: f32) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(40);
+    bytes.extend_from_slice(&tick.to_le_bytes());
+    bytes.extend_from_slice(&GUEST_CREATURE_ID.to_le_bytes());
+    bytes.extend_from_slice(&forward.to_le_bytes());
+    for _ in 0..5 {
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    }
+    bytes.extend_from_slice(&[0u8; 4]);
+    bytes
+}
+
+/// A REZ payload: the 32-byte header, then vertices (12 B), triangles (16 B), materials (32 B).
+/// `claimed_vertex_count` lets the header lie about what follows.
+fn rez_bytes(
+    creature_id: u32,
+    vertices: &[[f32; 3]],
+    triangles: &[[u32; 4]],
+    materials: u32,
+    claimed_vertex_count: Option<u32>,
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&creature_id.to_le_bytes());
+    bytes.extend_from_slice(&1.0f32.to_le_bytes());
+    bytes.extend_from_slice(&1.0f32.to_le_bytes());
+    bytes.extend_from_slice(&1.0f32.to_le_bytes());
+    bytes.extend_from_slice(&4u32.to_le_bytes());
+    let vertex_count = claimed_vertex_count.unwrap_or(u32::try_from(vertices.len()).expect("fits"));
+    bytes.extend_from_slice(&vertex_count.to_le_bytes());
+    bytes.extend_from_slice(&u32::try_from(triangles.len()).expect("fits").to_le_bytes());
+    bytes.extend_from_slice(&materials.to_le_bytes());
+    for vertex in vertices {
+        for axis in vertex {
+            bytes.extend_from_slice(&axis.to_le_bytes());
+        }
+    }
+    for triangle in triangles {
+        for word in triangle {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+    }
+    for _ in 0..materials {
+        for _ in 0..8 {
+            bytes.extend_from_slice(&0.5f32.to_le_bytes());
+        }
+    }
+    bytes
+}
+
+#[test]
+fn the_world_hangs_up_on_every_malformed_frame_and_keeps_talking_to_the_honest() {
+    let world = World::stand_up(quick_config());
+    let wire = LinkDll::beside_executable().expect("wire");
+    let (mut spectator, welcome) = wire
+        .connect(
+            &world.address(),
+            ROLE_SPECTATOR,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
+        .expect("the honest spectator is welcomed");
+    let (mut tick, _) = await_tick(&mut spectator, welcome.current_tick + 1);
+
+    let cube: Vec<[f32; 3]> = (0..8)
+        .map(|corner| {
+            [
+                if corner & 1 == 0 { -0.1 } else { 0.1 },
+                if corner & 2 == 0 { 0.0 } else { 0.2 },
+                if corner & 4 == 0 { -0.1 } else { 0.1 },
+            ]
+        })
+        .collect();
+
+    let reserved_actions = {
+        let mut bytes = actions_bytes(tick + 1, 1.0);
+        bytes[39] = 1;
+        bytes
+    };
+    let reserved_derez = {
+        let mut bytes = vec![0u8; 16];
+        bytes[15] = 0xFF;
+        bytes
+    };
+    // Not a number is not malformed: a buggy brain's NaN reaches the validator, which zeroes
+    // it - the host keeps its wire, and the guest it claimed by steering stands still.
+    for (name, garbage) in [
+        ("a NaN", f32::NAN),
+        ("an infinity", f32::INFINITY),
+        ("a subnormal", 1.0e-40),
+    ] {
+        let mut buggy = RawCitizen::dial(&world, &wire, ROLE_CREATURE_HOST);
+        let (before, states) = await_tick(&mut spectator, tick + 1);
+        let stood = guest_row(&states).position;
+        for offset in 1..=4 {
+            buggy.frame(5, &actions_bytes(before + offset, garbage));
+        }
+        let (later, states) = await_tick(&mut spectator, before + 6);
+        tick = later;
+        let now = guest_row(&states).position;
+        assert!(
+            (now[0] - stood[0]).abs() < 1e-6 && (now[2] - stood[2]).abs() < 1e-6,
+            "{name} moved the guest from {stood:?} to {now:?}"
+        );
+        assert!(
+            buggy.is_still_spoken_to(Duration::from_millis(500)),
+            "{name} is sanitised, not a hang-up"
+        );
+        drop(buggy);
+        let (later, _) = await_tick(&mut spectator, tick + 2);
+        tick = later;
+    }
+
+    let attacks: Vec<(&str, u8, u8, Vec<u8>)> = vec![
+        (
+            "ACTIONS with a nonzero reserved word",
+            ROLE_CREATURE_HOST,
+            5,
+            reserved_actions,
+        ),
+        (
+            "ACTIONS one byte short",
+            ROLE_CREATURE_HOST,
+            5,
+            actions_bytes(tick + 1, 1.0)[..39].to_vec(),
+        ),
+        (
+            "ACTIONS from a spectator",
+            ROLE_SPECTATOR,
+            5,
+            actions_bytes(tick + 1, 1.0),
+        ),
+        ("an unknown type", ROLE_CREATURE_HOST, 200, vec![0u8; 8]),
+        ("the reserved type zero", ROLE_CREATURE_HOST, 0, vec![]),
+        (
+            "a PROPRIOCEPTION letter, which only the world writes",
+            ROLE_CREATURE_HOST,
+            11,
+            vec![0u8; 32],
+        ),
+        (
+            "a WELCOME, which only the world sends",
+            ROLE_CREATURE_HOST,
+            2,
+            vec![0u8; 24],
+        ),
+        (
+            "a REZ whose triangle points past its vertices",
+            ROLE_CREATURE_HOST,
+            3,
+            rez_bytes(300, &cube, &[[0, 1, 8, 0]], 1, None),
+        ),
+        (
+            "a REZ whose triangle names a material it does not carry",
+            ROLE_CREATURE_HOST,
+            3,
+            rez_bytes(301, &cube, &[[0, 1, 2, 1]], 1, None),
+        ),
+        (
+            "a REZ claiming more vertices than the cap, with no bytes behind the claim",
+            ROLE_CREATURE_HOST,
+            3,
+            rez_bytes(302, &cube, &[], 0, Some(1_025)),
+        ),
+        (
+            "a REZ whose count and length disagree",
+            ROLE_CREATURE_HOST,
+            3,
+            rez_bytes(303, &cube, &[], 0, Some(9)),
+        ),
+        (
+            "a REZ with a NaN vertex",
+            ROLE_CREATURE_HOST,
+            3,
+            rez_bytes(304, &[[0.0, f32::NAN, 0.0]], &[], 0, None),
+        ),
+        (
+            "a DEREZ with a nonzero reserved word",
+            ROLE_CREATURE_HOST,
+            7,
+            reserved_derez,
+        ),
+        (
+            "a BYE that carries a payload",
+            ROLE_CREATURE_HOST,
+            10,
+            vec![0u8; 1],
+        ),
+    ];
+
+    for (name, role, type_byte, payload) in attacks {
+        let mut adversary = RawCitizen::dial(&world, &wire, role);
+        adversary.frame(type_byte, &payload);
+        assert!(
+            adversary.was_hung_up_on(),
+            "the world kept talking to {name}"
+        );
+        // And the honest spectator never noticed.
+        let (later, _) = await_tick(&mut spectator, tick + 1);
+        tick = later;
+    }
+
+    // The control: a raw citizen speaking correctly is a citizen like any other - told the
+    // world, and not hung up on.
+    let mut honest = RawCitizen::dial(&world, &wire, ROLE_CREATURE_HOST);
+    honest.frame(5, &actions_bytes(tick + 2, 1.0));
+    assert!(
+        honest.is_still_spoken_to(Duration::from_millis(500)),
+        "a well-formed frame from raw bytes is welcome"
+    );
+}
+
+#[test]
+fn a_body_reaching_too_far_or_subnormal_is_refused_by_the_world_and_a_cap_sized_one_is_stepped() {
+    let world = World::stand_up(quick_config());
+    let wire = LinkDll::beside_executable().expect("wire");
+    let (mut host, welcome) = wire
+        .connect(
+            &world.address(),
+            ROLE_CREATURE_HOST,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
+        .expect("welcomed");
+    let (mut spectator, _) = wire
+        .connect(
+            &world.address(),
+            ROLE_SPECTATOR,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
+        .expect("welcomed");
+    let creature_id = (welcome.client_id << 8) | 1;
+
+    // The wire passes a finite 1e30 and a subnormal without comment; the world refuses both.
+    for (name, bad) in [
+        ("far", [0.0, 0.0, 1.0e30]),
+        ("subnormal", [1.0e-40, 0.0, 0.0]),
+    ] {
+        let (mut header, mut vertices, triangles, materials) = a_body(creature_id);
+        vertices.push(RezVertex { position: bad });
+        header.vertex_count += 1;
+        assert_eq!(
+            host.send_rez(&header, &vertices, &triangles, &materials),
+            master_control::link_dll::LNK_OK,
+            "the wire does not judge {name}"
+        );
+        let _ = host.flush();
+    }
+    let (tick, states) = await_tick(&mut spectator, welcome.current_tick + 4);
+    assert!(
+        !states.iter().any(|state| state.creature_id == creature_id),
+        "neither body was embodied"
+    );
+
+    // A body at the caps - a thousand vertices on a sphere, two thousand triangles - is a
+    // creature, and the world steps it without stalling.
+    let vertex_count = 1_024u32;
+    let vertices: Vec<RezVertex> = (0..vertex_count)
+        .map(|index| {
+            #[allow(clippy::cast_precision_loss)]
+            let golden = index as f32 * 2.399_963_2;
+            #[allow(clippy::cast_precision_loss)]
+            let y = 1.0 - 2.0 * (index as f32 + 0.5) / vertex_count as f32;
+            let radius = (1.0 - y * y).sqrt();
+            RezVertex {
+                position: [
+                    radius * golden.cos() * 0.5,
+                    0.5 + y * 0.5,
+                    radius * golden.sin() * 0.5,
+                ],
+            }
+        })
+        .collect();
+    let triangles: Vec<RezTriangle> = (0..2_048u32)
+        .map(|index| RezTriangle {
+            vertices: [
+                index % vertex_count,
+                (index + 1) % vertex_count,
+                (index + 2) % vertex_count,
+            ],
+            material: 0,
+        })
+        .collect();
+    let (mut header, _, _, materials) = a_body(creature_id);
+    header.vertex_count = vertex_count;
+    header.triangle_count = 2_048;
+    assert_eq!(
+        host.send_rez(&header, &vertices, &triangles, &materials),
+        master_control::link_dll::LNK_OK
+    );
+    let _ = host.flush();
+    let started = Instant::now();
+    let (_, states) = await_tick(&mut spectator, tick + 8);
+    assert!(
+        states.iter().any(|state| state.creature_id == creature_id),
+        "the cap-sized body is embodied"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "eight ticks with a thousand-vertex hull took {:?}",
+        started.elapsed()
+    );
+}
