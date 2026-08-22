@@ -36,7 +36,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -70,6 +70,30 @@ pub const ROLE_CREATURE_HOST: u8 = 2;
 
 pub const EVENT_VOCALISATION: u8 = 1;
 
+/// `LNK_REZ_MAX_*`: the three caps of the one variable-size client input. The wire judges them
+/// before any copy; this side restates them so a roster can size itself without asking.
+pub const REZ_MAX_VERTICES: u32 = 1_024;
+pub const REZ_MAX_TRIANGLES: u32 = 2_048;
+pub const REZ_MAX_MATERIALS: u32 = 16;
+
+/// `LnkWorldDefinition`: what the simulated world is made of, the fields both ends must agree
+/// on before a position means the same thing twice. The fingerprint over it is the DLL's to
+/// compute ([`LinkDll::world_fingerprint`]) - never this side's.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct WorldDefinition {
+    pub floor_cells: u32,
+    pub floor_cell_size: f32,
+    pub floor_height: f32,
+    pub relief_amplitude: f32,
+    pub relief_wavelength: f32,
+    pub relief_octaves: u32,
+    pub relief_terraces: u32,
+    pub relief_seed: u32,
+    pub dt_seconds: f32,
+    pub body_half_height: f32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Hello {
@@ -77,6 +101,7 @@ pub struct Hello {
     pub fingerprint: [u8; 32],
     pub role: u8,
     pub reserved0: [u8; 3],
+    pub world_fingerprint: u64,
 }
 
 #[repr(C)]
@@ -85,6 +110,43 @@ pub struct Welcome {
     pub current_tick: u64,
     pub nominal_dt_seconds: f32,
     pub client_id: u32,
+    pub world_fingerprint: u64,
+}
+
+/// `LnkRez`: a creature's bounds and the counts of the rows that follow it on the wire.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Rez {
+    pub creature_id: u32,
+    pub max_forward_speed: f32,
+    pub max_turn_rate: f32,
+    pub max_vocalisation_strength: f32,
+    pub max_contact_count: u32,
+    pub vertex_count: u32,
+    pub triangle_count: u32,
+    pub material_count: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct RezVertex {
+    pub position: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RezTriangle {
+    pub vertices: [u32; 3],
+    pub material: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct RezMaterial {
+    pub colour: [f32; 3],
+    pub index_of_refraction: f32,
+    pub emission: [f32; 3],
+    pub transmission: f32,
 }
 
 #[repr(C)]
@@ -151,8 +213,13 @@ pub struct Pong {
     pub nonce: u64,
 }
 
-const _: () = assert!(size_of::<Hello>() == 40);
-const _: () = assert!(size_of::<Welcome>() == 16);
+const _: () = assert!(size_of::<WorldDefinition>() == 40);
+const _: () = assert!(size_of::<Hello>() == 48);
+const _: () = assert!(size_of::<Welcome>() == 24);
+const _: () = assert!(size_of::<Rez>() == 32);
+const _: () = assert!(size_of::<RezVertex>() == 12);
+const _: () = assert!(size_of::<RezTriangle>() == 16);
+const _: () = assert!(size_of::<RezMaterial>() == 32);
 const _: () = assert!(size_of::<CreatureState>() == 40);
 const _: () = assert!(size_of::<TickStateHeader>() == 16);
 const _: () = assert!(size_of::<Actions>() == 40);
@@ -164,7 +231,7 @@ const _: () = assert!(size_of::<Derez>() == 16);
 // ---------------------------------------------------------------------------------------------
 
 /// `LNK_CLIENT_ABI_VERSION` this binding was written against; the export refuses any other.
-pub const CLIENT_ABI_VERSION: u32 = 3;
+pub const CLIENT_ABI_VERSION: u32 = 4;
 
 pub type LnkStatus = i32;
 
@@ -198,6 +265,16 @@ pub struct TickStateView {
     pub states: *const CreatureState,
 }
 
+/// `LnkRezView`: the header by value, the rows borrowed until the next poll.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RezView {
+    pub rez: Rez,
+    pub vertices: *const RezVertex,
+    pub triangles: *const RezTriangle,
+    pub materials: *const RezMaterial,
+}
+
 /// The union behind `LnkMessageView.as`. Reading the member the type byte names is the
 /// contract; [`MessageView::message`] is the one place that read happens.
 #[repr(C)]
@@ -211,6 +288,7 @@ pub union MessageViewPayload {
     pub pong: Pong,
     pub hello: Hello,
     pub actions: Actions,
+    pub rez: RezView,
 }
 
 #[repr(C)]
@@ -232,6 +310,13 @@ pub enum Message {
         states: Vec<CreatureState>,
     },
     Actions(Actions),
+    /// A body, rows copied out - the wire already judged counts, indices and finiteness.
+    Rez {
+        header: Rez,
+        vertices: Vec<RezVertex>,
+        triangles: Vec<RezTriangle>,
+        materials: Vec<RezMaterial>,
+    },
     Event(Event),
     Derez(Derez),
     Ping(Ping),
@@ -240,6 +325,20 @@ pub enum Message {
     /// A type byte this mirror does not know. The wire refuses unknown types itself, so seeing
     /// one here means the mirror is older than the library - worth a log, never a crash.
     Unknown(u8),
+}
+
+/// Rows copied out of a borrowed view: a zero count never touches the pointer.
+///
+/// # Safety
+///
+/// `pointer` must point at `count` rows the library wrote, which is the view's contract.
+unsafe fn rows<T: Copy>(pointer: *const T, count: u32) -> Vec<T> {
+    if count == 0 || pointer.is_null() {
+        Vec::new()
+    } else {
+        // SAFETY: delegated to the caller, per the contract above.
+        unsafe { std::slice::from_raw_parts(pointer, count as usize) }.to_vec()
+    }
 }
 
 impl MessageView {
@@ -267,6 +366,15 @@ impl MessageView {
                     }
                 }
                 MSG_ACTIONS => Message::Actions(self.payload.actions),
+                MSG_REZ => {
+                    let view = self.payload.rez;
+                    Message::Rez {
+                        header: view.rez,
+                        vertices: rows(view.vertices, view.rez.vertex_count),
+                        triangles: rows(view.triangles, view.rez.triangle_count),
+                        materials: rows(view.materials, view.rez.material_count),
+                    }
+                }
                 MSG_EVENT => Message::Event(self.payload.event),
                 MSG_DEREZ => Message::Derez(self.payload.derez),
                 MSG_PING => Message::Ping(self.payload.ping),
@@ -286,9 +394,11 @@ pub struct LnkClientVTable {
     pub abi_version: u32,
     pub protocol_version: extern "C" fn() -> u32,
     pub protocol_fingerprint: extern "C" fn(out_fingerprint: *mut u8),
+    pub world_fingerprint: extern "C" fn(definition: *const WorldDefinition) -> u64,
     pub connect: extern "C" fn(
         address_utf8: *const c_char,
         role: u8,
+        world_fingerprint: u64,
         timeout_milliseconds: u32,
         out_welcome: *mut Welcome,
         out_status: *mut LnkStatus,
@@ -297,12 +407,20 @@ pub struct LnkClientVTable {
     ) -> *mut LnkClient,
     pub poll: extern "C" fn(client: *mut LnkClient, out_message: *mut MessageView) -> LnkStatus,
     pub send_actions: extern "C" fn(client: *mut LnkClient, actions: *const Actions) -> LnkStatus,
+    pub send_rez: extern "C" fn(
+        client: *mut LnkClient,
+        rez: *const Rez,
+        vertices: *const RezVertex,
+        triangles: *const RezTriangle,
+        materials: *const RezMaterial,
+    ) -> LnkStatus,
     pub send_ping: extern "C" fn(client: *mut LnkClient, nonce: u64) -> LnkStatus,
     pub send_pong: extern "C" fn(client: *mut LnkClient, nonce: u64) -> LnkStatus,
     pub flush: extern "C" fn(client: *mut LnkClient, out_everything_left: *mut u8) -> LnkStatus,
     pub close: extern "C" fn(client: *mut LnkClient),
     pub listen: extern "C" fn(
         port: u16,
+        world_fingerprint: u64,
         out_status: *mut LnkStatus,
         out_detail_utf8: *mut c_char,
         detail_capacity_bytes: u32,
@@ -486,10 +604,16 @@ unsafe impl Send for Connection {}
 impl LinkDll {
     /// The client half's handshake, wrapped for the tests that dial the world this server
     /// stands up. Master Control itself never places an outbound call.
+    /// The fingerprint over a world definition, by the one implementation there is.
+    pub fn world_fingerprint(&self, definition: &WorldDefinition) -> u64 {
+        (self.vtable.world_fingerprint)(definition)
+    }
+
     pub fn connect(
         &self,
         address: &str,
         role: u8,
+        world_fingerprint: u64,
         timeout_ms: u32,
     ) -> Result<(Connection, Welcome), String> {
         let c_address = CString::new(address).map_err(|_| "the address holds a NUL".to_string())?;
@@ -497,12 +621,14 @@ impl LinkDll {
             current_tick: 0,
             nominal_dt_seconds: 0.0,
             client_id: 0,
+            world_fingerprint: 0,
         };
         let mut status: LnkStatus = LNK_PANIC;
         let mut detail = [0u8; 256];
         let client = (self.vtable.connect)(
             c_address.as_ptr(),
             role,
+            world_fingerprint,
             timeout_ms,
             &raw mut welcome,
             &raw mut status,
@@ -525,12 +651,14 @@ impl LinkDll {
         }
     }
 
-    /// Listen on the port (0 asks the operating system; [`Listener::port`] answers which).
-    pub fn listen(&self, port: u16) -> Result<Listener, String> {
+    /// Listen on the port (0 asks the operating system; [`Listener::port`] answers which) as
+    /// the world the fingerprint names: every HELLO is judged against it at the door.
+    pub fn listen(&self, port: u16, world_fingerprint: u64) -> Result<Listener, String> {
         let mut status: LnkStatus = LNK_PANIC;
         let mut detail = [0u8; 256];
         let server = (self.vtable.listen)(
             port,
+            world_fingerprint,
             &raw mut status,
             detail.as_mut_ptr().cast::<c_char>(),
             detail.len() as u32,
@@ -563,6 +691,7 @@ impl Listener {
             fingerprint: [0; 32],
             role: 0,
             reserved0: [0; 3],
+            world_fingerprint: 0,
         };
         let mut status: LnkStatus = LNK_PANIC;
         let mut detail = [0u8; 256];
@@ -603,6 +732,30 @@ impl Drop for Listener {
 impl Connection {
     pub fn send_actions(&mut self, actions: &Actions) -> LnkStatus {
         (self.vtable.send_actions)(self.client, actions)
+    }
+
+    /// A body, rows by borrow; the library copies them before returning, and judges the counts
+    /// against the caps before reading a single row.
+    pub fn send_rez(
+        &mut self,
+        header: &Rez,
+        vertices: &[RezVertex],
+        triangles: &[RezTriangle],
+        materials: &[RezMaterial],
+    ) -> LnkStatus {
+        if vertices.len() != header.vertex_count as usize
+            || triangles.len() != header.triangle_count as usize
+            || materials.len() != header.material_count as usize
+        {
+            return LNK_BAD_ARGUMENT;
+        }
+        (self.vtable.send_rez)(
+            self.client,
+            header,
+            vertices.as_ptr(),
+            triangles.as_ptr(),
+            materials.as_ptr(),
+        )
     }
 
     pub fn send_welcome(&mut self, welcome: &Welcome) -> LnkStatus {
@@ -717,7 +870,11 @@ mod tests {
                 u64::from(TICK_STATE_MAX_CREATURES),
             ),
             ("LNK_MSG_HELLO", u64::from(MSG_HELLO)),
+            ("LNK_MSG_REZ", u64::from(MSG_REZ)),
             ("LNK_MSG_BYE", u64::from(MSG_BYE)),
+            ("LNK_REZ_MAX_VERTICES", u64::from(REZ_MAX_VERTICES)),
+            ("LNK_REZ_MAX_TRIANGLES", u64::from(REZ_MAX_TRIANGLES)),
+            ("LNK_REZ_MAX_MATERIALS", u64::from(REZ_MAX_MATERIALS)),
             ("LNK_ROLE_SPECTATOR", u64::from(ROLE_SPECTATOR)),
             ("LNK_ROLE_CREATURE_HOST", u64::from(ROLE_CREATURE_HOST)),
             ("LNK_EVENT_VOCALISATION", u64::from(EVENT_VOCALISATION)),
