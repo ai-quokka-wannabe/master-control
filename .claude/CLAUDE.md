@@ -11,7 +11,8 @@ engineering.
    target exists, and the wire can carry a tick. All three hold — the flagship's
    `src/world_definition.hpp` and the `grid` library landed with its seams PR, and the `link`
    repository's protocol carries TICK_STATE end to end, proven by the flagship's own spectator.
-   The flesh may now grow, in the blueprint's order: the heartbeat first (`TODO.md` § Etape 1).
+   The flesh grew in the blueprint's order - heartbeat, roster, validation, logs, contacts -
+   and `TODO.md` records each etape as done with what it decided.
    The original discipline survives in one sentence: never implement here a truth that still
    lives elsewhere — when a truth moves here (the simulated world, at Etape 2), the flagship's
    copy is deleted in the same movement, so there is one implementation at every moment.
@@ -40,7 +41,8 @@ engineering.
   server half — a plain citizen at the wire with no side door. The loader is a few dozen lines
   of `extern "C"` declarations (`LoadLibraryW`/`GetProcAddress`, `dlopen`/`dlsym`) rather than
   a crate, per the no-crates rule.
-- **The simulated world moves here, in Rust, at Etape 2** (the owner's ruling, 2026-08-21,
+- **The simulated world moved here, in Rust, at Etape 2** (the owner's ruling, 2026-08-21, done
+  2026-08-22: `src/physics.rs`, `src/ground.rs`, `src/hull.rs`, the goldens in `tests/data/`;
   superseding the earlier C-face plan). The flagship's `grid` library is two worlds fused: the
   *perceived* world (geometry, materials, stage, senses) stays C++ in tron-grid-lite forever —
   its consumers render and sense, and this server never renders — while the *simulated* world
@@ -109,10 +111,10 @@ function by design.
 
 ## CI today
 
-`quick-checks` (markdown lint + stray carriage returns) feeding the `CI Success` gate — the
-ruleset requires that check by its exact name. The build matrix arrives with the first code,
-and it is the link repository's cargo-flavoured shape (fmt, clippy, test, both platforms), not
-the flagship's — this is a Rust repository.
+`quick-checks` (markdown lint + stray carriage returns) feeding `Build (ubuntu-latest)` and
+`Build (windows-latest)` - fmt, clippy with warnings as errors, and the whole test suite, the
+link repository's cargo-flavoured shape - and the `CI Success` gate the ruleset requires by its
+exact name. CodeQL (rust, actions, c-cpp for the submodule) runs beside it.
 
 ## Process
 

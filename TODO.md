@@ -1,7 +1,7 @@
 # TODO
 
 The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` and the
-`grid` library) and the wire carries a tick (link protocol v3). The blueprint is the flagship's
+`grid` library) and the wire carries a tick (link protocol v3 then; v6 today). The blueprint is the flagship's
 [docs/TOPOLOGY.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/TOPOLOGY.md)
 — its § Master Control's mechanics and § One tick, across the wire sections carry every
 mechanism below with its citation; this file only stages the server-side etapes so they are not
@@ -11,7 +11,8 @@ forgotten.
 
 A paced tick loop broadcasting `TICK_STATE` over the wire to whoever is connected — **in Rust**
 (the owner's ruling; see CLAUDE.md § Rules), loading Link as the DLL beside the executable
-through a few dozen lines of hand-written `extern "C"` loader, never as a crate. The heartbeat
+through a hand-written `extern "C"` loader (`src/link_dll.rs`, which grew the full message
+mirror beside the loader), never as a crate. The heartbeat
 needs no world: a scripted or empty roster broadcast is enough to prove the pacing, the
 acceptance window and the silence rules against real spectators. What the audit added to the
 original sentence, all of it specified in TOPOLOGY.md:
@@ -113,7 +114,7 @@ for a number nobody draws is the versioning-before-need the owner warned against
 The owner's observation (2026-08-22), ruled in `TOPOLOGY.md` § Master Control's mechanics: the
 Grid and every creature are triangles and squares only, so contacts are closed-form and the
 capsule-against-height-function body in `src/physics.rs` is a placeholder that `REZ` retires.
-Gated on the `REZ` payload (Link protocol v4) and on Etape 2's roster of record.
+Gated on the `REZ` payload (Link protocol v4, now v6) and on Etape 2's roster of record.
 
 - **World collision geometry** = planar faces with adjacency, derived from the same
   world-definition source as the mesh and the reflectors — never from a triangle soup. **A
