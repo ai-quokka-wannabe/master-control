@@ -992,10 +992,12 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
             ticks,
             hashes,
             ended,
+            other_build,
         } => {
             assert!(ticks >= 24, "{ticks} ticks");
             assert!(hashes >= 3, "{hashes} hashes");
             assert!(ended, "the world stopped on request, and the log says so");
+            assert!(other_build.is_none(), "the same binary made the log");
         }
         other => panic!("an honest log must agree: {other:?}"),
     }
@@ -1760,6 +1762,19 @@ fn clu_names_every_way_a_log_can_lie() {
     let other_protocol = honest.replacen("protocol 6 ", "protocol 7 ", 1);
     let refusal = check(other_protocol).expect_err("protocol");
     assert!(refusal.contains("Link protocol 7"), "{refusal}");
+
+    // Another build made the log: not a lie, but said, so a later disagreement is read right.
+    let build_line = lines
+        .iter()
+        .find(|line| line.starts_with("build "))
+        .expect("the log names its build");
+    let other_build = honest.replacen(build_line, "build ffffffffffffffff", 1);
+    match check(other_build) {
+        Ok(master_control::clu::Verdict::Agreed { other_build, .. }) => {
+            assert_eq!(other_build.as_deref(), Some("ffffffffffffffff"));
+        }
+        other => panic!("another build's honest log still agrees: {other:?}"),
+    }
 
     // A corrupted hash value: a divergence, found on the beat and named.
     let corrupted = honest.replacen("hash 8 ", "hash 8 DEADBEEFDEADBEEF\nhash 8 ", 1);
