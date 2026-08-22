@@ -20,6 +20,7 @@
 pub mod clu;
 pub mod ground;
 pub mod heartbeat;
+pub mod hull;
 pub mod link_dll;
 pub mod physics;
 pub mod record;
