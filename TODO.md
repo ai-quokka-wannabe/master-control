@@ -113,8 +113,15 @@ Gated on the `REZ` payload (Link protocol v4) and on Etape 2's roster of record.
   a root, not a tolerance). Still owed: edges against faces, and the vertical time of impact
   for a falling hull on a terrace edge (today the floor claim is the vertical root already, the
   floor being horizontal).
-- **Body against body**: Separating-Axis Test over face normals and edge cross products, pairs
-  culled by an AABB sweep in roster order.
+- [x] **Body against body**: Separating-Axis Test over both hulls' face normals and every
+  edge-pair cross product in a fixed order, pairs culled by a bounding-box test in id order
+  (`physics::separate`, called from `Roster::step` after every body has stepped alone). The
+  least overlap stands the pair apart half each, arrests the closing velocity, stops a walk
+  into the other, and each body feels a contact at its deepest vertex - normal, depth, the
+  arrested velocity plus the push as impulse, the relative tangential velocity as slip. A
+  body rests *on* another only when its lowest point is above the other's middle (then it is
+  stood up whole and grounded); two bodies in one spot go apart on the floor, never stacked.
+  Kinematic throughout: no solver, as ruled.
 - **The report is the sense**: each contact is a point on the body, a world normal, a depth and
   a slip velocity;
   it extends the `TICK_STATE` creature-host debt (specific force plus contacts) and the

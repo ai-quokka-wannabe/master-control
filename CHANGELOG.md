@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Exact contacts, second movement: creatures feel each other.** `physics::separate` is the
+  separating-axis test between two hulls - both hulls' face normals and every edge-pair cross
+  product, in a fixed order, because the axes are replayed state - run from the roster's step
+  over every pair whose bounding boxes touch, in id order, after every body has stepped alone
+  against the world. The least overlap stands the pair apart half each (kinematic, no solver),
+  arrests the closing velocity, stops a walk into the other body, and each feels a contact at
+  its deepest vertex: the world normal pushing it back, the depth, the arrested velocity plus
+  the push itself as the impulse (a resting contact is not a zero one - the ABI reports no
+  zero contacts, and the budget would have discarded it as faintest, which the first live run
+  taught), and the relative tangential velocity as the slip. A body rests *on* another only
+  when its lowest point is above the other's middle; two bodies standing in one spot overlap
+  least through their height, and stacking them would be a lie, so they go apart on the floor
+  along the least horizontal overlap. Tests: overlapping cubes stood apart with mirrored
+  contacts (and mirrored again, so the axis is oriented by where the other stands and never by
+  which normal came first), a walk stopped at a face with no slip, a sidestep whose slip is the
+  sidestep, a landing that stacks, two slabs in one spot that do not; five breakage rounds
+  discriminated. Live: two modelled hosts on one spawn pad stand apart on the floor.
 - **Exact contacts, first movement: a shaped body collides as its convex hull.** `src/hull.rs`
   builds the hull of a REZ mesh at rez - incremental, in row order, so the same rows give the
   same hull bit for bit; a flat mesh has no hull and keeps the point proxy, as does every
