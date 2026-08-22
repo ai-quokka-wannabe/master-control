@@ -72,10 +72,17 @@ Grid and every creature are triangles and squares only, so contacts are closed-f
 capsule-against-height-function body in `src/physics.rs` is a placeholder that `REZ` retires.
 Gated on the `REZ` payload (Link protocol v4) and on Etape 2's roster of record.
 
-- **World collision geometry** = welded planar faces with adjacency, derived from the same
-  world-definition source as the mesh and the reflectors — never from a triangle soup, so no
-  interior edge between coplanar neighbours can ever author a contact normal (internal-edge
-  catching, the PhysX/Unity ghost-collision class).
+- **World collision geometry** = planar faces with adjacency, derived from the same
+  world-definition source as the mesh and the reflectors — never from a triangle soup. **A
+  square is its own primitive, not two triangles** (owner's ruling): the collision
+  representation keeps quads as quads, so no interior diagonal exists to catch on
+  (internal-edge catching, the PhysX/Unity ghost-collision class); welding is only ever owed to
+  a genuine triangle soup.
+- **Sliding, friction, and the scratch**: a contact persists across ticks as a sliding contact
+  along any face, the floor's traction applies to every face, and a sliding contact authors a
+  *scratch* acoustic `EVENT` (strength from slip speed against normal load, position at the
+  contact point) through the same acoustics the voice uses — creatures hear each other scrape,
+  spectators hear it Doppler-shifted.
 - **Creature proxy** = the convex hull of the `REZ` mesh, computed once at rez in a fixed vertex
   order; hull and axis enumeration are replayed state.
 - **Body against world**: continuous, time-of-impact contacts of the hull's vertices and edges
@@ -83,7 +90,8 @@ Gated on the `REZ` payload (Link protocol v4) and on Etape 2's roster of record.
   form, so tunnelling is closed by construction, not by a tolerance.
 - **Body against body**: Separating-Axis Test over face normals and edge cross products, pairs
   culled by an AABB sweep in roster order.
-- **The report is the sense**: each contact is a point on the body, a world normal and a depth;
+- **The report is the sense**: each contact is a point on the body, a world normal, a depth and
+  a slip velocity;
   it extends the `TICK_STATE` creature-host debt (specific force plus contacts) and the
   `max_contact_count` truncation (discard the faintest) stays deterministic.
 - **Response stays kinematic**: minimal-translation separation and velocity projection, as the
