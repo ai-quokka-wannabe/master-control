@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Clu: `master-control clu <log> [<disk>]` re-simulates a log and checks its hashes.** The
+  input log now also records every `rez` with the body's bounds and every `derez`, so it is
+  self-sufficient: Clu drives a roster from it alone - the same physics under the same build -
+  and compares its hashes with the logged ones on the beat. Agreement is the replay claim made
+  good; at the first disagreement Clu names the tick and, given the Disk, which body and which
+  field moved differently, floats as their bits. A log from another world is refused in words.
+  Proven on a real run (328 ticks, 10 hashes agreed) and on the same run with one intent lied
+  about by a quarter of a metre a second (`creature 256 pz: recorded 408C0000 (4.375)
+  re-simulated 408BC000 (4.3671875)`); an integration test pins both verdicts and the refusal;
+  three breakage rounds discriminated. One ulp of a lie on a slow intent moves a body below
+  float resolution at five metres - an honest agreement, noted so nobody mistakes it for a gap.
 - **The two logs: a Disk and an input log (Etape 4).** `--disk <path>` records the world to a
   Disk - a client whose socket is a file, opened through Link's `record_open` and told
   everything every citizen is told, the owners' letters included, from the same per-subscriber
