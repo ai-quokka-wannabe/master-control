@@ -38,16 +38,17 @@ a leave is a broadcast; late arrival is not a special case. Added by the audit: 
 substreams derived from the master seed; traceable identities on creatures and models; intent
 conflicts resolved deterministically against the settled snapshot and logged.
 
-The placement ruling's port is **done on this side**: `stepBody`, `sanitiseAndClamp` and the
-ground contract live in `src/physics.rs` and `src/ground.rs`, held to the flagship by golden
-vectors (bit-exact for the ground, tolerance for the arc's sin/cos), with the per-tick hash in
-this suite and per-creature seed substreams ready. What remains of this etape:
-
-- **The flagship's deletion movement**: its `stepBody`, physics tests, Etape-16 hash and the
-  local `--program --ticks` mode go, its dev loop dialling a local Master Control instead.
-- **The REZ/DEREZ wire lifecycle**, gated on the REZ payload (Link Etape 6): real descriptors
-  replace `FIRST_BODY`, joins broadcast, the roster becomes plural. (`WELCOME` already carries
-  the world-definition fingerprint since Link v4, and the door already judges by it.)
+**Done.** The physics port (`src/physics.rs`, `src/ground.rs`, golden vectors), the flagship's
+deletion movement, and the wire lifecycle in `src/roster.rs`: a host's `REZ` embodies a creature
+on the spawn pad (or takes up an orphan where it stands), is relayed to every citizen and
+replayed to every late joiner verbatim; a host's `DEREZ` or `BYE` is a leave and is broadcast; a
+crash or a reap is not a leave - the body stays on the neutral reflex, ownerless, until the next
+host rezzes the same identity. Declared bounds are judged against the world's own (`WORLD_MAX_*`)
+and refused by name rather than clamped. The world's own guest remains as the first unowned
+resident, claimable by steering it. Two notes for later etapes: every body spawns on the one
+spawn pad until bodies feel each other (Etape 5 is the trigger for a spawn rule); and a refused
+`REZ` is a log line at the server only - the host learns by not hearing its body relayed, which
+a future `REFUSED` message could make explicit.
 
 ## Etape 3 — validation
 

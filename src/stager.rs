@@ -52,6 +52,8 @@ pub enum Verdict {
     },
     /// Sent by a connection that does not own the creature - sender-owns-creature, refused.
     RefusedNotOwner { creature_id: u32, sender: u64 },
+    /// Sent for an identity nobody wears: intents steer bodies, and there is no body.
+    RefusedNotEmbodied { creature_id: u32, sender: u64 },
 }
 
 /// How a step's intent came to be - the applied half of the record.
@@ -66,8 +68,8 @@ pub enum Applied {
 }
 
 struct CreatureStaging {
-    /// The connection that owns this creature's intent stream. First claimant wins for the
-    /// scripted guest; the roster of record replaces this at Etape 2.
+    /// The connection that owns this creature's intent stream - the roster's word, mirrored
+    /// here by [`ActionStager::reassign`] so a stale stream can never outlive its owner.
     owner: u64,
     /// Accepted intents by the tick they are staged for. Two entries at most in practice -
     /// the window is two ticks wide - but a map states the rule rather than an optimisation.
@@ -184,6 +186,25 @@ impl ActionStager {
         } else {
             Applied::Coasted
         }
+    }
+
+    /// The roster's word on who steers a creature: a `REZ` (or a claim by steering) hands the
+    /// intent stream to `owner`, and whatever an earlier owner staged is forgotten with it.
+    pub fn reassign(&mut self, creature_id: u32, owner: u64) {
+        self.creatures.insert(
+            creature_id,
+            CreatureStaging {
+                owner,
+                staged: HashMap::new(),
+                last_accepted: None,
+                repeat_budget: 0,
+            },
+        );
+    }
+
+    /// A creature that left the world takes its intent stream with it.
+    pub fn release(&mut self, creature_id: u32) {
+        self.creatures.remove(&creature_id);
     }
 
     /// The dead-host liveness rule: the creature stays embodied and falls to the neutral

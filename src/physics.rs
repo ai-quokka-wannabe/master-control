@@ -24,7 +24,7 @@
 //! too, FNV-1a over the bytes of every body's pose, velocity and actuators: the failure it
 //! hunts is a single stray bit, which a tolerance would forgive.
 
-use crate::ground::GRID_FLOOR_CONFIG;
+use crate::ground::{GRID_FLOOR_CONFIG, grid_mesh_height};
 use crate::link_dll::WorldDefinition;
 use crate::stager::Intent;
 
@@ -41,6 +41,12 @@ pub const BODY_MASS_KG: f32 = 1.0;
 
 /// Half the body's height, metres: how far its origin stands above what it stands on.
 pub const BODY_HALF_HEIGHT: f32 = 0.05;
+
+/// The floor every body walks - the world's own, never a stand-in.
+#[must_use]
+pub fn floor(x: f32, z: f32) -> f32 {
+    grid_mesh_height(x, z, &GRID_FLOOR_CONFIG)
+}
 
 /// The simulated world, in the wire's words: the floor this server steps against, its tick and
 /// its body height - the fields a client must agree on before its positions mean what ours do.

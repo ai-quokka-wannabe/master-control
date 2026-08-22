@@ -13,26 +13,14 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
-//! The world's telling: the understudy's set dressing, and one real body.
+//! The set dressing: the understudy's scripted furniture beside the roster of record.
 //!
-//! Since the physics came home (the placement ruling's Etape 2), the guest is no longer a
-//! kinematic glide: it is a [`crate::physics::Body`] stepped by the ported `stepBody` against
-//! the real terraced floor - gravity, traction, arc turns, climb-limit walls, contacts. The two
-//! orbiters and the blinker remain scripted set dressing, deliberately: they exist so a
-//! spectator always has motion and snapshot-removal to show, and they claim to be nothing more.
+//! Every body lives in [`crate::roster::Roster`] and walks by real physics. The two orbiters
+//! and the blinker here remain scripted, deliberately: they exist so a spectator always has
+//! motion and snapshot-removal to show, and they claim to be nothing more. Their three rows
+//! are [`crate::roster::SET_DRESSING_ROWS`], the part of the snapshot the roster cannot use.
 
-use crate::ground::{GRID_FLOOR_CONFIG, grid_mesh_height};
 use crate::link_dll::{CreatureState, EVENT_VOCALISATION, Event};
-use crate::physics::{Body, step_body};
-use crate::stager::Intent;
-
-/// The steerable guest's identity - the one row a creature host may claim.
-pub const GUEST_CREATURE_ID: u32 = 100;
-
-/// Where the guest rezzes: the centre of a cell, so its first steps cross no riser and its
-/// physics is legible from the very first telling.
-pub const GUEST_SPAWN_X: f32 = 1.0;
-pub const GUEST_SPAWN_Z: f32 = 5.0;
 
 /// The blinker's period, in ticks: four seconds there, four seconds gone - the understudy's
 /// rhythm, kept so a spectator shows snapshot-authoritative removal against this server too.
@@ -41,12 +29,6 @@ const BLINK_HALF_PERIOD: u64 = 128;
 /// The caller calls this often, for this long.
 const CALL_PERIOD: u64 = 64;
 const CALL_LENGTH: u64 = 8;
-
-/// The floor the guest walks - the world's own, never a stand-in.
-#[must_use]
-pub fn floor(x: f32, z: f32) -> f32 {
-    grid_mesh_height(x, z, &GRID_FLOOR_CONFIG)
-}
 
 /// One orbiting creature's row at a tick: a circle walked at constant speed, facing along it.
 /// Yaw is wrapped onto ±pi so the seam the spectator's shortest-arc blend guards keeps being
@@ -89,15 +71,17 @@ fn wrap_to_pi(angle: f32) -> f32 {
     }
 }
 
-/// The world this tick: every row, and any events that sounded.
-pub struct Telling {
+/// The set dressing this tick: every scripted row, and any events that sounded.
+pub struct Dressing {
     pub rows: Vec<CreatureState>,
     pub events: Vec<Event>,
 }
 
-/// Steps the world to `tick` - the guest by real physics with its already-sanitised staged
-/// intent, the set dressing by its script - and tells the result.
-pub fn tell(tick: u64, guest: &mut Body, staged: Intent) -> Telling {
+/// The scripted part of the world at `tick`: two orbiters, the blinker, the caller's call.
+/// Bodies are the roster's business; this is the furniture a spectator sees move while the
+/// roster is still small.
+#[must_use]
+pub fn set_dressing(tick: u64) -> Dressing {
     let mut rows = vec![
         orbiter(1, tick, 6.0, 0.6, 0.0),
         orbiter(2, tick, 9.0, -0.35, 2.1),
@@ -114,17 +98,6 @@ pub fn tell(tick: u64, guest: &mut Body, staged: Intent) -> Telling {
         rows[0].vocalisation = 0.8;
     }
 
-    let previous_voice = guest.vocalisation;
-    step_body(guest, staged, floor);
-    rows.push(CreatureState {
-        creature_id: GUEST_CREATURE_ID,
-        position: guest.position,
-        yaw: guest.yaw,
-        velocity: guest.velocity,
-        yaw_rate: guest.turn_rate,
-        vocalisation: guest.vocalisation,
-    });
-
     let mut events = Vec::new();
     if calling && call_phase == 0 {
         events.push(Event {
@@ -136,20 +109,8 @@ pub fn tell(tick: u64, guest: &mut Body, staged: Intent) -> Telling {
             reserved0: [0; 3],
         });
     }
-    // The guest's voice sounds as an event on its onset - a call that starts is news; a call
-    // that continues is already in the rows.
-    if guest.vocalisation > 0.0 && previous_voice <= 0.0 {
-        events.push(Event {
-            tick,
-            position: guest.position,
-            strength: guest.vocalisation,
-            creature_id: GUEST_CREATURE_ID,
-            kind: EVENT_VOCALISATION,
-            reserved0: [0; 3],
-        });
-    }
 
-    Telling { rows, events }
+    Dressing { rows, events }
 }
 
 /// Whether the blinker leaves the world at this tick - the moment a DEREZ is owed beside the
@@ -162,77 +123,17 @@ pub fn blinker_derezzes_at(tick: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::physics::{FIRST_BODY, TICK_SECONDS};
-
-    fn spawned_guest() -> Body {
-        Body::standing_at(
-            GUEST_SPAWN_X,
-            GUEST_SPAWN_Z,
-            floor(GUEST_SPAWN_X, GUEST_SPAWN_Z),
-            FIRST_BODY,
-        )
-    }
-
-    #[test]
-    fn the_guest_walks_by_real_physics_and_stands_still_on_zero_intent() {
-        let mut guest = spawned_guest();
-        let before = guest.position;
-        tell(
-            1,
-            &mut guest,
-            Intent {
-                forward_speed: 1.0,
-                turn_rate: 0.0,
-                vocalisation: 0.0,
-            },
-        );
-        assert!(
-            (guest.position[2] - (before[2] - TICK_SECONDS)).abs() < 1e-6,
-            "forward is -Z at yaw zero, at the commanded metre per second"
-        );
-        assert!(guest.grounded, "a walking guest keeps its feet");
-        assert!(
-            !guest.contacts.is_empty(),
-            "a standing body feels the floor every tick"
-        );
-
-        let held = guest.position;
-        tell(2, &mut guest, Intent::default());
-        assert_eq!(
-            guest.position, held,
-            "zero intent brakes, and a stopped body stays put"
-        );
-    }
-
-    #[test]
-    fn the_spawn_cell_is_flat_enough_to_walk() {
-        // The spawn promise, checked rather than remembered: a metre of forward walk from the
-        // spawn crosses no wall-height rise, so the first tellings show motion, not a creature
-        // pinned to a riser.
-        let start = floor(GUEST_SPAWN_X, GUEST_SPAWN_Z);
-        for step in 0..32 {
-            #[allow(clippy::cast_precision_loss)]
-            let z = GUEST_SPAWN_Z - (step as f32 * TICK_SECONDS);
-            assert!(
-                (floor(GUEST_SPAWN_X, z) - start).abs() <= crate::physics::CLIMB_LIMIT_METRES,
-                "the guest's opening walk must not start against a wall"
-            );
-        }
-    }
 
     #[test]
     fn the_blinker_keeps_the_understudys_rhythm() {
-        let mut guest = spawned_guest();
         assert_eq!(
-            tell(0, &mut guest, Intent::default()).rows.len(),
-            4,
-            "two orbiters, the blinker, the guest"
+            set_dressing(0).rows.len(),
+            3,
+            "two orbiters and the blinker"
         );
         assert_eq!(
-            tell(BLINK_HALF_PERIOD, &mut guest, Intent::default())
-                .rows
-                .len(),
-            3,
+            set_dressing(BLINK_HALF_PERIOD).rows.len(),
+            2,
             "the blinker is gone"
         );
         assert!(blinker_derezzes_at(BLINK_HALF_PERIOD));
@@ -243,39 +144,14 @@ mod tests {
     }
 
     #[test]
-    fn a_guest_call_sounds_once_on_its_onset() {
-        let mut guest = spawned_guest();
-        let first = tell(
-            1,
-            &mut guest,
-            Intent {
-                forward_speed: 0.0,
-                turn_rate: 0.0,
-                vocalisation: 0.9,
-            },
-        );
-        assert!(
-            first
-                .events
-                .iter()
-                .any(|event| event.creature_id == GUEST_CREATURE_ID),
-            "the onset is news"
-        );
-        let second = tell(
-            2,
-            &mut guest,
-            Intent {
-                forward_speed: 0.0,
-                turn_rate: 0.0,
-                vocalisation: 0.9,
-            },
-        );
-        assert!(
-            !second
-                .events
-                .iter()
-                .any(|event| event.creature_id == GUEST_CREATURE_ID),
-            "a continuing call is already in the rows"
-        );
+    fn the_caller_sounds_once_on_its_onset_and_then_only_in_the_rows() {
+        let onset = set_dressing(CALL_PERIOD);
+        assert_eq!(onset.events.len(), 1);
+        assert_eq!(onset.events[0].creature_id, 1);
+        assert!(onset.rows[0].vocalisation > 0.0);
+        let continuing = set_dressing(CALL_PERIOD + 1);
+        assert!(continuing.events.is_empty());
+        assert!(continuing.rows[0].vocalisation > 0.0);
+        assert!(set_dressing(CALL_PERIOD + CALL_LENGTH).rows[0].vocalisation == 0.0);
     }
 }
