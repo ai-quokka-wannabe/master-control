@@ -23,6 +23,11 @@
 //! fires the unpaid debt is dropped rather than carried: later ticks run late, simulation time
 //! never stretches, and the log is tick-indexed either way.
 
+// The one clock rule, stated where it is kept: this module owns the wall clock - the pacing
+// accumulator, the keepalive, the Disk header's start time - and nothing else in the crate may
+// touch one (clippy.toml). The allow is the visible, greppable exception the rule wants.
+#![allow(clippy::disallowed_types, clippy::disallowed_methods)]
+
 use crate::link_dll::{
     Actions, Connection, Derez, Hello, LNK_OK, LinkDll, Listener, Message, PROTOCOL_VERSION,
     ROLE_CREATURE_HOST, ROLE_SPECTATOR, TickStateHeader, Welcome,
@@ -269,6 +274,9 @@ impl Heartbeat {
                 ));
                 next_tick_time = Instant::now() + dt;
             }
+        }
+        if let Some(log) = self.input_log.as_mut() {
+            log.end(self.tick);
         }
         log_info("the world stops on request - Master Control out.");
     }
@@ -604,7 +612,7 @@ impl Heartbeat {
         if let Some(log) = input_log.as_mut() {
             if self.config.hash_every > 0 && tick.is_multiple_of(u64::from(self.config.hash_every))
             {
-                log.hash(tick, state_hash(self.roster.bodies()));
+                log.hash(tick, state_hash(self.roster.named_bodies()));
             }
             log.flush();
         }

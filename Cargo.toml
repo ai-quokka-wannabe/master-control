@@ -24,3 +24,17 @@ unsafe_code = "deny"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
+
+# Release, with the arithmetic still watched. A wrap that only happens at the speed of an
+# optimised build is exactly the shape of a replay divergence the debug test suite can never
+# reproduce, so the whole suite also runs under this profile: release codegen, overflow checks
+# and debug assertions on. `cargo test --profile release-check`.
+[profile.release-check]
+inherits = "release"
+overflow-checks = true
+debug-assertions = true
+
+# One codegen unit: build-to-build variation is one more thing a bit-for-bit world does not
+# want, and this crate is small enough that the compile time is nothing.
+[profile.release]
+codegen-units = 1

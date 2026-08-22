@@ -42,7 +42,16 @@ fn clu_main(arguments: Vec<String>) -> std::process::ExitCode {
         }
     };
     match master_control::clu::check(std::path::Path::new(log), disk.as_deref(), &wire) {
-        Ok(master_control::clu::Verdict::Agreed { ticks, hashes }) => {
+        Ok(master_control::clu::Verdict::Agreed {
+            ticks,
+            hashes,
+            ended,
+        }) => {
+            if !ended {
+                println!(
+                    "[WARN] Clu: the log has no end line - the world did not stop on request, and whatever followed its last line was never written."
+                );
+            }
             println!(
                 "[INFO] Clu: {ticks} ticks re-simulated, {hashes} hashes agreed - the log replays to the world it describes."
             );
