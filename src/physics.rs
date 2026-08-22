@@ -138,11 +138,17 @@ pub fn sanitise_and_clamp(intent: Intent, bounds: &BodyBounds) -> Intent {
     }
 }
 
-/// One contact the body felt this tick, in body frame - position and impulse, the ABI's shape.
+/// One contact the body felt this tick, in body frame - position and impulse, the ABI's shape,
+/// and what the exact-contacts ruling adds: the world normal at the contact, how deep the body
+/// stood past the face before it was stood back (zero when it merely rests), and the slip -
+/// the body's velocity along the face, body frame, which is what a scratch is made of.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Contact {
     pub position: [f32; 3],
     pub impulse: [f32; 3],
+    pub normal: [f32; 3],
+    pub depth: f32,
+    pub slip: [f32; 3],
 }
 
 /// One creature's physical state: what the flagship's `Creature` carried for physics, and what
@@ -158,6 +164,9 @@ pub struct Body {
     pub vocalisation: f32,
     pub specific_force: [f32; 3],
     pub contacts: Vec<Contact>,
+    /// The collision proxy: the convex hull of the body's REZ mesh, built once at rez. `None`
+    /// is a bodiless creature, which keeps the point proxy the goldens hold.
+    pub hull: Option<crate::hull::Hull>,
     pub bounds: BodyBounds,
 }
 
@@ -175,6 +184,7 @@ impl Body {
             vocalisation: 0.0,
             specific_force: [0.0; 3],
             contacts: Vec::new(),
+            hull: None,
             bounds,
         }
     }
@@ -183,6 +193,59 @@ impl Body {
 /// The direction a body faces: -Z at rest, +Y up, right-handed, so positive yaw turns left.
 fn forward_for(yaw: f32) -> [f32; 3] {
     [-yaw.sin(), 0.0, -yaw.cos()]
+}
+
+/// A body-frame point carried into the world by a pose: the yaw about +Y, then the translation
+/// - the flagship's `worldFromBody`, clause for clause.
+fn body_to_world(point: &[f32; 3], position: [f32; 3], yaw: f32) -> [f32; 3] {
+    let (sin, cos) = yaw.sin_cos();
+    [
+        position[0] + point[0].mul_add(cos, point[2] * sin),
+        position[1] + point[1],
+        position[2] + point[2].mul_add(cos, -(point[0] * sin)),
+    ]
+}
+
+/// A world direction into the body's frame: the inverse yaw, no translation.
+fn world_to_body_direction(direction: [f32; 3], yaw: f32) -> [f32; 3] {
+    let (sin, cos) = (-yaw).sin_cos();
+    [
+        direction[0].mul_add(cos, direction[2] * sin),
+        direction[1],
+        direction[2].mul_add(cos, -(direction[0] * sin)),
+    ]
+}
+
+/// Where a horizontal sweep from `before` to `after` first crosses a floor-cell boundary: the
+/// fraction of the sweep, and the wall's outward normal (the boundary faces the sweep). The
+/// floor is a lattice of `cell_size` squares, so the candidate crossings are the next lattice
+/// line along each axis; the earlier one is the riser met. A sweep that crosses no line (a rise
+/// within one cell cannot happen on this floor) answers the whole sweep.
+fn first_cell_crossing(before: [f32; 3], after: [f32; 3]) -> (f32, [f32; 3]) {
+    let config = &crate::ground::GRID_FLOOR_CONFIG;
+    let cell = config.cell_size;
+    // The lattice's lines sit at k * cell - half, the floor being centred on the origin.
+    let half = (config.cells as f32 * cell) * 0.5;
+    let mut best = (1.0f32, [0.0, 0.0, 1.0]);
+    for (axis, normal_axis) in [(0usize, 0usize), (2usize, 2usize)] {
+        let delta = after[axis] - before[axis];
+        if delta == 0.0 {
+            continue;
+        }
+        let line = if delta > 0.0 {
+            ((before[axis] + half) / cell).floor().mul_add(cell, cell) - half
+        } else {
+            ((before[axis] + half) / cell).ceil().mul_add(cell, -cell) - half
+        };
+        let fraction = (line - before[axis]) / delta;
+        if (0.0..=1.0).contains(&fraction) && fraction < best.0 {
+            let mut normal = [0.0f32; 3];
+            normal[normal_axis] = if delta > 0.0 { -1.0 } else { 1.0 };
+            best = (fraction, normal);
+        }
+    }
+    // A hair before the line, so the vertex stands against the riser and not inside the cell.
+    (best.0 * (1.0 - 1e-5), best.1)
 }
 
 /// Advances one body by one tick of physics against `ground` - the flagship's `stepBody`,
@@ -238,42 +301,153 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
     let mut y = position_before[1] + (velocity_before[1] * DT) - (0.5 * GRAVITY * DT * DT);
     let mut velocity_y = velocity_before[1] - (GRAVITY * DT);
 
-    // A terrace riser taller than ankle height is a wall: the horizontal move is cancelled, the
-    // turn kept, and the stop felt on the front face.
+    // A terrace riser taller than ankle height is a wall. For the point proxy the horizontal
+    // move is cancelled whole, the turn kept, and the stop felt on the front face. For a hull
+    // the wall is met by whichever vertex reaches it first, at the exact fraction of the tick
+    // where that vertex's sweep crosses into the higher cell - the contact time is a root, not
+    // a tolerance - and the body keeps the part of its move before it.
     if body.grounded {
-        let rise = ground(x, z) - ground(position_before[0], position_before[2]);
-        if rise > CLIMB_LIMIT_METRES {
-            let arrested = body.forward_speed;
-            x = position_before[0];
-            z = position_before[2];
-            body.forward_speed = 0.0;
+        match body.hull.as_ref() {
+            None => {
+                let rise = ground(x, z) - ground(position_before[0], position_before[2]);
+                if rise > CLIMB_LIMIT_METRES {
+                    let arrested = body.forward_speed;
+                    x = position_before[0];
+                    z = position_before[2];
+                    body.forward_speed = 0.0;
 
-            if arrested != 0.0 {
-                body.contacts.push(Contact {
-                    position: [0.0, 0.0, -BODY_HALF_LENGTH],
-                    impulse: [0.0, 0.0, BODY_MASS_KG * arrested],
-                });
+                    if arrested != 0.0 {
+                        body.contacts.push(Contact {
+                            position: [0.0, 0.0, -BODY_HALF_LENGTH],
+                            impulse: [0.0, 0.0, BODY_MASS_KG * arrested],
+                            normal: [0.0, 0.0, 1.0],
+                            depth: 0.0,
+                            slip: [0.0; 3],
+                        });
+                    }
+                }
+            }
+            Some(hull) => {
+                let move_x = x - position_before[0];
+                let move_z = z - position_before[2];
+                let mut earliest: Option<(f32, usize, [f32; 3])> = None;
+                for (index, vertex) in hull.vertices.iter().enumerate() {
+                    // The vertex's own floor before and after, under the pose before the turn
+                    // (the sweep is translation; the turn is kept whatever the wall says).
+                    let before = body_to_world(
+                        vertex,
+                        [position_before[0], position_before[1], position_before[2]],
+                        yaw_before,
+                    );
+                    let after = [before[0] + move_x, before[1], before[2] + move_z];
+                    let rise = ground(after[0], after[2]) - ground(before[0], before[2]);
+                    if rise > CLIMB_LIMIT_METRES {
+                        let (fraction, normal) = first_cell_crossing(before, after);
+                        if earliest.is_none_or(|(t, _, _)| fraction < t) {
+                            earliest = Some((fraction, index, normal));
+                        }
+                    }
+                }
+                if let Some((fraction, index, normal)) = earliest {
+                    let arrested = body.forward_speed;
+                    x = position_before[0] + move_x * fraction;
+                    z = position_before[2] + move_z * fraction;
+                    body.forward_speed = 0.0;
+                    if arrested != 0.0 {
+                        // The stop is felt at the vertex that met the wall, body frame, along
+                        // the wall's normal turned into the body's frame.
+                        let push = world_to_body_direction(
+                            [
+                                normal[0] * BODY_MASS_KG * arrested,
+                                0.0,
+                                normal[2] * BODY_MASS_KG * arrested,
+                            ],
+                            yaw_before,
+                        );
+                        body.contacts.push(Contact {
+                            position: hull.vertices[index],
+                            impulse: push,
+                            normal,
+                            depth: 0.0,
+                            slip: [0.0; 3],
+                        });
+                    }
+                }
             }
         }
     }
 
-    // The ground claims everything at or below standing height.
-    let standing = ground(x, z) + BODY_HALF_HEIGHT;
+    // The ground claims everything at or below standing height. For the point proxy that is
+    // the floor under the origin plus the half height; for a hull it is wherever the lowest
+    // vertex, over its own cell, would touch its own floor - a body on a terrace edge stands on
+    // the higher cell - and every vertex that rests there is a contact of its own, the support
+    // shared among them, each knowing its normal, its depth and its slip.
+    let standing = match body.hull.as_ref() {
+        None => ground(x, z) + BODY_HALF_HEIGHT,
+        Some(hull) => hull
+            .vertices
+            .iter()
+            .map(|vertex| {
+                let world = body_to_world(vertex, [x, 0.0, z], yaw_after);
+                ground(world[0], world[2]) - world[1]
+            })
+            .fold(f32::NEG_INFINITY, f32::max),
+    };
     if y <= standing {
         let arrested = -velocity_y;
-        body.contacts.push(Contact {
-            position: [0.0, -BODY_HALF_HEIGHT, 0.0],
-            impulse: [
-                0.0,
-                (BODY_MASS_KG * GRAVITY * DT)
-                    + if body.grounded {
-                        0.0
-                    } else {
-                        BODY_MASS_KG * arrested
-                    },
-                0.0,
-            ],
-        });
+        let support = (BODY_MASS_KG * GRAVITY * DT)
+            + if body.grounded {
+                0.0
+            } else {
+                BODY_MASS_KG * arrested
+            };
+        let depth = standing - y;
+        match body.hull.as_ref() {
+            None => body.contacts.push(Contact {
+                position: [0.0, -BODY_HALF_HEIGHT, 0.0],
+                impulse: [0.0, support, 0.0],
+                normal: [0.0, 1.0, 0.0],
+                depth,
+                slip: [0.0; 3],
+            }),
+            Some(hull) => {
+                // The vertices resting on their floors once the body stands: within a hair of
+                // their own ground, in a fixed order - the hull's.
+                const REST_EPSILON: f32 = 1e-4;
+                let resting: Vec<usize> = hull
+                    .vertices
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, vertex)| {
+                        let world = body_to_world(vertex, [x, standing, z], yaw_after);
+                        world[1] - ground(world[0], world[2]) <= REST_EPSILON
+                    })
+                    .map(|(index, _)| index)
+                    .collect();
+                let share = support / resting.len().max(1) as f32;
+                // The slip: the body's horizontal velocity along the floor, in the body's frame.
+                let forward = forward_for(yaw_after);
+                let slip_world = if body.grounded || arrested >= 0.0 {
+                    [
+                        forward[0] * body.forward_speed,
+                        0.0,
+                        forward[2] * body.forward_speed,
+                    ]
+                } else {
+                    [velocity_before[0], 0.0, velocity_before[2]]
+                };
+                let slip = world_to_body_direction(slip_world, yaw_after);
+                for index in resting {
+                    body.contacts.push(Contact {
+                        position: hull.vertices[index],
+                        impulse: [0.0, share, 0.0],
+                        normal: [0.0, 1.0, 0.0],
+                        depth,
+                        slip,
+                    });
+                }
+            }
+        }
 
         y = standing;
         velocity_y = 0.0;
@@ -360,6 +534,177 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = &'a Body>) -> u64 {
         mix(body.vocalisation);
     }
     hash
+}
+
+#[cfg(test)]
+mod hull_tests {
+    use super::*;
+    use crate::hull::Hull;
+
+    fn cube_body(size: f32, contacts: usize) -> Body {
+        let h = size / 2.0;
+        let corners = [
+            [-h, -h, -h],
+            [h, -h, -h],
+            [-h, h, -h],
+            [h, h, -h],
+            [-h, -h, h],
+            [h, -h, h],
+            [-h, h, h],
+            [h, h, h],
+        ];
+        let mut body = Body::standing_at(
+            0.0,
+            0.0,
+            0.0,
+            BodyBounds {
+                max_contact_count: contacts,
+                ..FIRST_BODY
+            },
+        );
+        body.hull = Some(Hull::from_points(&corners).expect("a cube"));
+        body.position[1] = h; // standing on its feet, not on a half height it lacks
+        body
+    }
+
+    /// A flat world with one terrace: a metre up beyond the lattice line at z = -2.
+    fn terrace(_: f32, z: f32) -> f32 {
+        if z < -2.0 { 1.0 } else { 0.0 }
+    }
+
+    #[test]
+    fn a_shaped_body_stands_on_its_lowest_vertices_each_a_contact_with_its_normal() {
+        let mut body = cube_body(1.0, 16);
+        step_body(&mut body, Intent::default(), |_, _| 0.0);
+        assert!(
+            (body.position[1] - 0.5).abs() < 1e-6,
+            "a unit cube's origin stands half a metre up: {:?}",
+            body.position
+        );
+        assert!(body.grounded);
+        assert_eq!(
+            body.contacts.len(),
+            4,
+            "four feet on the floor: {:?}",
+            body.contacts
+        );
+        for contact in &body.contacts {
+            assert_eq!(contact.normal, [0.0, 1.0, 0.0]);
+            assert!(
+                (contact.position[1] + 0.5).abs() < 1e-6,
+                "the contact is the foot itself"
+            );
+            assert!(
+                (contact.impulse[1] - BODY_MASS_KG * GRAVITY * TICK_SECONDS / 4.0).abs() < 1e-6,
+                "the support is shared"
+            );
+            assert_eq!(contact.slip, [0.0; 3]);
+        }
+        // A keel: one vertex reaching 0.8 below the origin, the rest a half-cube above. The body
+        // stands on the keel alone, 0.8 up - which is where a sign error in the standing height
+        // would put it 0.2 up instead.
+        let mut keeled = cube_body(1.0, 16);
+        let mut corners: Vec<[f32; 3]> = keeled.hull.as_ref().expect("cube").vertices.clone();
+        corners.push([0.0, -0.8, 0.0]);
+        keeled.hull = Some(Hull::from_points(&corners).expect("a keeled cube"));
+        keeled.position[1] = 5.0; // dropped from above, landing on the keel
+        for _ in 0..64 {
+            step_body(&mut keeled, Intent::default(), |_, _| 0.0);
+        }
+        assert!(
+            (keeled.position[1] - 0.8).abs() < 1e-5,
+            "stands on the keel: {:?}",
+            keeled.position
+        );
+        assert_eq!(keeled.contacts.len(), 1, "one foot: the keel");
+        assert!((keeled.contacts[0].position[1] + 0.8).abs() < 1e-6);
+
+        // Walking, the feet slip along the floor at the walking speed, in the body's frame.
+        let mut walking = cube_body(1.0, 16);
+        step_body(
+            &mut walking,
+            Intent {
+                forward_speed: 1.0,
+                turn_rate: 0.0,
+                vocalisation: 0.0,
+            },
+            |_, _| 0.0,
+        );
+        assert!(
+            (walking.contacts[0].slip[2] + 1.0).abs() < 1e-5,
+            "slip is -Z at a metre a second: {:?}",
+            walking.contacts[0].slip
+        );
+    }
+
+    #[test]
+    fn a_shaped_body_meets_a_riser_with_the_vertex_that_reaches_it_at_the_exact_crossing() {
+        // Front feet at z = -1.98; a tick of walking at 1 m/s carries them past the line at
+        // -2.0, 0.64 of the way through the tick.
+        let mut body = cube_body(1.0, 16);
+        body.position[2] = -1.48;
+        step_body(
+            &mut body,
+            Intent {
+                forward_speed: 1.0,
+                turn_rate: 0.0,
+                vocalisation: 0.0,
+            },
+            terrace,
+        );
+        assert!(
+            (body.position[2] + 1.5).abs() < 1e-4,
+            "stood against the riser, feet on the line: {:?}",
+            body.position
+        );
+        assert!(
+            body.position[2] > -1.5,
+            "a hair before the line, never inside the higher cell"
+        );
+        assert_eq!(body.forward_speed, 0.0, "the wall took the walk");
+        let wall: Vec<&Contact> = body
+            .contacts
+            .iter()
+            .filter(|contact| contact.normal == [0.0, 0.0, 1.0])
+            .collect();
+        assert_eq!(
+            wall.len(),
+            1,
+            "one vertex met the wall: {:?}",
+            body.contacts
+        );
+        assert!((wall[0].position[2] + 0.5).abs() < 1e-6, "a front vertex");
+        assert!(
+            (wall[0].impulse[2] - BODY_MASS_KG * 1.0).abs() < 1e-6,
+            "the arrested metre a second, pushed back"
+        );
+        assert_eq!(body.contacts.len(), 5, "the wall and the four feet");
+
+        // The same walk a step short of the line crosses nothing and is not arrested.
+        let mut clear = cube_body(1.0, 16);
+        clear.position[2] = -1.40;
+        step_body(
+            &mut clear,
+            Intent {
+                forward_speed: 1.0,
+                turn_rate: 0.0,
+                vocalisation: 0.0,
+            },
+            terrace,
+        );
+        assert!((clear.forward_speed - 1.0).abs() < 1e-6);
+        assert!((clear.position[2] - (-1.40 - TICK_SECONDS)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_bodiless_creature_keeps_the_point_proxy_exactly() {
+        // The point proxy is what the goldens hold; a hull of None must leave it untouched.
+        let mut point = Body::standing_at(0.0, 0.0, 0.0, FIRST_BODY);
+        step_body(&mut point, Intent::default(), |_, _| 0.0);
+        assert_eq!(point.contacts.len(), 1);
+        assert_eq!(point.contacts[0].position, [0.0, -BODY_HALF_HEIGHT, 0.0]);
+        assert!((point.position[1] - BODY_HALF_HEIGHT).abs() < 1e-7);
+    }
 }
 
 #[cfg(test)]

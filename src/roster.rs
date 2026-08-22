@@ -219,6 +219,7 @@ impl Roster {
                 _ => {
                     resident.owner = Some(sender);
                     resident.body.bounds = bounds;
+                    resident.body.hull = hull_of(&model);
                     resident.model = model;
                     Admission::Adopted
                 }
@@ -231,7 +232,16 @@ impl Roster {
                     creature_id,
                     Resident {
                         owner: Some(sender),
-                        body: spawned(bounds),
+                        body: {
+                            let mut body = spawned(bounds);
+                            body.hull = hull_of(&model);
+                            // A shaped body stands on its own lowest vertex, not on a half
+                            // height it does not have.
+                            if let Some(hull) = body.hull.as_ref() {
+                                body.position[1] = floor(SPAWN_PAD_X, SPAWN_PAD_Z) - hull.lowest();
+                            }
+                            body
+                        },
                         model,
                     },
                 );
@@ -357,6 +367,21 @@ impl Roster {
             letters,
         }
     }
+}
+
+/// The collision proxy of a model: the convex hull of its vertices, or none for a bodiless
+/// creature and for a mesh that spans no volume (a flat body keeps the point proxy, logged
+/// nowhere because it is the body's own choice).
+fn hull_of(model: &Model) -> Option<crate::hull::Hull> {
+    if model.vertices.is_empty() {
+        return None;
+    }
+    let points: Vec<[f32; 3]> = model
+        .vertices
+        .iter()
+        .map(|vertex| vertex.position)
+        .collect();
+    crate::hull::Hull::from_points(&points)
 }
 
 fn spawned(bounds: BodyBounds) -> Body {
