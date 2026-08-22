@@ -426,6 +426,16 @@ impl Heartbeat {
             return;
         }
         let tick = self.tick;
+        if let Some(log) = self.input_log.as_mut() {
+            for model in rezzed {
+                if let Some(resident) = self.roster.resident(model.header.creature_id) {
+                    log.rez(tick, model.header.creature_id, &resident.body.bounds);
+                }
+            }
+            for creature_id in derezzed {
+                log.derez(tick, *creature_id);
+            }
+        }
         if let Some(disk) = self.disk.as_mut() {
             let mut told = true;
             for model in rezzed {

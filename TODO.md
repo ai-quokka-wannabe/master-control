@@ -74,10 +74,16 @@ applied to and whether it was fresh, repeated or coasted), and a hash of every b
 `hash_every` ticks. The owner's names: the file is a *Disk*; the program that reads Disks is
 *Clu*.
 
+**Done, Clu.** The flagship's `--replay <disk>` plays a Disk back into the window at the
+world's own pace. `master-control clu <log> [<disk>]` re-simulates the log - every `rez` with
+its bounds, every `derez`, every applied intent at its tick - and compares its hashes with the
+logged ones on the beat; an honest log agrees to the last hash, and a lie of half a metre a
+second in one intent is named at the first hash after it, with the Disk's rows against the
+re-simulated body, floats as bits (`creature 7 pz: recorded 408C0000 (4.375) re-simulated
+408BC000 (4.3671875)`). A log from another world is refused in words.
+
 **Still owed:** rotation (~55 MB per hour; a Disk should roll over at a size, each file whole);
-Clu itself — replay into a `--window`, re-simulate from the input log and compare the hashes,
-and on disagreement a state diff with floats as hex; the master seed in the log's header once
-the world draws one.
+the master seed in the log's header once the world draws one.
 
 ## Etape 5 — contacts, exact
 

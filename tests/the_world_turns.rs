@@ -903,3 +903,104 @@ fn a_world_with_a_disk_and_a_log_replays_what_it_said_and_logged_what_it_was_tol
     let _ = std::fs::remove_file(&disk_path);
     let _ = std::fs::remove_file(&log_path);
 }
+
+#[test]
+fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
+    let mut disk_path = std::env::temp_dir();
+    disk_path.push(format!("master-control-clu-{}.disk", std::process::id()));
+    let mut log_path = std::env::temp_dir();
+    log_path.push(format!("master-control-clu-{}.log", std::process::id()));
+    let config = Config {
+        disk: Some(disk_path.clone()),
+        input_log: Some(log_path.clone()),
+        hash_every: 8,
+        ..quick_config()
+    };
+    let wire = LinkDll::beside_executable().expect("wire");
+    let fingerprint = wire.world_fingerprint(&world_definition());
+
+    // A life worth re-simulating: a body rezzed, steered for a stretch, left.
+    {
+        let world = World::stand_up(config);
+        let (mut host, _) = wire
+            .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+            .expect("host");
+        rez(&mut host, 7);
+        let (mut seen, _) = await_tick(&mut host, 1);
+        for _ in 0..24 {
+            steer_creature(&mut host, 7, seen + 1, 1.5);
+            let (tick, _) = await_tick(&mut host, seen + 1);
+            seen = tick;
+        }
+        drop(host);
+        let (mut spectator, _) = wire
+            .connect(&world.address(), ROLE_SPECTATOR, fingerprint, 5_000)
+            .expect("spectator");
+        let _ = await_tick(&mut spectator, seen + 10);
+    }
+
+    // The honest log re-simulates to every hash it carries.
+    match master_control::clu::check(&log_path, Some(&disk_path), &wire).expect("clu reads the log")
+    {
+        master_control::clu::Verdict::Agreed { ticks, hashes } => {
+            assert!(ticks >= 30, "{ticks} ticks");
+            assert!(hashes >= 3, "{hashes} hashes");
+        }
+        other => panic!("an honest log must agree: {other:?}"),
+    }
+
+    // One applied intent, lied about by half a metre a second: Clu names the tick of the
+    // first hash after it and the field of the body that moved differently, in bits.
+    let text = std::fs::read_to_string(&log_path).expect("log");
+    let mut tampered = String::new();
+    let mut lied = false;
+    for line in text.lines() {
+        if !lied && line.starts_with("applied ") && line.contains(" 7 fresh 3FC00000 ") {
+            tampered.push_str(&line.replace("fresh 3FC00000", "fresh 3F800000"));
+            lied = true;
+        } else {
+            tampered.push_str(line);
+        }
+        tampered.push('\n');
+    }
+    assert!(lied, "the log carries the steered intent to lie about");
+    let mut lie_path = std::env::temp_dir();
+    lie_path.push(format!("master-control-clu-{}-lie.log", std::process::id()));
+    std::fs::write(&lie_path, tampered).expect("write");
+    match master_control::clu::check(&lie_path, Some(&disk_path), &wire).expect("clu reads the lie")
+    {
+        master_control::clu::Verdict::Diverged {
+            tick,
+            logged,
+            resimulated,
+            diff,
+        } => {
+            assert_ne!(logged, resimulated);
+            assert!(
+                tick.is_multiple_of(8),
+                "the divergence is found on the beat: {tick}"
+            );
+            assert!(
+                diff.iter().any(|line| line.starts_with("creature 7 pz:")
+                    && line.contains("recorded")
+                    && line.contains("re-simulated")),
+                "the diff names the body and the field, in bits: {diff:?}"
+            );
+        }
+        other => panic!("a lie must be found: {other:?}"),
+    }
+
+    // Another world's log is refused in words, never re-simulated.
+    let other_world = text.replacen(
+        &format!("world {fingerprint:016X}"),
+        "world 0000000000000001",
+        1,
+    );
+    std::fs::write(&lie_path, other_world).expect("write");
+    let refusal = master_control::clu::check(&lie_path, None, &wire).expect_err("another world");
+    assert!(refusal.contains("different world"), "{refusal}");
+
+    let _ = std::fs::remove_file(&disk_path);
+    let _ = std::fs::remove_file(&log_path);
+    let _ = std::fs::remove_file(&lie_path);
+}
