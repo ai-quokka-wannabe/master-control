@@ -731,8 +731,9 @@ fn log_judged(
 
 fn record_verdict(sender: u64, verdict: Verdict, verbose: bool) {
     match verdict {
-        Verdict::AlreadyApplied { .. } => {
-            // The resend of an applied intent: silence is the record, because nothing happened.
+        Verdict::AlreadyApplied { .. } | Verdict::BeforeFirstIntent { .. } => {
+            // The resend of an applied intent, or the first word's piggyback naming the step
+            // before any word could land: silence is the record, because nothing was lost.
         }
         Verdict::Accepted {
             creature_id,
