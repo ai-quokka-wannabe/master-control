@@ -24,6 +24,8 @@
 //! too, FNV-1a over the bytes of every body's pose, velocity and actuators: the failure it
 //! hunts is a single stray bit, which a tolerance would forgive.
 
+use crate::ground::GRID_FLOOR_CONFIG;
+use crate::link_dll::WorldDefinition;
 use crate::stager::Intent;
 
 /// Seconds per tick: 32 Hz because 0.03125 is exact in binary32, so `tick * dt` is exact for a
@@ -39,6 +41,26 @@ pub const BODY_MASS_KG: f32 = 1.0;
 
 /// Half the body's height, metres: how far its origin stands above what it stands on.
 pub const BODY_HALF_HEIGHT: f32 = 0.05;
+
+/// The simulated world, in the wire's words: the floor this server steps against, its tick and
+/// its body height - the fields a client must agree on before its positions mean what ours do.
+/// Fingerprinted by the DLL (never here) and carried in every WELCOME; a client built from a
+/// different world is refused at the door.
+#[must_use]
+pub fn world_definition() -> WorldDefinition {
+    WorldDefinition {
+        floor_cells: GRID_FLOOR_CONFIG.cells,
+        floor_cell_size: GRID_FLOOR_CONFIG.cell_size,
+        floor_height: GRID_FLOOR_CONFIG.height,
+        relief_amplitude: GRID_FLOOR_CONFIG.relief_amplitude,
+        relief_wavelength: GRID_FLOOR_CONFIG.relief_wavelength,
+        relief_octaves: GRID_FLOOR_CONFIG.relief_octaves,
+        relief_terraces: GRID_FLOOR_CONFIG.relief_terraces,
+        relief_seed: GRID_FLOOR_CONFIG.relief_seed,
+        dt_seconds: TICK_SECONDS,
+        body_half_height: BODY_HALF_HEIGHT,
+    }
+}
 
 /// Half the body's length along its own Z, metres.
 pub const BODY_HALF_LENGTH: f32 = 0.215;

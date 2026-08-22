@@ -20,6 +20,7 @@
 
 use master_control::heartbeat::{Config, Heartbeat};
 use master_control::link_dll::{Actions, LinkDll, Message, ROLE_CREATURE_HOST, ROLE_SPECTATOR};
+use master_control::physics::world_definition;
 use master_control::script::GUEST_CREATURE_ID;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -134,7 +135,12 @@ fn a_spectator_is_welcomed_and_the_world_keeps_its_pace() {
     let wire = LinkDll::beside_executable().expect("wire");
 
     let (mut spectator, welcome) = wire
-        .connect(&world.address(), ROLE_SPECTATOR, 5_000)
+        .connect(
+            &world.address(),
+            ROLE_SPECTATOR,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
         .expect("the world answers");
     assert!(
         (welcome.nominal_dt_seconds - 0.031_25).abs() < 1e-9,
@@ -169,10 +175,20 @@ fn a_creature_host_steers_the_guest_and_silence_repeats_then_coasts() {
     let wire = LinkDll::beside_executable().expect("wire");
 
     let (mut host, welcome) = wire
-        .connect(&world.address(), ROLE_CREATURE_HOST, 5_000)
+        .connect(
+            &world.address(),
+            ROLE_CREATURE_HOST,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
         .expect("the world answers");
     let (mut spectator, _) = wire
-        .connect(&world.address(), ROLE_SPECTATOR, 5_000)
+        .connect(
+            &world.address(),
+            ROLE_SPECTATOR,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
         .expect("the world answers twice");
 
     // Steer hard forward for a stretch of ticks, resending per the piggyback rule.
@@ -227,10 +243,20 @@ fn a_stale_intent_is_refused_but_the_world_keeps_talking() {
     let wire = LinkDll::beside_executable().expect("wire");
 
     let (mut host, _) = wire
-        .connect(&world.address(), ROLE_CREATURE_HOST, 5_000)
+        .connect(
+            &world.address(),
+            ROLE_CREATURE_HOST,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
         .expect("the world answers");
     let (mut spectator, welcome) = wire
-        .connect(&world.address(), ROLE_SPECTATOR, 5_000)
+        .connect(
+            &world.address(),
+            ROLE_SPECTATOR,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
         .expect("the world answers twice");
 
     let (tick, _) = await_tick(&mut spectator, welcome.current_tick + 4);
@@ -267,10 +293,20 @@ fn a_reaped_hosts_creature_stays_embodied_on_the_neutral_reflex() {
     let wire = LinkDll::beside_executable().expect("wire");
 
     let (mut host, welcome) = wire
-        .connect(&world.address(), ROLE_CREATURE_HOST, 5_000)
+        .connect(
+            &world.address(),
+            ROLE_CREATURE_HOST,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
         .expect("the world answers");
     let (mut spectator, _) = wire
-        .connect(&world.address(), ROLE_SPECTATOR, 5_000)
+        .connect(
+            &world.address(),
+            ROLE_SPECTATOR,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
         .expect("the world answers twice");
 
     let (tick, _) = await_tick(&mut spectator, welcome.current_tick + 1);
@@ -310,7 +346,12 @@ fn a_reaped_hosts_creature_stays_embodied_on_the_neutral_reflex() {
         owner would still hold the intent stream and the newcomer would be refused.
     */
     let (mut second_host, _) = wire
-        .connect(&world.address(), ROLE_CREATURE_HOST, 5_000)
+        .connect(
+            &world.address(),
+            ROLE_CREATURE_HOST,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
         .expect("a successor dials in");
     let deadline = Instant::now() + PATIENCE;
     loop {
@@ -325,4 +366,34 @@ fn a_reaped_hosts_creature_stays_embodied_on_the_neutral_reflex() {
         );
     }
     drop(silent_host);
+}
+
+#[test]
+fn a_citizen_of_another_world_is_refused_at_the_door() {
+    let world = World::stand_up(quick_config());
+    let wire = LinkDll::beside_executable().expect("wire");
+    let other_world = wire.world_fingerprint(&world_definition()) + 1;
+
+    let verdict = wire.connect(&world.address(), ROLE_SPECTATOR, other_world, 5_000);
+    let Err(reason) = verdict else {
+        panic!("a client built from another world must not be welcomed");
+    };
+    assert!(
+        reason.contains("different world"),
+        "the refusal names the cause, got: {reason}"
+    );
+
+    // The world itself is untouched: the next honest citizen is welcomed as before.
+    let (_honest, welcome) = wire
+        .connect(
+            &world.address(),
+            ROLE_SPECTATOR,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
+        .expect("an honest citizen is still welcomed");
+    assert_eq!(
+        welcome.world_fingerprint,
+        wire.world_fingerprint(&world_definition())
+    );
 }
