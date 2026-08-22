@@ -490,22 +490,7 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
         (world[2] * cos_yaw) - (world[0] * sin_yaw),
     ];
 
-    // Truncate to the body's contact budget by discarding the faintest, preserving generation
-    // order among the kept - the ABI promises the Grid's own order, never a sort by strength.
-    while body.contacts.len() > body.bounds.max_contact_count {
-        let mut faintest = 0usize;
-        let mut faintest_magnitude = f32::MAX;
-        for (index, contact) in body.contacts.iter().enumerate() {
-            let magnitude = (contact.impulse[0] * contact.impulse[0])
-                + (contact.impulse[1] * contact.impulse[1])
-                + (contact.impulse[2] * contact.impulse[2]);
-            if magnitude < faintest_magnitude {
-                faintest_magnitude = magnitude;
-                faintest = index;
-            }
-        }
-        body.contacts.remove(faintest);
-    }
+    truncate_contacts(body);
 }
 
 /// FNV-1a over the bytes of every body's pose, velocity and actuators - the flagship's Etape 16
@@ -534,6 +519,297 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = &'a Body>) -> u64 {
         mix(body.vocalisation);
     }
     hash
+}
+
+/// Truncate to the body's contact budget by discarding the faintest, preserving generation
+/// order among the kept - the ABI promises the Grid's own order, never a sort by strength.
+pub fn truncate_contacts(body: &mut Body) {
+    while body.contacts.len() > body.bounds.max_contact_count {
+        let mut faintest = 0usize;
+        let mut faintest_magnitude = f32::MAX;
+        for (index, contact) in body.contacts.iter().enumerate() {
+            let magnitude = (contact.impulse[0] * contact.impulse[0])
+                + (contact.impulse[1] * contact.impulse[1])
+                + (contact.impulse[2] * contact.impulse[2]);
+            if magnitude < faintest_magnitude {
+                faintest_magnitude = magnitude;
+                faintest = index;
+            }
+        }
+        body.contacts.remove(faintest);
+    }
+}
+
+/// The world-frame vertices of a hull under a pose.
+fn hull_world_vertices(body: &Body, hull: &crate::hull::Hull) -> Vec<[f32; 3]> {
+    hull.vertices
+        .iter()
+        .map(|v| body_to_world(v, body.position, body.yaw))
+        .collect()
+}
+
+fn rotate_direction(direction: [f32; 3], yaw: f32) -> [f32; 3] {
+    let (sin, cos) = yaw.sin_cos();
+    [
+        direction[0].mul_add(cos, direction[2] * sin),
+        direction[1],
+        direction[2].mul_add(cos, -(direction[0] * sin)),
+    ]
+}
+
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0].mul_add(b[0], a[1].mul_add(b[1], a[2] * b[2]))
+}
+
+fn cross3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1].mul_add(b[2], -(a[2] * b[1])),
+        a[2].mul_add(b[0], -(a[0] * b[2])),
+        a[0].mul_add(b[1], -(a[1] * b[0])),
+    ]
+}
+
+fn extent_along(points: &[[f32; 3]], axis: [f32; 3]) -> (f32, f32) {
+    points
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), p| {
+            let d = dot3(*p, axis);
+            (low.min(d), high.max(d))
+        })
+}
+
+/// Whether two bodies' bounding boxes touch - the cull before the separating-axis test.
+#[must_use]
+pub fn boxes_touch(a: &Body, b: &Body) -> bool {
+    let (Some(ha), Some(hb)) = (a.hull.as_ref(), b.hull.as_ref()) else {
+        return false;
+    };
+    let pa = hull_world_vertices(a, ha);
+    let pb = hull_world_vertices(b, hb);
+    (0..3).all(|axis| {
+        let mut unit = [0.0f32; 3];
+        unit[axis] = 1.0;
+        let (la, ha) = extent_along(&pa, unit);
+        let (lb, hb) = extent_along(&pb, unit);
+        la <= hb && lb <= ha
+    })
+}
+
+/// Two hulls against each other: the separating-axis test over both hulls' face normals and
+/// every edge-pair cross product, in a fixed order - the axes are replayed state. Separated,
+/// nothing happens. Overlapping, each body is stood back by half the least overlap along
+/// that axis (the minimal translation, kinematic: no solver), the velocity along it is
+/// arrested, a walk into the other body is stopped, and each body feels a contact at its
+/// deepest vertex: the world normal pushing it back, the depth, the impulse of what was
+/// arrested, and the slip - the relative velocity along the face. When the axis is more
+/// vertical than not, the upper body rests on the lower one: it is stood up by the whole
+/// overlap and grounded, because a creature standing on another is standing.
+/// Returns whether the two touched.
+pub fn separate(a: &mut Body, b: &mut Body) -> bool {
+    let (Some(ha), Some(hb)) = (a.hull.clone(), b.hull.clone()) else {
+        return false;
+    };
+    let pa = hull_world_vertices(a, &ha);
+    let pb = hull_world_vertices(b, &hb);
+
+    let mut axes: Vec<[f32; 3]> =
+        Vec::with_capacity(ha.faces.len() + hb.faces.len() + ha.edges.len() * hb.edges.len());
+    for face in &ha.faces {
+        axes.push(rotate_direction(face.normal, a.yaw));
+    }
+    for face in &hb.faces {
+        axes.push(rotate_direction(face.normal, b.yaw));
+    }
+    for ea in &ha.edges {
+        let da = rotate_direction(
+            [
+                ha.vertices[ea[1] as usize][0] - ha.vertices[ea[0] as usize][0],
+                ha.vertices[ea[1] as usize][1] - ha.vertices[ea[0] as usize][1],
+                ha.vertices[ea[1] as usize][2] - ha.vertices[ea[0] as usize][2],
+            ],
+            a.yaw,
+        );
+        for eb in &hb.edges {
+            let db = rotate_direction(
+                [
+                    hb.vertices[eb[1] as usize][0] - hb.vertices[eb[0] as usize][0],
+                    hb.vertices[eb[1] as usize][1] - hb.vertices[eb[0] as usize][1],
+                    hb.vertices[eb[1] as usize][2] - hb.vertices[eb[0] as usize][2],
+                ],
+                b.yaw,
+            );
+            let raw = cross3(da, db);
+            let magnitude = dot3(raw, raw).sqrt();
+            if magnitude > 1e-6 {
+                axes.push([raw[0] / magnitude, raw[1] / magnitude, raw[2] / magnitude]);
+            }
+        }
+    }
+
+    // The least overlap, first in axis order on a tie; the axis oriented from A towards B.
+    let centre = |points: &[[f32; 3]]| {
+        let n = points.len() as f32;
+        points.iter().fold([0.0f32; 3], |c, p| {
+            [c[0] + p[0] / n, c[1] + p[1] / n, c[2] + p[2] / n]
+        })
+    };
+    let ca = centre(&pa);
+    let cb = centre(&pb);
+    let mut best: Option<(f32, [f32; 3])> = None;
+    let mut horizontal: Vec<(f32, [f32; 3])> = Vec::new();
+    for axis in axes {
+        let axis = if dot3(cb, axis) >= dot3(ca, axis) {
+            axis
+        } else {
+            [-axis[0], -axis[1], -axis[2]]
+        };
+        let (la, ua) = extent_along(&pa, axis);
+        let (lb, ub) = extent_along(&pb, axis);
+        let overlap = (ua - lb).min(ub - la);
+        if overlap <= 0.0 {
+            return false;
+        }
+        if best.is_none_or(|(least, _)| overlap < least) {
+            best = Some((overlap, axis));
+        }
+        if axis[1].abs() <= 0.7 {
+            horizontal.push((overlap, axis));
+        }
+    }
+    let Some((depth, axis)) = best else {
+        return false;
+    };
+
+    // The deepest vertex of each: A's farthest along the axis, B's farthest against it.
+    let deepest = |points: &[[f32; 3]], sign: f32| {
+        points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (i, dot3(*p, axis) * sign))
+            .fold((0usize, f32::NEG_INFINITY), |best, (i, d)| {
+                if d > best.1 { (i, d) } else { best }
+            })
+            .0
+    };
+    let ia = deepest(&pa, 1.0);
+    let ib = deepest(&pb, -1.0);
+
+    let relative = [
+        a.velocity[0] - b.velocity[0],
+        a.velocity[1] - b.velocity[1],
+        a.velocity[2] - b.velocity[2],
+    ];
+    let closing = dot3(relative, axis).max(0.0);
+    let tangential = [
+        relative[0] - axis[0] * dot3(relative, axis),
+        relative[1] - axis[1] * dot3(relative, axis),
+        relative[2] - axis[2] * dot3(relative, axis),
+    ];
+
+    // Resting on the other is a vertical matter only when the upper body is actually above:
+    // its lowest point over the lower body's middle. Two bodies standing in one spot overlap
+    // least through their height, but stacking them would be a lie - they are stood apart on
+    // the floor instead, along the least horizontal overlap.
+    let vertical = axis[1].abs() > 0.7 && {
+        let (upper, lower) = if axis[1] > 0.0 {
+            (&pb, &pa)
+        } else {
+            (&pa, &pb)
+        };
+        let upper_lowest = upper.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
+        let (lower_low, lower_high) = extent_along(lower, [0.0, 1.0, 0.0]);
+        upper_lowest >= (lower_low + lower_high) * 0.5
+    };
+    let (depth, axis) = if axis[1].abs() > 0.7 && !vertical {
+        // The least overlap among the horizontal axes instead.
+        let mut flat: Option<(f32, [f32; 3])> = None;
+        for candidate in &horizontal {
+            if flat.is_none_or(|(least, _)| candidate.0 < least) {
+                flat = Some(*candidate);
+            }
+        }
+        flat.unwrap_or((depth, axis))
+    } else {
+        (depth, axis)
+    };
+    if vertical {
+        // The upper body stands on the lower: it is stood up whole and grounded.
+        let (upper, lower_is_a) = if axis[1] > 0.0 {
+            (&mut *b, true)
+        } else {
+            (&mut *a, false)
+        };
+        upper.position[1] += depth;
+        upper.velocity[1] = upper.velocity[1].max(0.0);
+        upper.grounded = true;
+        let _ = lower_is_a;
+    } else {
+        let half = depth * 0.5;
+        a.position = [
+            a.position[0] - axis[0] * half,
+            a.position[1] - axis[1] * half,
+            a.position[2] - axis[2] * half,
+        ];
+        b.position = [
+            b.position[0] + axis[0] * half,
+            b.position[1] + axis[1] * half,
+            b.position[2] + axis[2] * half,
+        ];
+    }
+
+    // Velocity projection: whatever closes along the axis is arrested; a walk into the other
+    // body stops, and the stop is what the contact's impulse carries.
+    for (body, sign) in [(&mut *a, 1.0f32), (&mut *b, -1.0f32)] {
+        let along = dot3(body.velocity, axis) * sign;
+        if along > 0.0 {
+            body.velocity = [
+                body.velocity[0] - axis[0] * along * sign,
+                body.velocity[1] - axis[1] * along * sign,
+                body.velocity[2] - axis[2] * along * sign,
+            ];
+        }
+        if !vertical {
+            let forward = forward_for(body.yaw);
+            if dot3(forward, axis) * sign * body.forward_speed > 0.0 {
+                body.forward_speed = 0.0;
+            }
+        }
+    }
+
+    // What the contact delivered: the closing velocity arrested, plus the push that stood the
+    // body back - half the overlap (or the whole of it, stood up) in one tick is a velocity
+    // change too, and a body merely resting against another still feels that pressure. A
+    // contact carrying no impulse is not reported, the ABI says; this one always carries some.
+    let stood_back = if vertical { depth } else { depth * 0.5 };
+    let impulse = BODY_MASS_KG * (closing + stood_back / TICK_SECONDS);
+    let normal_a = [-axis[0], -axis[1], -axis[2]];
+    a.contacts.push(Contact {
+        position: ha.vertices[ia],
+        impulse: world_to_body_direction(
+            [
+                normal_a[0] * impulse,
+                normal_a[1] * impulse,
+                normal_a[2] * impulse,
+            ],
+            a.yaw,
+        ),
+        normal: normal_a,
+        depth,
+        slip: world_to_body_direction(tangential, a.yaw),
+    });
+    b.contacts.push(Contact {
+        position: hb.vertices[ib],
+        impulse: world_to_body_direction(
+            [axis[0] * impulse, axis[1] * impulse, axis[2] * impulse],
+            b.yaw,
+        ),
+        normal: axis,
+        depth,
+        slip: world_to_body_direction([-tangential[0], -tangential[1], -tangential[2]], b.yaw),
+    });
+    truncate_contacts(a);
+    truncate_contacts(b);
+    true
 }
 
 #[cfg(test)]
@@ -694,6 +970,207 @@ mod hull_tests {
         );
         assert!((clear.forward_speed - 1.0).abs() < 1e-6);
         assert!((clear.position[2] - (-1.40 - TICK_SECONDS)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn two_overlapping_cubes_are_stood_apart_with_mirrored_contacts() {
+        let mut a = cube_body(1.0, 16);
+        let mut b = cube_body(1.0, 16);
+        b.position[0] = 0.8; // 0.2 m into each other along +X
+        a.velocity = [1.0, 0.0, 0.0];
+        assert!(boxes_touch(&a, &b));
+        assert!(separate(&mut a, &mut b));
+        assert!(
+            (a.position[0] + 0.1).abs() < 1e-6 && (b.position[0] - 0.9).abs() < 1e-6,
+            "half the overlap each: {:?} {:?}",
+            a.position,
+            b.position
+        );
+        assert!(
+            (b.position[0] - a.position[0] - 1.0).abs() < 1e-6,
+            "touching, not overlapping"
+        );
+        assert_eq!(a.velocity[0], 0.0, "the closing velocity is arrested");
+        let ca = a.contacts.last().expect("a's contact");
+        let cb = b.contacts.last().expect("b's contact");
+        assert_eq!(ca.normal, [-1.0, 0.0, 0.0]);
+        assert_eq!(cb.normal, [1.0, 0.0, 0.0]);
+        assert!((ca.depth - 0.2).abs() < 1e-6 && (cb.depth - 0.2).abs() < 1e-6);
+        assert!(
+            (ca.position[0] - 0.5).abs() < 1e-6,
+            "a's deepest vertex: its +X face"
+        );
+        assert!(
+            (cb.position[0] + 0.5).abs() < 1e-6,
+            "b's deepest vertex: its -X face"
+        );
+        // The impulse: the metre a second a closed at, plus the push of a tenth of a metre in
+        // one tick, on each - equal and opposite.
+        let expected = BODY_MASS_KG * (1.0 + 0.1 / TICK_SECONDS);
+        assert!(
+            (ca.impulse[0] + expected).abs() < 1e-4,
+            "a is pushed back: {:?}",
+            ca.impulse
+        );
+        assert!((cb.impulse[0] - expected).abs() < 1e-4);
+
+        // Mirrored - B on A's other side - so the axis must be oriented by where B stands,
+        // never by which face normal came first.
+        let mut m = cube_body(1.0, 16);
+        let mut n = cube_body(1.0, 16);
+        n.position[0] = -0.8;
+        assert!(separate(&mut m, &mut n));
+        assert!(
+            (m.position[0] - 0.1).abs() < 1e-6 && (n.position[0] + 0.9).abs() < 1e-6,
+            "pushed apart, not together: {:?} {:?}",
+            m.position,
+            n.position
+        );
+        assert_eq!(m.contacts.last().expect("contact").normal, [1.0, 0.0, 0.0]);
+
+        // Apart by a hair: nothing happens, nothing is felt.
+        let mut c = cube_body(1.0, 16);
+        let mut d = cube_body(1.0, 16);
+        d.position[0] = 1.001;
+        let before = (c.position, d.position);
+        assert!(!separate(&mut c, &mut d));
+        assert_eq!((c.position, d.position), before);
+        assert!(c.contacts.is_empty() && d.contacts.is_empty());
+    }
+
+    #[test]
+    fn a_walk_into_a_standing_body_stops_at_its_face_and_the_slip_is_the_sidestep() {
+        // A walks -Z into B, B sits still a body's length ahead; after A's own step they
+        // overlap by the tick's walk, and the separation puts A against B's face, stopped.
+        let mut a = cube_body(1.0, 16);
+        a.position[2] = -0.0;
+        let mut b = cube_body(1.0, 16);
+        b.position[2] = -1.0 - TICK_SECONDS * 0.5; // A's next step overlaps by half the walk
+        step_body(
+            &mut a,
+            Intent {
+                forward_speed: 1.0,
+                turn_rate: 0.0,
+                vocalisation: 0.0,
+            },
+            |_, _| 0.0,
+        );
+        assert!(separate(&mut a, &mut b));
+        assert!(
+            (b.position[2] - a.position[2] + 1.0).abs() < 1e-5,
+            "face to face: {:?} {:?}",
+            a.position,
+            b.position
+        );
+        assert_eq!(a.forward_speed, 0.0, "a walk into a body stops");
+        assert!(a.velocity[2].abs() < 1e-6);
+        let ca = a.contacts.last().expect("contact");
+        assert_eq!(ca.normal, [0.0, 0.0, 1.0]);
+        assert!(ca.slip.iter().all(|v| v.abs() < 1e-6), "head-on: no slip");
+
+        // Sidestepping along the face: the slip is the relative velocity along it.
+        let mut e = cube_body(1.0, 16);
+        let mut f = cube_body(1.0, 16);
+        f.position[2] = -0.9;
+        e.velocity = [0.5, 0.0, 0.0];
+        e.yaw = 0.0;
+        assert!(separate(&mut e, &mut f));
+        let ce = e.contacts.last().expect("contact");
+        assert!(
+            (ce.slip[0] - 0.5).abs() < 1e-6,
+            "the sidestep is the slip: {:?}",
+            ce.slip
+        );
+        assert!(
+            (e.velocity[0] - 0.5).abs() < 1e-6,
+            "sliding along a face is not arrested"
+        );
+    }
+
+    #[test]
+    fn a_cube_landing_on_another_stands_on_it() {
+        let mut below = cube_body(1.0, 16);
+        let mut above = cube_body(1.0, 16);
+        above.position[1] = 1.3; // 0.2 into the lower one from above
+        above.velocity = [0.0, -2.0, 0.0];
+        above.grounded = false;
+        assert!(separate(&mut below, &mut above));
+        assert!(
+            (above.position[1] - 1.5).abs() < 1e-6,
+            "stood up onto the lower cube: {:?}",
+            above.position
+        );
+        assert!(above.grounded, "standing on a body is standing");
+        assert_eq!(above.velocity[1], 0.0);
+        assert!(
+            (below.position[1] - 0.5).abs() < 1e-6,
+            "the lower one is not pushed into the floor"
+        );
+        assert_eq!(
+            above.contacts.last().expect("contact").normal,
+            [0.0, 1.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn two_bodies_in_one_spot_go_apart_on_the_floor_never_one_on_top_of_the_other() {
+        // A flat, wide body: its least overlap with its twin is through its height - which is
+        // exactly where stacking would be a lie, since neither is above the other.
+        let slab = |y0: f32| {
+            let corners = [
+                [-0.5, -0.05, -0.5],
+                [0.5, -0.05, -0.5],
+                [-0.5, 0.05, -0.5],
+                [0.5, 0.05, -0.5],
+                [-0.5, -0.05, 0.5],
+                [0.5, -0.05, 0.5],
+                [-0.5, 0.05, 0.5],
+                [0.5, 0.05, 0.5],
+            ];
+            let mut body = Body::standing_at(
+                0.0,
+                0.0,
+                0.0,
+                BodyBounds {
+                    max_contact_count: 16,
+                    ..FIRST_BODY
+                },
+            );
+            body.hull = Some(Hull::from_points(&corners).expect("a slab"));
+            body.position[1] = y0;
+            body
+        };
+        let mut a = slab(0.05);
+        let mut b = slab(0.05);
+        assert!(separate(&mut a, &mut b));
+        assert!(
+            (a.position[1] - 0.05).abs() < 1e-6 && (b.position[1] - 0.05).abs() < 1e-6,
+            "neither was lifted: {:?} {:?}",
+            a.position,
+            b.position
+        );
+        let apart = ((a.position[0] - b.position[0]).powi(2)
+            + (a.position[2] - b.position[2]).powi(2))
+        .sqrt();
+        assert!(
+            (apart - 1.0).abs() < 1e-5,
+            "stood apart to touching on the floor: {apart}"
+        );
+        assert!(
+            a.contacts.last().expect("contact").normal[1].abs() < 1e-6,
+            "a sideways contact"
+        );
+
+        // A slab genuinely landing on another - its bottom above the other's middle - does rest.
+        let mut below = slab(0.05);
+        let mut above = slab(0.12);
+        assert!(separate(&mut below, &mut above));
+        assert!(
+            (above.position[1] - 0.15).abs() < 1e-6,
+            "stood up onto the lower slab: {:?}",
+            above.position
+        );
+        assert!(above.grounded);
     }
 
     #[test]
