@@ -79,10 +79,11 @@ vertex, a BYE with a payload) each hung up on while the honest spectator never n
 **Done (2026-08-23), the first half.** The state hash by a replay hash's rules (domain tag,
 length prefixes, tag bytes, identities, hidden state); `clippy.toml` as the hidden-state rule
 made mechanical; the `release-check` profile in CI; Clu as a diagnostic with an `end` line and
-seven named refusals. **Still owed, the second half:** seeded random-walk tests with invariants
-asserted every step (a cheap tier in CI, an expensive `#[ignore]` tier), and a std-only
-build-provenance stamp in `--version` and the Disk and log headers, so a replay mismatch can say
-"different binary" before it says "simulation bug".
+seven named refusals. **Done (2026-08-23), the second half:** `tests/random_walk.rs` - seeded, invariants after every
+step, replayed bit for bit, a cheap tier on every run and a deep one behind `--include-ignored`;
+and the build stamp - `build.rs` hashes the sources, `--version` prints it, the input log
+records it, Clu names a log made by another build. The Disk header stays the wire's (Link owns
+its layout); the log beside it carries the stamp.
 
 ## Etape 4 — the logs
 

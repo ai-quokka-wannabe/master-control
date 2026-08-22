@@ -109,6 +109,15 @@ decision. Sense computation is the one load that could ever grow device-sized he
 (server-computed hearing on the integrity ladder), and the acoustic gather is a host-CPU
 function by design.
 
+## The suite's tiers, and the stamp
+
+`cargo test` runs everything cheap: the unit tests, the worlds stood up on loopback, the random
+walk at four seeds. `cargo test --release -- --include-ignored` adds the deep walk (twenty-four
+seeds, two thousand steps, about eight minutes) - run it before a physics or hash change lands,
+not on every push. CI runs the cheap tier twice, debug and `--profile release-check`. Every
+binary stamps itself with a hash over its sources (`--version` prints `build=`), and the input
+log records it, so Clu can tell "another binary" from "another world".
+
 ## CI today
 
 `quick-checks` (markdown lint + stray carriage returns) feeding `Build (ubuntu-latest)` and

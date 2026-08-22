@@ -41,6 +41,9 @@ pub enum Verdict {
         ticks: u64,
         hashes: u32,
         ended: bool,
+        /// The build the log was made by, when it differs from this one: a divergence found
+        /// later is then "a different binary" before it is "a simulation bug".
+        other_build: Option<String>,
     },
     /// The first hash that did not agree, and the diff if a Disk was given.
     Diverged {
@@ -58,6 +61,7 @@ enum Record {
         version: u32,
         fingerprint: String,
     },
+    Build(String),
     World(u64),
     End {
         tick: u64,
@@ -112,6 +116,12 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                 .to_string(),
         })),
         "end" => Ok(Some(Record::End { tick: number(1)? })),
+        "build" => Ok(Some(Record::Build(
+            words
+                .get(1)
+                .ok_or_else(|| format!("malformed build record: {line}"))?
+                .to_string(),
+        ))),
         "world" => {
             let fingerprint = words
                 .get(1)
@@ -235,6 +245,7 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
     let mut hashes_agreed: u32 = 0;
     let mut last_tick: u64 = 0;
     let mut ended = false;
+    let mut other_build: Option<String> = None;
 
     // The roster as the world opened: the guest, whose intents the log names by its id.
     let step = |roster: &mut Roster, tick: u64, intents: &BTreeMap<u32, Intent>| {
@@ -299,6 +310,11 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
             }
             Record::End { .. } => {
                 ended = true;
+            }
+            Record::Build(stamp) => {
+                if stamp != crate::build_info::build_hash_hex() {
+                    other_build = Some(stamp);
+                }
             }
             Record::World(fingerprint) => {
                 if fingerprint != own_world {
@@ -371,6 +387,16 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
                             "(no Disk given: re-run with the Disk to see which bit)".to_string(),
                         ],
                     };
+                    let mut diff = diff;
+                    if let Some(stamp) = &other_build {
+                        diff.insert(
+                            0,
+                            format!(
+                                "the log was made by build {stamp} and this is build {} - a different binary before a different world",
+                                crate::build_info::build_hash_hex()
+                            ),
+                        );
+                    }
                     return Ok(Verdict::Diverged {
                         tick,
                         logged: hash,
@@ -390,6 +416,7 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
         ticks: ticks_stepped,
         hashes: hashes_agreed,
         ended,
+        other_build,
     })
 }
 
@@ -522,6 +549,9 @@ mod tests {
         assert!(
             parse_line("protocol 6").is_err(),
             "a protocol line names its fingerprint"
+        );
+        assert!(
+            matches!(parse_line("build 0123456789abcdef"), Ok(Some(Record::Build(stamp))) if stamp == "0123456789abcdef")
         );
         assert!(matches!(
             parse_line("derez 9 7"),
