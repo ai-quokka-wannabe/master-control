@@ -18,6 +18,10 @@
 //! repository's rehearsal of its own citizens - the pacing, the window and the silence rules
 //! observed from outside, which is the only place they are real.
 
+// The tests wait on a world with patience measured by a wall clock, which the simulation itself
+// may never read (clippy.toml); a test is the outside, and the outside has clocks.
+#![allow(clippy::disallowed_types, clippy::disallowed_methods)]
+
 use master_control::heartbeat::{Config, Heartbeat};
 use master_control::link_dll::{
     Actions, LinkDll, Message, ROLE_CREATURE_HOST, ROLE_SPECTATOR, Rez, RezMaterial, RezTriangle,
@@ -984,9 +988,14 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
     // The honest log re-simulates to every hash it carries.
     match master_control::clu::check(&log_path, Some(&disk_path), &wire).expect("clu reads the log")
     {
-        master_control::clu::Verdict::Agreed { ticks, hashes } => {
+        master_control::clu::Verdict::Agreed {
+            ticks,
+            hashes,
+            ended,
+        } => {
             assert!(ticks >= 24, "{ticks} ticks");
             assert!(hashes >= 3, "{hashes} hashes");
+            assert!(ended, "the world stopped on request, and the log says so");
         }
         other => panic!("an honest log must agree: {other:?}"),
     }
@@ -1647,4 +1656,119 @@ fn a_derez_and_a_rez_of_one_identity_in_one_breath_are_told_in_that_order() {
     }
     let _ = std::fs::remove_file(&disk_path);
     let _ = std::fs::remove_file(&log_path);
+}
+
+/// A bad log is refused, and says why - one corruption, one distinct reason. A replayer that
+/// only proves "a good recording replays" is a tool; one that names what is wrong with a bad
+/// one is a diagnostic.
+#[test]
+fn clu_names_every_way_a_log_can_lie() {
+    let mut disk_path = std::env::temp_dir();
+    disk_path.push(format!("master-control-lies-{}.disk", std::process::id()));
+    let mut log_path = std::env::temp_dir();
+    log_path.push(format!("master-control-lies-{}.log", std::process::id()));
+    let config = Config {
+        disk: Some(disk_path.clone()),
+        input_log: Some(log_path.clone()),
+        hash_every: 8,
+        ..quick_config()
+    };
+    let wire = LinkDll::beside_executable().expect("wire");
+    let fingerprint = wire.world_fingerprint(&world_definition());
+    {
+        let world = World::stand_up(config);
+        let (mut host, _) = wire
+            .connect(&world.address(), ROLE_CREATURE_HOST, fingerprint, 5_000)
+            .expect("host");
+        rez(&mut host, 7);
+        let (mut seen, _) = await_tick(&mut host, 1);
+        for _ in 0..20 {
+            steer_creature(&mut host, 7, seen + 1, 1.0);
+            let (tick, _) = await_tick(&mut host, seen + 1);
+            seen = tick;
+        }
+    }
+    let honest = std::fs::read_to_string(&log_path).expect("log");
+    let lines: Vec<&str> = honest.lines().collect();
+    assert!(
+        lines.last().is_some_and(|line| line.starts_with("end ")),
+        "the world ended on request"
+    );
+
+    let mut lie_path = std::env::temp_dir();
+    lie_path.push(format!(
+        "master-control-lies-{}-lie.log",
+        std::process::id()
+    ));
+    let check = |text: String| {
+        std::fs::write(&lie_path, text).expect("write");
+        master_control::clu::check(&lie_path, Some(&disk_path), &wire)
+    };
+
+    // The honest log agrees and ended.
+    assert!(matches!(
+        check(honest.clone()),
+        Ok(master_control::clu::Verdict::Agreed { ended: true, .. })
+    ));
+
+    // Truncated: everything after a hash line dropped, the end line with it. Still agrees - the
+    // lines it has are true - but the verdict says the world did not stop on request.
+    let last_hash = lines
+        .iter()
+        .rposition(|line| line.starts_with("hash "))
+        .expect("a hash");
+    let truncated = lines[..=last_hash].join("\n") + "\n";
+    assert!(
+        matches!(
+            check(truncated),
+            Ok(master_control::clu::Verdict::Agreed { ended: false, .. })
+        ),
+        "a truncated log is honest as far as it goes, and says it was cut"
+    );
+
+    // A record appended after the end: a log that was written to after the world stopped.
+    let appended = honest.clone() + "hash 999999 0000000000000000\n";
+    let refusal = check(appended).expect_err("appended");
+    assert!(refusal.contains("after the world's end line"), "{refusal}");
+
+    // Rearranged: two applied lines swapped so a tick goes backwards.
+    let applied: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.starts_with("applied "))
+        .map(|(index, _)| index)
+        .collect();
+    let (first, later) = (applied[0], *applied.last().expect("applied lines"));
+    let mut swapped: Vec<&str> = lines.clone();
+    swapped.swap(first, later);
+    let refusal = check(swapped.join("\n") + "\n").expect_err("swapped");
+    assert!(refusal.contains("out of order"), "{refusal}");
+
+    // An intent for a creature that was never rezzed.
+    let invented = honest.replacen(
+        "\napplied ",
+        "\napplied 0 999 fresh 3F800000 00000000 00000000\napplied ",
+        1,
+    );
+    let refusal = check(invented).expect_err("invented");
+    assert!(
+        refusal.contains("creature 999, which is not embodied"),
+        "{refusal}"
+    );
+
+    // Another protocol: the version bumped.
+    let other_protocol = honest.replacen("protocol 6 ", "protocol 7 ", 1);
+    let refusal = check(other_protocol).expect_err("protocol");
+    assert!(refusal.contains("Link protocol 7"), "{refusal}");
+
+    // A corrupted hash value: a divergence, found on the beat and named.
+    let corrupted = honest.replacen("hash 8 ", "hash 8 DEADBEEFDEADBEEF\nhash 8 ", 1);
+    assert!(matches!(
+        check(corrupted),
+        Ok(master_control::clu::Verdict::Diverged { tick: 8, .. })
+    ));
+
+    for path in [&disk_path, &log_path, &lie_path] {
+        let _ = std::fs::remove_file(path);
+    }
 }

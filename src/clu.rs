@@ -34,8 +34,14 @@ use std::path::Path;
 /// What Clu found.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Verdict {
-    /// Every hash on the beat agreed: the log re-simulates to the world it describes.
-    Agreed { ticks: u64, hashes: u32 },
+    /// Every hash on the beat agreed: the log re-simulates to the world it describes. `ended`
+    /// is whether the log carries the world's own end line - without it the world stopped some
+    /// other way, and whatever followed the last line was never written.
+    Agreed {
+        ticks: u64,
+        hashes: u32,
+        ended: bool,
+    },
     /// The first hash that did not agree, and the diff if a Disk was given.
     Diverged {
         tick: u64,
@@ -48,7 +54,14 @@ pub enum Verdict {
 /// One parsed record of the input log.
 #[derive(Clone, PartialEq, Debug)]
 enum Record {
+    Protocol {
+        version: u32,
+        fingerprint: String,
+    },
     World(u64),
+    End {
+        tick: u64,
+    },
     Rez {
         creature_id: u32,
         bounds: BodyBounds,
@@ -89,7 +102,16 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
             .ok_or_else(|| format!("malformed record: {line}"))
     };
     match *kind {
-        "#" | "protocol" | "start" | "hash_every" => Ok(None),
+        "#" | "start" | "hash_every" => Ok(None),
+        "protocol" => Ok(Some(Record::Protocol {
+            #[allow(clippy::cast_possible_truncation)]
+            version: number(1)? as u32,
+            fingerprint: words
+                .get(2)
+                .ok_or_else(|| format!("malformed protocol record: {line}"))?
+                .to_string(),
+        })),
+        "end" => Ok(Some(Record::End { tick: number(1)? })),
         "world" => {
             let fingerprint = words
                 .get(1)
@@ -199,11 +221,20 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
         .map_err(|error| format!("could not read the log at {}: {error}", log_path.display()))?;
     let own_world = wire.world_fingerprint(&world_definition());
 
+    let own_protocol = wire.protocol_version();
+    let own_fingerprint: String = {
+        let mut bytes = [0u8; 32];
+        (wire.vtable().protocol_fingerprint)(bytes.as_mut_ptr());
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    };
+
     let mut roster = Roster::with_the_guest();
     let mut pending: BTreeMap<u32, Intent> = BTreeMap::new();
     let mut pending_tick: Option<u64> = None;
     let mut ticks_stepped: u64 = 0;
     let mut hashes_agreed: u32 = 0;
+    let mut last_tick: u64 = 0;
+    let mut ended = false;
 
     // The roster as the world opened: the guest, whose intents the log names by its id.
     let step = |roster: &mut Roster, tick: u64, intents: &BTreeMap<u32, Intent>| {
@@ -229,7 +260,46 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
             pending_tick = None;
         }
 
+        // The log is a life told forwards: a tick that goes backwards is a log that was
+        // rearranged, and one that arrives after the end line is one that was appended to.
+        let record_tick = match &record {
+            Record::Applied { tick, .. } | Record::Hash { tick, .. } | Record::End { tick } => {
+                Some(*tick)
+            }
+            _ => None,
+        };
+        if let Some(tick) = record_tick {
+            if ended {
+                return Err(format!(
+                    "line {}: a record after the world's end line - the log was appended to",
+                    line_number + 1
+                ));
+            }
+            if tick < last_tick {
+                return Err(format!(
+                    "line {}: tick {tick} after tick {last_tick} - the log is out of order",
+                    line_number + 1
+                ));
+            }
+            last_tick = tick;
+        }
+
         match record {
+            Record::Protocol {
+                version,
+                fingerprint,
+            } => {
+                if version != own_protocol || fingerprint != own_fingerprint {
+                    return Err(format!(
+                        "this log was made under Link protocol {version} ({}) and this Master Control speaks {own_protocol} ({}) - re-simulate it with the build it was made with",
+                        &fingerprint[..fingerprint.len().min(16)],
+                        &own_fingerprint[..16]
+                    ));
+                }
+            }
+            Record::End { .. } => {
+                ended = true;
+            }
             Record::World(fingerprint) => {
                 if fingerprint != own_world {
                     return Err(format!(
@@ -283,11 +353,17 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
                 creature_id,
                 intent,
             } => {
+                if roster.resident(creature_id).is_none() {
+                    return Err(format!(
+                        "line {}: the log applies an intent to creature {creature_id}, which is not embodied at tick {tick} on re-simulation",
+                        line_number + 1
+                    ));
+                }
                 pending_tick = Some(tick);
                 pending.insert(creature_id, intent);
             }
             Record::Hash { tick, hash } => {
-                let resimulated = state_hash(roster.bodies());
+                let resimulated = state_hash(roster.named_bodies());
                 if resimulated != hash {
                     let diff = match disk_path {
                         Some(disk) => diff_against_disk(disk, tick, &roster, wire)?,
@@ -313,6 +389,7 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
     Ok(Verdict::Agreed {
         ticks: ticks_stepped,
         hashes: hashes_agreed,
+        ended,
     })
 }
 
@@ -431,6 +508,21 @@ mod tests {
             parse_line("claim 9 100"),
             Ok(Some(Record::Claim { creature_id: 100 }))
         ));
+        assert!(matches!(
+            parse_line("end 4242"),
+            Ok(Some(Record::End { tick: 4242 }))
+        ));
+        match parse_line("protocol 6 abcdef") {
+            Ok(Some(Record::Protocol {
+                version: 6,
+                fingerprint,
+            })) => assert_eq!(fingerprint, "abcdef"),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            parse_line("protocol 6").is_err(),
+            "a protocol line names its fingerprint"
+        );
         assert!(matches!(
             parse_line("derez 9 7"),
             Ok(Some(Record::Derez { creature_id: 7 }))

@@ -135,6 +135,11 @@ jobs:
             - name: Test (unit, twin and the whole world stood up)
               run: cargo test --locked
 
+            # The same suite at release speed with the arithmetic still watched: a wrap that only
+            # happens in an optimised build is a replay divergence the debug run cannot see.
+            - name: Test again under release-check (optimised, overflow checks on)
+              run: cargo test --locked --profile release-check
+
     ci-success:
         name: CI Success
         needs: [quick-checks, build]
