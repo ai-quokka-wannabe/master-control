@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Determinism hardening, the first half: the hash, the lint, the profile, the diagnostic.**
+  Adopted from the owner's `queen-of-towers-game` and `project_nimrod`. The state hash is
+  rebuilt by the rules a replay hash needs: a domain tag, the body count and every creature's
+  identity (two worlds with the same bodies under swapped names hashed alike), every sequence
+  length-prefixed and every choice tagged, and the hidden state covered at last - `grounded`,
+  the bounds, the hull's every vertex (a re-simulation that lost the mesh now disagrees, as it
+  must), and the contacts the owner is told. `clippy.toml` bans `HashMap`, `HashSet`, `Instant`
+  and `SystemTime` from the crate, with the heartbeat's single visible allow for the one clock,
+  and the stager's maps became `BTreeMap`s so the ban has no other exception. A
+  `release-check` profile - release codegen with overflow checks and debug assertions on - runs
+  the whole suite in CI beside the debug run, because a wrap that only happens at optimised
+  speed is a replay divergence the debug suite cannot see; `codegen-units = 1` for release.
+  And Clu became a diagnostic: the input log ends with an `end` line the heartbeat writes on a
+  requested stop (a log without one says the world ended some other way, and Clu says so);
+  the protocol line is judged, not skipped; an intent for a creature that is not embodied is
+  refused by name; a tick that goes backwards, or a record after the end line, is refused as a
+  rearranged or appended log. Tested: a hash that tells apart everything a lazier one would
+  not; a clock smuggled into the physics caught by the lint; and a matrix of seven ways a log
+  can lie, each named.
 - **Every internal link and anchor is checked per pull request, the external ones weekly.**
   Adopted from the owner's `altium-designer-mcp`: `lychee --offline --include-fragments` in
   quick-checks, installed from its pinned release with a checksum rather than through a

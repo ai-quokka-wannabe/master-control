@@ -180,6 +180,13 @@ impl InputLog {
     pub fn flush(&mut self) {
         let _ = self.file.flush();
     }
+
+    /// The world stopped on request at this tick: the log ends as it should. A log without
+    /// this line ended some other way - a crash, a power cut - and Clu says so.
+    pub fn end(&mut self, tick: u64) {
+        let _ = writeln!(self.file, "end {tick}");
+        let _ = self.file.flush();
+    }
 }
 
 #[cfg(test)]

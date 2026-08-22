@@ -545,28 +545,119 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
 /// determinism check, promoted to the world. Per build, per machine, exactly as always claimed:
 /// a hash because the failure this hunts is a single stray bit, which a tolerance would forgive.
 #[must_use]
-pub fn state_hash<'a>(bodies: impl IntoIterator<Item = &'a Body>) -> u64 {
-    let mut hash: u64 = 14_695_981_039_346_656_037;
-    let mut mix = |value: f32| {
-        let bits = value.to_bits();
-        for byte in 0..4 {
-            hash ^= u64::from((bits >> (byte * 8)) & 0xFF);
-            hash = hash.wrapping_mul(1_099_511_628_211);
+pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 {
+    let mut hasher = StateHasher::new();
+    let bodies: Vec<(u32, &Body)> = bodies.into_iter().collect();
+    // The count first, so a sequence of bodies is delimited rather than merely concatenated.
+    hasher.u32(
+        bodies
+            .len()
+            .try_into()
+            .expect("fewer than four billion bodies"),
+    );
+    for (creature_id, body) in bodies {
+        // The identity, so two worlds with the same bodies under swapped names hash apart.
+        hasher.u32(creature_id);
+        hasher.floats(&body.position);
+        hasher.float(body.yaw);
+        hasher.floats(&body.velocity);
+        hasher.byte(u8::from(body.grounded));
+        hasher.float(body.forward_speed);
+        hasher.float(body.turn_rate);
+        hasher.float(body.vocalisation);
+        hasher.floats(&body.specific_force);
+        // The bounds, fixed at rez but the clamp every step obeys: a rez replayed with other
+        // bounds is another world.
+        hasher.float(body.bounds.max_forward_speed);
+        hasher.float(body.bounds.max_turn_rate);
+        hasher.float(body.bounds.max_vocalisation_strength);
+        hasher.u32(
+            body.bounds
+                .max_contact_count
+                .try_into()
+                .expect("a contact count is small"),
+        );
+        // The proxy, which is what the body touches the world with: a point, or a hull whose
+        // every vertex is state - a re-simulation that lost the mesh stands elsewhere.
+        match body.hull.as_ref() {
+            None => hasher.byte(0),
+            Some(hull) => {
+                hasher.byte(1);
+                hasher.u32(
+                    hull.vertices
+                        .len()
+                        .try_into()
+                        .expect("the wire caps vertices"),
+                );
+                for vertex in &hull.vertices {
+                    hasher.floats(vertex);
+                }
+            }
         }
-    };
-    for body in bodies {
-        mix(body.position[0]);
-        mix(body.position[1]);
-        mix(body.position[2]);
-        mix(body.yaw);
-        mix(body.velocity[0]);
-        mix(body.velocity[1]);
-        mix(body.velocity[2]);
-        mix(body.forward_speed);
-        mix(body.turn_rate);
-        mix(body.vocalisation);
+        // What the body felt this step, as the owner is told it - derived, but a divergence in
+        // a contact is a divergence, and one the positions alone would show a tick late.
+        hasher.u32(
+            body.contacts
+                .len()
+                .try_into()
+                .expect("a contact count is small"),
+        );
+        for contact in &body.contacts {
+            hasher.floats(&contact.position);
+            hasher.floats(&contact.impulse);
+            hasher.floats(&contact.normal);
+            hasher.float(contact.depth);
+            hasher.floats(&contact.slip);
+        }
     }
-    hash
+    hasher.finish()
+}
+
+/// FNV-1a over bytes, opened with a domain tag so this hash can never equal a hash of anything
+/// else that happens to share its first bytes. Every float enters as its bit pattern - two
+/// values that print alike but differ in the last bit are two states - and every sequence is
+/// length-prefixed and every choice tagged, so no two different states can spell the same bytes.
+struct StateHasher {
+    hash: u64,
+}
+
+impl StateHasher {
+    const DOMAIN: &'static [u8] = b"master-control state";
+
+    fn new() -> Self {
+        let mut hasher = StateHasher {
+            hash: 14_695_981_039_346_656_037,
+        };
+        for byte in Self::DOMAIN {
+            hasher.byte(*byte);
+        }
+        hasher
+    }
+
+    fn byte(&mut self, byte: u8) {
+        self.hash ^= u64::from(byte);
+        self.hash = self.hash.wrapping_mul(1_099_511_628_211);
+    }
+
+    fn u32(&mut self, value: u32) {
+        for byte in value.to_le_bytes() {
+            self.byte(byte);
+        }
+    }
+
+    fn float(&mut self, value: f32) {
+        self.u32(value.to_bits());
+    }
+
+    fn floats(&mut self, values: &[f32]) {
+        for value in values {
+            self.float(*value);
+        }
+    }
+
+    fn finish(&self) -> u64 {
+        self.hash
+    }
 }
 
 /// Truncate to the body's contact budget by discarding the faintest, preserving generation
@@ -1568,6 +1659,68 @@ mod tests {
     /// Etape 16's twin: two identical runs hash bit-identically at every tick, and the floor
     /// under the comparison - a frozen world agreeing about nothing - is checked too.
     #[test]
+    fn the_state_hash_tells_apart_what_a_lazier_hash_would_not() {
+        let body = Body::standing_at(0.5, 6.5, floor(0.5, 6.5), FIRST_BODY);
+        let base = state_hash([(7u32, &body)]);
+        assert_eq!(base, state_hash([(7u32, &body)]), "pure");
+        // The same body under another name is another world.
+        assert_ne!(base, state_hash([(8u32, &body)]));
+        // Two bodies are not one body with twice the fields, and none is not one at rest.
+        assert_ne!(base, state_hash([(7u32, &body), (8u32, &body)]));
+        assert_ne!(state_hash(std::iter::empty()), base);
+        // Standing and airborne at the same place are two states.
+        let mut airborne = body.clone();
+        airborne.grounded = false;
+        assert_ne!(base, state_hash([(7u32, &airborne)]));
+        // A bound the step obeys is state.
+        let mut slower = body.clone();
+        slower.bounds.max_forward_speed *= 0.5;
+        assert_ne!(base, state_hash([(7u32, &slower)]));
+        // A hull is state: a re-simulation that lost the mesh must not agree.
+        let mut hulled = body.clone();
+        hulled.hull = crate::hull::Hull::from_points(&[
+            [-0.1, -0.05, -0.1],
+            [0.1, -0.05, -0.1],
+            [-0.1, 0.45, -0.1],
+            [0.1, 0.45, -0.1],
+            [-0.1, -0.05, 0.1],
+            [0.1, -0.05, 0.1],
+            [-0.1, 0.45, 0.1],
+            [0.1, 0.45, 0.1],
+        ]);
+        assert!(hulled.hull.is_some());
+        assert_ne!(base, state_hash([(7u32, &hulled)]));
+        // A contact felt is state the owner is told; the same floats shuffled between fields
+        // are another feel.
+        let mut felt = body.clone();
+        felt.contacts.push(Contact {
+            position: [0.0, -0.05, 0.0],
+            impulse: [0.0, 0.3, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            depth: 0.001,
+            slip: [0.0; 3],
+        });
+        let with_contact = state_hash([(7u32, &felt)]);
+        assert_ne!(base, with_contact);
+        let mut shuffled = body.clone();
+        shuffled.contacts.push(Contact {
+            position: [0.0, 0.3, 0.0],
+            impulse: [0.0, -0.05, 0.0],
+            normal: [0.0, 1.0, 0.0],
+            depth: 0.001,
+            slip: [0.0; 3],
+        });
+        assert_ne!(with_contact, state_hash([(7u32, &shuffled)]));
+        // Negative zero and zero are two bit patterns, and the hash says so: a world that
+        // replays bit for bit agrees on the sign of nothing too.
+        let mut minus = body.clone();
+        minus.velocity[0] = -0.0;
+        let mut plus = body.clone();
+        plus.velocity[0] = 0.0;
+        assert_ne!(state_hash([(7u32, &minus)]), state_hash([(7u32, &plus)]));
+    }
+
+    #[test]
     fn the_same_run_hashes_bit_identically_twice() {
         let run = || {
             let mut body = Body::standing_at(0.5, 6.5, floor(0.5, 6.5), FIRST_BODY);
@@ -1583,7 +1736,7 @@ mod tests {
                     &FIRST_BODY,
                 );
                 step_body(&mut body, staged, floor);
-                hashes.push(state_hash([&body]));
+                hashes.push(state_hash([(7u32, &body)]));
             }
             hashes
         };

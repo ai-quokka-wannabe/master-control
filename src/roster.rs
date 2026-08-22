@@ -220,6 +220,13 @@ impl Roster {
         self.residents.values().map(|resident| &resident.body)
     }
 
+    /// Every body with its identity, in roster order: what the state hash covers.
+    pub fn named_bodies(&self) -> impl Iterator<Item = (u32, &Body)> {
+        self.residents
+            .iter()
+            .map(|(creature_id, resident)| (*creature_id, &resident.body))
+    }
+
     /// Every model, in roster order - what a late joiner is told before its first tick.
     pub fn models(&self) -> impl Iterator<Item = &Model> {
         self.residents.values().map(|resident| &resident.model)
