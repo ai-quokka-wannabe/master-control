@@ -21,6 +21,7 @@ pub mod ground;
 pub mod heartbeat;
 pub mod link_dll;
 pub mod physics;
+pub mod record;
 pub mod roster;
 pub mod script;
 pub mod stager;
