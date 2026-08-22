@@ -98,8 +98,15 @@ second in one intent is named at the first hash after it, with the Disk's rows a
 re-simulated body, floats as bits (`creature 7 pz: recorded 408C0000 (4.375) re-simulated
 408BC000 (4.3671875)`). A log from another world is refused in words.
 
-**Still owed:** rotation (~55 MB per hour; a Disk should roll over at a size, each file whole);
-the master seed in the log's header once the world draws one.
+**Done (2026-08-22), rotation.** `--disk-roll <MiB>` (48 by default, 0 never): once the file
+reaches the size, the tick just told is its last - it closes with `BYE` as a world does - and
+`<stem>.0002.disk`, `.0003` and on open at that very tick with the live roster's `REZ` at their
+head, exactly as a late joiner is told, so any one file replays alone and Clu, handed a later
+file than the divergence, names it and asks for the earlier one. Judged every eighth tick.
+
+**Still owed, deliberately:** the master seed in the log's header - once the world draws one.
+Nothing in the world is random yet (`creature_seed` exists and nothing calls it), and a field
+for a number nobody draws is the versioning-before-need the owner warned against.
 
 ## Etape 5 — contacts, exact
 

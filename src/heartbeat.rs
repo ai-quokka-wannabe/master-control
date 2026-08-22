@@ -53,6 +53,12 @@ pub struct Config {
     /// Where to write the Disk - the state log, what the world said in the wire's own bytes.
     /// None records nothing.
     pub disk: Option<std::path::PathBuf>,
+    /// The size at which a Disk rolls over to the next file, in bytes: the named file first,
+    /// then `<stem>.0002.disk`, `.0003` and on, each one whole - a file opens at the tick the
+    /// one before it closed with and with the live roster's REZ at its head, as a late joiner
+    /// is told, so any one of them replays alone. Zero never rolls. A full world writes about
+    /// fifty-five megabytes an hour; the default rolls a little more often than hourly.
+    pub disk_roll_bytes: u64,
     /// Where to write the input log - every intent judged and applied, and the periodic hash.
     pub input_log: Option<std::path::PathBuf>,
     /// Ticks between hashes in the input log: 32 is once a second.
@@ -69,6 +75,7 @@ impl Default for Config {
             handshake_timeout: Duration::from_millis(250),
             verbose: false,
             disk: None,
+            disk_roll_bytes: 48 * 1024 * 1024,
             input_log: None,
             hash_every: 32,
         }
@@ -96,9 +103,44 @@ pub struct Heartbeat {
     /// This world's fingerprint, as the DLL computed it: the door judges by it, WELCOME says it.
     world_fingerprint: u64,
     /// The Disk: a citizen whose socket is a file, told everything every citizen is told.
-    disk: Option<Connection>,
+    disk: Option<Disk>,
     /// The input log, when one was asked for.
     input_log: Option<InputLog>,
+    /// The wire, kept for the Disk's rollover: the next file opens through it.
+    wire: LinkDll,
+}
+
+/// The Disk being written: the file's connection, and what the rollover needs to name the next.
+struct Disk {
+    connection: Connection,
+    /// The file being written.
+    path: std::path::PathBuf,
+    /// The path the operator named; the numbered files derive from it.
+    named: std::path::PathBuf,
+    /// This file's number: the named file is 1, and the rollovers count from 2.
+    number: u32,
+}
+
+impl Disk {
+    /// `<stem>.NNNN.disk` beside the named file, for number two and on.
+    fn path_for(named: &std::path::Path, number: u32) -> std::path::PathBuf {
+        if number <= 1 {
+            return named.to_path_buf();
+        }
+        let stem = named
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        named.with_file_name(format!("{stem}.{number:04}.disk"))
+    }
+
+    /// The file's size on disk, as the rollover judges it; zero when it cannot be read, which
+    /// merely postpones the roll rather than forcing one.
+    fn bytes(&self) -> u64 {
+        std::fs::metadata(&self.path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0)
+    }
 }
 
 impl Heartbeat {
@@ -115,17 +157,14 @@ impl Heartbeat {
         let roster = Roster::with_the_guest();
         let disk = match &config.disk {
             Some(path) => {
-                let mut disk =
-                    wire.record_open(path, world_fingerprint, 0, TICK_SECONDS, start_unix_seconds)?;
-                for model in roster.models() {
-                    if !send_model(&mut disk, model) {
-                        return Err("the Disk refused the opening roster".to_string());
-                    }
-                }
-                disk.flush()
-                    .map_err(|status| format!("the Disk could not be written: status {status}"))?;
+                let connection = open_disk(wire, path, world_fingerprint, 0, &roster)?;
                 log_info(&format!("recording the world to {}.", path.display()));
-                Some(disk)
+                Some(Disk {
+                    connection,
+                    path: path.clone(),
+                    named: path.clone(),
+                    number: 1,
+                })
             }
             None => None,
         };
@@ -159,6 +198,7 @@ impl Heartbeat {
             world_fingerprint,
             disk,
             input_log,
+            wire: *wire,
             config,
             citizens: Vec::new(),
             stager: ActionStager::default(),
@@ -437,6 +477,7 @@ impl Heartbeat {
             }
         }
         if let Some(disk) = self.disk.as_mut() {
+            let disk = &mut disk.connection;
             let mut told = true;
             for model in rezzed {
                 told = told && send_model(disk, model);
@@ -561,6 +602,7 @@ impl Heartbeat {
 
         // The Disk first: it is told everything, every letter included - the record is whole.
         if let Some(disk) = self.disk.as_mut() {
+            let disk = &mut disk.connection;
             let mut told = disk.send_tick_state(&header, &rows) == LNK_OK;
             if told && let Some(derez) = &derez {
                 told = disk.send_derez(derez) == LNK_OK;
@@ -576,7 +618,6 @@ impl Heartbeat {
                 self.disk = None;
             }
         }
-
         // Per-subscriber sends, per the composable-broadcast rule: the loop is the seam
         // interest management drops into, even while everyone still hears everything.
         let roster = &mut self.roster;
@@ -623,6 +664,8 @@ impl Heartbeat {
             // A leave discovered through a failed send still owes everyone its DEREZ.
             self.relay(&[], &late_leaves);
         }
+        // Last, once everything this tick owed the Disk is on it - the late leaves included.
+        self.roll_the_disk_if_due(tick);
     }
 }
 
@@ -659,6 +702,87 @@ fn part_with(citizen: &mut Citizen, roster: &mut Roster, what_failed: &str) -> V
 
 /// One body over one connection, the host's own rows. Queued, not flushed: the caller
 /// flushes once it has said everything.
+impl Heartbeat {
+    /// The rollover: once the file has reached the configured size, this tick - already told to
+    /// it whole - is the last it holds. It closes with BYE as a world does, and the next file
+    /// opens at this tick with the live roster at its head, so either replays alone. Judged
+    /// every eighth tick, because a size is a syscall and a quarter second of overshoot is
+    /// nothing against the limit.
+    fn roll_the_disk_if_due(&mut self, tick: u64) {
+        if self.config.disk_roll_bytes == 0 || !tick.is_multiple_of(8) {
+            return;
+        }
+        let Some(disk) = self.disk.as_ref() else {
+            return;
+        };
+        let bytes = disk.bytes();
+        if bytes < self.config.disk_roll_bytes {
+            return;
+        }
+        let number = disk.number + 1;
+        let next_path = Disk::path_for(&disk.named, number);
+        match open_disk(
+            &self.wire,
+            &next_path,
+            self.world_fingerprint,
+            tick,
+            &self.roster,
+        ) {
+            Ok(connection) => {
+                let previous = self.disk.replace(Disk {
+                    connection,
+                    path: next_path.clone(),
+                    named: disk.named.clone(),
+                    number,
+                });
+                // Dropping the old connection closes it: BYE, then the file.
+                drop(previous);
+                log_info(&format!(
+                    "the Disk rolled over at tick {tick}: {} ({bytes} bytes) closed, {} opened.",
+                    Disk::path_for(&self.disk.as_ref().expect("just placed").named, number - 1)
+                        .display(),
+                    next_path.display()
+                ));
+            }
+            Err(reason) => {
+                log_warn(&format!(
+                    "the Disk could not roll over - {reason} - recording continues in the current file."
+                ));
+            }
+        }
+    }
+}
+
+/// A Disk opened at `start_tick` with the live roster at its head: what a late joiner is told,
+/// so the file replays alone.
+fn open_disk(
+    wire: &LinkDll,
+    path: &std::path::Path,
+    world_fingerprint: u64,
+    start_tick: u64,
+    roster: &Roster,
+) -> Result<Connection, String> {
+    let start_unix_seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs())
+        .unwrap_or(0);
+    let mut disk = wire.record_open(
+        path,
+        world_fingerprint,
+        start_tick,
+        TICK_SECONDS,
+        start_unix_seconds,
+    )?;
+    for model in roster.models() {
+        if !send_model(&mut disk, model) {
+            return Err("the Disk refused the opening roster".to_string());
+        }
+    }
+    disk.flush()
+        .map_err(|status| format!("the Disk could not be written: status {status}"))?;
+    Ok(disk)
+}
+
 fn send_model(connection: &mut Connection, model: &Model) -> bool {
     connection.send_rez(
         &model.header,

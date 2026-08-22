@@ -596,6 +596,7 @@ mod os {
 
 /// The loaded wire: the vtable, version-refused and size-checked, from the library beside this
 /// executable - the residence rule, no path flag, no search order.
+#[derive(Clone, Copy)]
 pub struct LinkDll {
     vtable: &'static LnkClientVTable,
 }

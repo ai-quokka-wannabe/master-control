@@ -281,7 +281,16 @@ fn diff_against_disk(
     roster: &Roster,
     wire: &LinkDll,
 ) -> Result<Vec<String>, String> {
-    let (mut replay, _) = wire.replay_open(disk, wire.world_fingerprint(&world_definition()))?;
+    let (mut replay, welcome) =
+        wire.replay_open(disk, wire.world_fingerprint(&world_definition()))?;
+    if welcome.current_tick >= tick {
+        // A rolled-over Disk: this file is a later one. The operator is told which to bring.
+        return Ok(vec![format!(
+            "the Disk {} begins at tick {}, after tick {tick}: give the earlier file of the rollover",
+            disk.display(),
+            welcome.current_tick
+        )]);
+    }
     let mut lines = Vec::new();
     loop {
         match replay.poll() {
