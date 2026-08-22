@@ -55,6 +55,28 @@ jobs:
                     exit 1
                 fi
 
+            # lychee is installed from its pinned release archive with a checksum check rather
+            # than through lycheeverse/lychee-action: the organisation runs GitHub-owned actions
+            # only, and a verified download keeps that policy - and the trust it means - intact.
+            - name: Install lychee
+              shell: bash
+              env:
+                LYCHEE_VERSION: v0.24.2
+                LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
+              run: |
+                curl -sSfL -o lychee.tar.gz "https://github.com/lycheeverse/lychee/releases/download/lychee-${LYCHEE_VERSION}/lychee-x86_64-unknown-linux-gnu.tar.gz"
+                echo "${LYCHEE_SHA256}  lychee.tar.gz" | sha256sum --check --strict
+                tar -xzf lychee.tar.gz
+                sudo install -m 755 lychee-x86_64-unknown-linux-gnu/lychee /usr/local/bin/lychee
+                rm -rf lychee.tar.gz lychee-x86_64-unknown-linux-gnu
+                lychee --version
+
+            # Every internal link and anchor in the documentation resolves - offline, so the
+            # answer is deterministic and a third-party site cannot redden a pull request. The
+            # external links have their own scheduled workflow.
+            - name: Check internal links and anchors
+              run: lychee --offline --include-fragments --no-progress --root-dir "$(pwd)" --exclude-path target --exclude-path external --exclude-path node_modules "./**/*.md"
+
     build:
         name: Build (${{ matrix.os }})
         needs: quick-checks
@@ -76,23 +98,42 @@ jobs:
               with:
                 submodules: true
 
-            # The runners ship a Rust toolchain, but an image refresh can lag a release; updating
-            # to current stable makes the toolchain a fact of this run rather than of the image.
-            - name: Update the stable toolchain
+            # The runners ship a Rust toolchain, but the build is pinned to one exact version in
+            # rust-toolchain.toml, locally and here alike, so a new rustc or clippy never turns a
+            # green build red on its own timetable.
+            - name: Install the pinned toolchain
               run: |
-                rustup update --no-self-update stable
-                rustup default stable
+                # rust-toolchain.toml pins the exact version; rustup installs it on first use.
+                rustup show active-toolchain
                 cargo --version
                 rustc --version
+
+            # The build directory from main, read-only on a pull request: a pull request builds
+            # only what it changed. Keyed by the toolchain and the manifest.
+            - name: Restore the cargo cache
+              uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+              with:
+                path: |
+                    ~/.cargo/registry/index/
+                    ~/.cargo/registry/cache/
+                    target/
+                key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml') }}
 
             - name: Formatting must be canonical
               run: cargo fmt --check
 
+            # The doc comments are half of what these crates are; a broken intra-doc link or a
+            # missing code-block language is a lie waiting for a reader.
+            - name: Documentation builds without a warning
+              env:
+                RUSTDOCFLAGS: -D warnings
+              run: cargo doc --locked --no-deps --document-private-items
+
             - name: Clippy, warnings as errors
-              run: cargo clippy --all-targets -- --deny warnings
+              run: cargo clippy --locked --all-targets -- --deny warnings
 
             - name: Test (unit, twin and the whole world stood up)
-              run: cargo test
+              run: cargo test --locked
 
     ci-success:
         name: CI Success

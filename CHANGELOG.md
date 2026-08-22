@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every internal link and anchor is checked per pull request, the external ones weekly.**
+  Adopted from the owner's `altium-designer-mcp`: `lychee --offline --include-fragments` in
+  quick-checks, installed from its pinned release with a checksum rather than through a
+  third-party action, so a dead anchor is a red pull request; and `links.yml`, a scheduled
+  workflow that follows the external links too, never blocking a merge on a site elsewhere.
+- **The toolchain is pinned, the lock file is honoured, the docs must build clean, and main
+  caches the build.** Adopted from the owner's `altium-designer-mcp`: `rust-toolchain.toml`
+  pins rustc 1.95.0 with rustfmt and clippy, locally and in CI alike, so a new release never
+  turns a green build red on its own timetable; every cargo step runs `--locked`; `cargo doc
+  --document-private-items` runs with warnings as errors in quick-checks - and found two doc
+  links to private items at once; and main saves a cargo cache that pull requests restore.
 - **The spawn rule: every body gets a spot of its own.** `Roster::spawn_spot` walks a fixed
   square spiral out from the pad - half a metre apart, eight rings on the pad's own terrace,
   289 spots - and seats the newcomer on the first where its footprint (the hull's extents, or
