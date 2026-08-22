@@ -317,7 +317,7 @@ pub struct ProprioceptionView {
 }
 
 /// The union behind `LnkMessageView.as`. Reading the member the type byte names is the
-/// contract; [`MessageView::message`] is the one place that read happens.
+/// contract; the private `MessageView::message` is the one place that read happens.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub union MessageViewPayload {
