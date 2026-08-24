@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The markdown linter is pinned and every job has a timeout.** Adopted from the owner's
+  `arm-cmake-toolchains` and `claude-chats-browser`: `package.json` + `package-lock.json` pin
+  markdownlint-cli2 to the byte, `npm ci` installs exactly that, the cache is keyed on the lock
+  file, and Dependabot proposes the bumps - a lint run is reproducible and a new linter release
+  can no longer redden an unrelated pull request. Every job carries a `timeout-minutes`, so
+  nothing can hang for the six-hour default.
 - **Determinism hardening, the second half: the random walk and the build stamp.** Adopted from
   the owner's `queen-of-towers-game` and `project_nimrod`. `tests/random_walk.rs` walks the
   world at random from a seeded generator of its own (SplitMix64, std only) - hosts rezzing
