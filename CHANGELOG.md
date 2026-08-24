@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The goldens never merge.** `tests/data/*.txt` carry `-merge` in `.gitattributes`: a
+  line-by-line merge of two generations of a recorded golden would be a file that is neither,
+  so a conflict there is regenerated deliberately, never hand-merged. Diffs stay on. Adopted
+  from the owner's `queen-of-towers-game`.
 - **The pins Dependabot cannot see are watched weekly.** Adopted from the owner's `arm-dev-env`:
   `tool-updates.yml` reads each pinned tool version out of the tree, resolves the latest
   release from the tool's own feed, and opens one tracking issue per tool that is behind -

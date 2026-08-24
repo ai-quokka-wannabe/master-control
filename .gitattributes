@@ -1,2 +1,7 @@
 # automatically normalise line endings to the user's Git preferences
 * text=auto
+
+# The goldens are recorded data, not prose: a line-by-line merge of two generations of a golden
+# would be a file that is neither. A conflict there is regenerated, never hand-merged. (Adopted
+# from the owner's queen-of-towers-game.) Diffs stay on - a golden that moved is worth reading.
+tests/data/*.txt -merge
