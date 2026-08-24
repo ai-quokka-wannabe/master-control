@@ -17,3 +17,6 @@ __pycache__/
 # The golden generator's local build litter - the goldens are what gets committed.
 *.obj
 generate_physics_goldens.exe
+
+# The pinned markdown linter, installed by `npm ci`; the lock file is tracked, the modules are not.
+/node_modules/
