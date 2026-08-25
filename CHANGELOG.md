@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A refusal changes nothing, proven against a twin.** Adopted from the owner's
+  `queen-of-towers-game`: `tests/refusals_change_nothing.rs` tries every way the world says
+  no (a body another host wears, a body reaching past the world or made of subnormals, a derez
+  by a stranger or of nobody, a claim on a worn identity, an intent that is stale, from the
+  future or from a stranger) on one world and not on its twin, then steps both for forty
+  ticks: the same steering applied to every creature, the same state hash at every step. Not
+  "the hash did not move" at the refusal, but "nothing was remembered".
+- **The binary, stood up.** Adopted from the owner's `setonix-os`: `tests/the_world_stands_up.rs`
+  spawns the real `master-control` on port 0, reads its stdout on a thread until it greets the
+  Programs and names the port it got, dials that port once, and reaps it however the test
+  ends - telling a world that died (its stdout closed) from one that went silent (no greeting
+  within the budget) by name.
+- **The toolchain is pinned in one place, and CI says so.** Adopted from the owner's
+  `setonix-os`: `.github/scripts/check-toolchain-pin.sh` refuses a `rust-toolchain.toml` that
+  floats and any workflow that installs a toolchain of its own (a third-party toolchain action,
+  `rustup toolchain install`, a curl of rustup) - a second source of truth for the compiler
+  version is the kind of drift that leaves everything building.
+
 - **The goldens never merge.** `tests/data/*.txt` carry `-merge` in `.gitattributes`: a
   line-by-line merge of two generations of a recorded golden would be a file that is neither,
   so a conflict there is regenerated deliberately, never hand-merged. Diffs stay on. Adopted

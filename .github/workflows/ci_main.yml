@@ -93,6 +93,13 @@ jobs:
             - name: Check internal links and anchors
               run: lychee --offline --include-fragments --no-progress --root-dir "$(pwd)" --exclude-path target --exclude-path external --exclude-path node_modules "./**/*.md"
 
+            # rust-toolchain.toml is the one place a compiler version lives. The day a workflow
+            # installs a toolchain of its own, CI has a second source of truth and the pin's
+            # guarantee is gone silently - everything still builds. Adopted from the owner's
+            # setonix-os.
+            - name: The toolchain is pinned in one place
+              run: bash .github/scripts/check-toolchain-pin.sh
+
     build:
         name: Build (${{ matrix.os }})
         needs: quick-checks
