@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`/check-coherence`.** A documentation audit for contradictions between clauses that were
+  each right when written, orphaned claims about the tree, facts stated twice against the
+  single-source-of-truth table, scope drift and stale "today" sections - and one that is willing
+  to conclude the documents are coherent. Adopted from the owner's `setonix-os`; the same file
+  in every repository of the organisation.
 - **A refusal changes nothing, proven against a twin.** Adopted from the owner's
   `queen-of-towers-game`: `tests/refusals_change_nothing.rs` tries every way the world says
   no (a body another host wears, a body reaching past the world or made of subnormals, a derez
