@@ -16,10 +16,19 @@ if ! grep -qE '^channel = "[0-9]+\.[0-9]+\.[0-9]+"$' rust-toolchain.toml; then
     status=1
 fi
 
+# Only the directories that exist: grep answers 2 for a missing one even when it matched
+# elsewhere, and a check that mistakes "error" for "no match" is the silent kind of green.
+places=()
+for place in .github/workflows .github/actions; do
+    if [[ -d "$place" ]]; then
+        places+=("$place")
+    fi
+done
+
 # Un-anchored on purpose: the install idiom usually sits mid-line inside a `run: |` block.
 # setup-node is not a toolchain here - it serves the pinned markdown linter - so it is not listed.
-pattern='dtolnay/rust-toolchain|actions-rs/(toolchain|cargo)|actions/setup-(python|go|java|dotnet)|rustup toolchain install|rustup (default|override set)|sh\.rustup\.rs|rustup-init'
-if grep -rnE "$pattern" .github/workflows .github/actions 2>/dev/null; then
+pattern='dtolnay/rust-toolchain|actions-rs/(toolchain|cargo)|actions/setup-(python|go|java|dotnet)|rustup toolchain install|rustup update|rustup (default|override set)|sh\.rustup\.rs|rustup-init'
+if grep -rnE "$pattern" "${places[@]}"; then
     echo "::error::A workflow names a toolchain of its own (above). rust-toolchain.toml is the only place a compiler version lives; rustup reads it on first use."
     status=1
 fi
