@@ -56,6 +56,9 @@ fn orbiter(
         ],
         yaw_rate: -angular_speed,
         vocalisation: 0.0,
+        // The set dressing is single bodies: no chain, the slots zero.
+        segment_count: 1,
+        segments: [crate::link_dll::SegmentPose::default(); crate::link_dll::TRAILING_SEGMENTS_MAX],
     }
 }
 

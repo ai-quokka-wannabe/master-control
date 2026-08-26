@@ -70,6 +70,8 @@ enum Record {
         creature_id: u32,
         bounds: BodyBounds,
         vertices: Vec<[f32; 3]>,
+        segment_count: u32,
+        segment_spacing: f32,
     },
     Derez {
         creature_id: u32,
@@ -167,6 +169,30 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                     vertices.push(vertex);
                 }
                 vertices
+            },
+            // The chain, after the mesh; a log from before chains is a chain of one.
+            segment_count: {
+                let count = if words.len() > 7 { number(7)? } else { 0 };
+                #[allow(clippy::cast_possible_truncation)]
+                let at = 8 + (count as usize) * 3;
+                if words.len() > at {
+                    #[allow(clippy::cast_possible_truncation)]
+                    {
+                        number(at)? as u32
+                    }
+                } else {
+                    1
+                }
+            },
+            segment_spacing: {
+                let count = if words.len() > 7 { number(7)? } else { 0 };
+                #[allow(clippy::cast_possible_truncation)]
+                let at = 9 + (count as usize) * 3;
+                if words.len() > at {
+                    hex_f32(words[at])?
+                } else {
+                    0.0
+                }
             },
         })),
         "derez" => Ok(Some(Record::Derez {
@@ -327,9 +353,13 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
                 creature_id,
                 bounds,
                 vertices,
+                segment_count,
+                segment_spacing,
             } => {
                 let mut model = Model::bodiless(creature_id, &bounds);
                 model.header.creature_id = creature_id;
+                model.header.segment_count = segment_count;
+                model.header.segment_spacing = segment_spacing;
                 #[allow(clippy::cast_possible_truncation)]
                 {
                     model.header.vertex_count = vertices.len() as u32;
@@ -460,6 +490,43 @@ fn diff_against_disk(
                                 ("yaw_rate", state.yaw_rate, body.turn_rate),
                                 ("voice", state.vocalisation, body.vocalisation),
                             ];
+                            if state.segment_count != body.chain.segment_count {
+                                lines.push(format!(
+                                    "creature {} segments: recorded {} re-simulated {}",
+                                    state.creature_id,
+                                    state.segment_count,
+                                    body.chain.segment_count
+                                ));
+                            }
+                            for (slot, (recorded, resimulated)) in state
+                                .segments
+                                .iter()
+                                .zip(body.chain.poses.iter())
+                                .enumerate()
+                            {
+                                for (axis, name) in ["px", "py", "pz"].iter().enumerate() {
+                                    if recorded.position[axis].to_bits()
+                                        != resimulated.position[axis].to_bits()
+                                    {
+                                        lines.push(format!(
+                                            "creature {} segment {} {name}: recorded {:08X} re-simulated {:08X}",
+                                            state.creature_id,
+                                            slot + 1,
+                                            recorded.position[axis].to_bits(),
+                                            resimulated.position[axis].to_bits()
+                                        ));
+                                    }
+                                }
+                                if recorded.yaw.to_bits() != resimulated.yaw.to_bits() {
+                                    lines.push(format!(
+                                        "creature {} segment {} yaw: recorded {:08X} re-simulated {:08X}",
+                                        state.creature_id,
+                                        slot + 1,
+                                        recorded.yaw.to_bits(),
+                                        resimulated.yaw.to_bits()
+                                    ));
+                                }
+                            }
                             for (name, recorded, resimulated) in fields {
                                 if recorded.to_bits() != resimulated.to_bits() {
                                     lines.push(format!(
@@ -512,18 +579,41 @@ mod tests {
                 creature_id: 7,
                 bounds,
                 vertices,
+                segment_count,
+                segment_spacing,
             })) => {
                 assert!((bounds.max_forward_speed - 1.0).abs() < f32::EPSILON);
                 assert_eq!(bounds.max_contact_count, 4);
                 assert!(vertices.is_empty(), "an older log's rez is a bodiless body");
+                assert_eq!(segment_count, 1, "an older log's rez is a chain of one");
+                assert_eq!(segment_spacing, 0.0);
             }
             other => panic!("{other:?}"),
         }
         match parse_line(
             "rez 5 7 3F800000 3FC90FDB 3F800000 4 2 00000000 3F800000 00000000 BF800000 00000000 3F000000",
         ) {
-            Ok(Some(Record::Rez { vertices, .. })) => {
+            Ok(Some(Record::Rez {
+                vertices,
+                segment_count,
+                ..
+            })) => {
                 assert_eq!(vertices, vec![[0.0, 1.0, 0.0], [-1.0, 0.0, 0.5]]);
+                assert_eq!(segment_count, 1);
+            }
+            other => panic!("{other:?}"),
+        }
+        // A chain after the mesh: four segments, 0.3 m apart (3E99999A).
+        match parse_line(
+            "rez 5 7 3F800000 3FC90FDB 3F800000 4 2 00000000 3F800000 00000000 BF800000 00000000 3F000000 4 3E99999A",
+        ) {
+            Ok(Some(Record::Rez {
+                segment_count,
+                segment_spacing,
+                ..
+            })) => {
+                assert_eq!(segment_count, 4);
+                assert!((segment_spacing - 0.3).abs() < 1e-6);
             }
             other => panic!("{other:?}"),
         }
