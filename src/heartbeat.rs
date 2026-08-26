@@ -525,7 +525,14 @@ impl Heartbeat {
                             .iter()
                             .map(|vertex| vertex.position)
                             .collect();
-                        log.rez(tick, model.header.creature_id, bounds, &vertices);
+                        log.rez(
+                            tick,
+                            model.header.creature_id,
+                            bounds,
+                            &vertices,
+                            model.header.segment_count,
+                            model.header.segment_spacing,
+                        );
                     }
                     Change::Derez(creature_id) => log.derez(tick, *creature_id),
                     Change::Claim(creature_id) => log.claim(tick, *creature_id),

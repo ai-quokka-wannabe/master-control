@@ -141,6 +141,21 @@ fn every_refusal_leaves_the_world_bit_identical_to_a_twin_that_was_never_asked()
         matches!(abused.rez(HOST, subnormal), Admission::RefusedBounds(_)),
         "a body made of subnormals is refused"
     );
+    // A chain the world does not admit: too long, and one with no spacing.
+    let mut nine = boxed(302, 0.2);
+    nine.header.segment_count = 9;
+    nine.header.segment_spacing = 0.5;
+    assert!(
+        matches!(abused.rez(HOST, nine), Admission::RefusedBounds(_)),
+        "a chain of nine is refused"
+    );
+    let mut flat = boxed(303, 0.2);
+    flat.header.segment_count = 3;
+    flat.header.segment_spacing = 0.0;
+    assert!(
+        matches!(abused.rez(HOST, flat), Admission::RefusedBounds(_)),
+        "a chain with no spacing is refused"
+    );
     assert_eq!(
         abused.derez(STRANGER, CREATURE),
         Err(DerezRefusal::NotOwner { owner: Some(HOST) }),

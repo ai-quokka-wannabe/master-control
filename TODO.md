@@ -183,3 +183,25 @@ Gated on the `REZ` payload (Link protocol v4, now v6) and on Etape 2's roster of
 - **Held by goldens**: a contact-golden life (slide across a welded diagonal without a hop;
   corner, edge and face landings; two hulls meeting) joins `tests/data/`, with breakage rounds
   that unweld the diagonal and that reorder the hull.
+
+## Etape 6 — the chain
+
+**Done (2026-08-26).** The owner's ruling: a worm is a chain of icosahedra joined spike to
+spike, and it undulates. The world's part (`src/chain.rs`): the head stays the one rigid body
+physics steps; every trailing segment is kinematic trail, placed one spacing further back along
+the path the head actually walked - a ring of 128 past head poses per creature, sampled by
+distance (a head standing still records nothing), fixed at rez and never grown, seeded straight
+behind the spawn pose so the trail is defined from the first tick. Placement walks back from
+the head's own pose, accumulating arc length, interpolating within the hop that crosses each
+segment's distance, facing along the path there. Segments touch nothing: the contacts are the
+head's, the pair loop never sees them, and TOPOLOGY.md's deferred rigid-body solver stays
+deferred - nothing here is articulated. The `REZ` names the chain (`segment_count` 1..=8,
+`segment_spacing` 0 for one, (0, 4] m otherwise - refused by name, `refusals_change_nothing`
+holds the refusals), the row carries the poses, the state hash covers the ring in logical
+order and the poses, the input log's `rez` line carries the count and spacing after the mesh
+(an older line is a chain of one), and Clu's Disk diff names a segment that disagrees. Proven:
+`chain::tests` (straight seed, a quarter circle followed and faced along, the same walk twice),
+the random walk rezzing chains of two to eight (chords never over the spacing, dead slots
+zero), and a real chain of four told over the wire trailing its head through a turn. Owed: a
+lateral wave as a function of speed - authored motion, said so - once the following looks right
+in the window; a chain golden life in `tests/data/`.

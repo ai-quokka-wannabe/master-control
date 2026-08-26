@@ -436,6 +436,8 @@ fn a_body(creature_id: u32) -> (Rez, Vec<RezVertex>, Vec<RezTriangle>, Vec<RezMa
         vertex_count: 3,
         triangle_count: 1,
         material_count: 1,
+        segment_count: 1,
+        segment_spacing: 0.0,
     };
     let vertices = vec![
         RezVertex {
@@ -487,6 +489,105 @@ fn a_cube(creature_id: u32) -> (Rez, Vec<RezVertex>, Vec<RezTriangle>, Vec<RezMa
     header.vertex_count = 8;
     header.triangle_count = 2;
     (header, vertices, triangles, materials)
+}
+
+/// A chain of four cubes three tenths of a metre apart: the first worm the wire carries.
+fn a_chain(creature_id: u32) -> (Rez, Vec<RezVertex>, Vec<RezTriangle>, Vec<RezMaterial>) {
+    let (mut header, vertices, triangles, materials) = a_cube(creature_id);
+    header.segment_count = 4;
+    header.segment_spacing = 0.3;
+    (header, vertices, triangles, materials)
+}
+
+#[test]
+fn a_chain_is_told_with_its_segments_trailing_the_head() {
+    let world = World::stand_up(quick_config());
+    let wire = LinkDll::beside_executable().expect("wire");
+    let (mut host, welcome) = wire
+        .connect(
+            &world.address(),
+            ROLE_CREATURE_HOST,
+            wire.world_fingerprint(&world_definition()),
+            5_000,
+        )
+        .expect("the world answers");
+    let (header, vertices, triangles, materials) = a_chain(600);
+    assert_eq!(
+        host.send_rez(&header, &vertices, &triangles, &materials),
+        master_control::link_dll::LNK_OK
+    );
+    let _ = host.flush().expect("flush");
+
+    // Told: four segments, the three trailing ones straight behind the head, spacing apart,
+    // and the slots beyond the chain zero.
+    let (mut tick, mut states) = await_tick(&mut host, welcome.current_tick + 3);
+    while !states.iter().any(|state| state.creature_id == 600) {
+        let next = await_tick(&mut host, tick + 1);
+        tick = next.0;
+        states = next.1;
+    }
+    let row = states
+        .iter()
+        .find(|state| state.creature_id == 600)
+        .expect("the chain is in the telling");
+    assert_eq!(row.segment_count, 4);
+    let mut previous = row.position;
+    for pose in &row.segments[..3] {
+        let chord = ((pose.position[0] - previous[0]).powi(2)
+            + (pose.position[2] - previous[2]).powi(2))
+        .sqrt();
+        assert!((chord - 0.3).abs() < 1e-3, "straight behind: chord {chord}");
+        assert!(
+            pose.position[2] > previous[2],
+            "behind the head, which faces -Z"
+        );
+        previous = pose.position;
+    }
+    assert!(
+        row.segments[3..]
+            .iter()
+            .all(|pose| *pose == master_control::link_dll::SegmentPose::default()),
+        "the slots beyond the chain are zero"
+    );
+    let start_last = row.segments[2].position;
+
+    // Steered forward and turning for a second and a half: the trail follows the arc the head
+    // walked - every chord still no longer than the spacing - and the tail is elsewhere.
+    for _ in 0..48 {
+        let actions = Actions {
+            tick: tick + 1,
+            creature_id: 600,
+            desired_forward_speed: 1.5,
+            desired_turn_rate: 0.8,
+            vocalisation_strength: 0.0,
+            previous_forward_speed: 1.5,
+            previous_turn_rate: 0.8,
+            previous_vocalisation: 0.0,
+            reserved0: [0; 4],
+        };
+        assert_eq!(
+            host.send_actions(&actions),
+            master_control::link_dll::LNK_OK
+        );
+        let _ = host.flush().expect("flush");
+        let next = await_tick(&mut host, tick + 1);
+        tick = next.0;
+        states = next.1;
+    }
+    let row = states
+        .iter()
+        .find(|state| state.creature_id == 600)
+        .expect("still told");
+    let mut previous = row.position;
+    for pose in &row.segments[..3] {
+        let chord = ((pose.position[0] - previous[0]).powi(2)
+            + (pose.position[2] - previous[2]).powi(2))
+        .sqrt();
+        assert!(chord <= 0.3 + 1e-3, "chord {chord} over the spacing");
+        assert!(chord > 0.05, "the segments did not pile up: chord {chord}");
+        previous = pose.position;
+    }
+    assert_ne!(row.segments[2].position, start_last, "the tail moved");
 }
 
 fn rez_cube(connection: &mut master_control::link_dll::Connection, creature_id: u32) {
@@ -1759,9 +1860,9 @@ fn clu_names_every_way_a_log_can_lie() {
     );
 
     // Another protocol: the version bumped.
-    let other_protocol = honest.replacen("protocol 6 ", "protocol 7 ", 1);
+    let other_protocol = honest.replacen("protocol 7 ", "protocol 8 ", 1);
     let refusal = check(other_protocol).expect_err("protocol");
-    assert!(refusal.contains("Link protocol 7"), "{refusal}");
+    assert!(refusal.contains("Link protocol 8"), "{refusal}");
 
     // Another build made the log: not a lie, but said, so a later disagreement is read right.
     let build_line = lines

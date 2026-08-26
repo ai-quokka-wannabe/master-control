@@ -134,6 +134,54 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                 at(&format!("creature {creature_id} {name} is {value}"))
             );
         }
+        // The chain: a length in range, every trailing pose finite and a chord no longer than
+        // the spacing from the one before it (an arc is never shorter than its chord), the
+        // slots beyond the chain exactly zero - the wire's rule, kept at the source.
+        let chain = &body.chain;
+        assert!(
+            (1..=master_control::link_dll::SEGMENTS_MAX).contains(&chain.segment_count),
+            "{}",
+            at(&format!(
+                "creature {creature_id} has {} segments",
+                chain.segment_count
+            ))
+        );
+        let mut previous = body.position;
+        for (slot, pose) in chain.poses.iter().enumerate() {
+            if slot + 1 < chain.segment_count as usize {
+                assert!(
+                    pose.position.iter().all(|axis| axis.is_finite()) && pose.yaw.is_finite(),
+                    "{}",
+                    at(&format!(
+                        "creature {creature_id} segment {} is not finite",
+                        slot + 1
+                    ))
+                );
+                let chord = ((pose.position[0] - previous[0]).powi(2)
+                    + (pose.position[1] - previous[1]).powi(2)
+                    + (pose.position[2] - previous[2]).powi(2))
+                .sqrt();
+                assert!(
+                    chord <= chain.spacing + 1e-3,
+                    "{}",
+                    at(&format!(
+                        "creature {creature_id} segment {} is {chord} m from the one before, spacing {}",
+                        slot + 1,
+                        chain.spacing
+                    ))
+                );
+                previous = pose.position;
+            } else {
+                assert!(
+                    pose.position == [0.0; 3] && pose.yaw == 0.0,
+                    "{}",
+                    at(&format!(
+                        "creature {creature_id} slot {} beyond its chain is not zero",
+                        slot + 1
+                    ))
+                );
+            }
+        }
         // Nothing falls through the floor: the lowest the body can be is its floor, less a hair
         // of the one-tick settle the contact model allows.
         let ground = floor(body.position[0], body.position[2]);
@@ -213,7 +261,16 @@ fn walk(seed: u64, steps: u64) -> Vec<u64> {
             0 | 1 => {
                 let host = 1 + rng.below(3);
                 let half = 0.1 + rng.unit() * 0.4;
-                let admission = roster.rez(host, boxed(next_id, half));
+                let mut model = boxed(next_id, half);
+                // Every third body is a chain: two to eight segments, a spacing of a body's width.
+                if rng.below(3) == 0 {
+                    #[allow(clippy::cast_possible_truncation)]
+                    {
+                        model.header.segment_count = 2 + rng.below(7) as u32;
+                    }
+                    model.header.segment_spacing = 2.0 * half + 0.05;
+                }
+                let admission = roster.rez(host, model);
                 assert!(
                     matches!(
                         admission,

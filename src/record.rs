@@ -87,7 +87,7 @@ impl InputLog {
         writeln!(file, "# hash <tick> <fnv1a_64_hex>")?;
         writeln!(
             file,
-            "# rez <tick> <creature> <max_forward_bits> <max_turn_bits> <max_voice_bits> <max_contacts>"
+            "# rez <tick> <creature> <max_forward_bits> <max_turn_bits> <max_voice_bits> <max_contacts> <vertex_count> <vertex_bits...> <segment_count> <spacing_bits>"
         )?;
         writeln!(file, "# derez <tick> <creature>")?;
         file.flush()?;
@@ -143,7 +143,15 @@ impl InputLog {
     /// to stand the same body under the same clamp - and its vertices, every one as bits,
     /// because the hull is simulation state: where a body stands, how it is seated, what it
     /// touches, all follow from the mesh, and a log without it re-simulates a different world.
-    pub fn rez(&mut self, tick: u64, creature_id: u32, bounds: &BodyBounds, vertices: &[[f32; 3]]) {
+    pub fn rez(
+        &mut self,
+        tick: u64,
+        creature_id: u32,
+        bounds: &BodyBounds,
+        vertices: &[[f32; 3]],
+        segment_count: u32,
+        segment_spacing: f32,
+    ) {
         let mut line = format!(
             "rez {tick} {creature_id} {} {} {} {} {}",
             bits(bounds.max_forward_speed),
@@ -158,6 +166,9 @@ impl InputLog {
                 line.push_str(&bits(*axis));
             }
         }
+        // The chain, after the mesh: its length and spacing are what the trail is placed by,
+        // and a re-simulation without them stands a different worm.
+        line.push_str(&format!(" {segment_count} {}", bits(segment_spacing)));
         let _ = writeln!(self.file, "{line}");
     }
 

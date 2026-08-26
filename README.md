@@ -34,6 +34,10 @@ sacred 32 Hz:
   body is seated by the spawn rule on a spot of its own.
 - **The validator, the only path in** — bounds refused by name, subnormals flushed or refused,
   a body's extent capped, every malformed frame hung up on at the wire.
+- **The chain** — a creature may be a chain of up to eight segments (protocol v7): the head is
+  the rigid body physics steps, the trailing segments are placed along the path the head
+  walked, a ring of past poses per creature that the state hash covers whole. Kinematic trail,
+  not articulation; the segments touch nothing.
 - **The physics** — the flagship's body step ported here as the one implementation: convex-hull
   proxies from the `REZ` mesh, exact contacts against the terraced floor and its risers,
   hull-against-hull separation, Coulomb friction, and a scratch for every slide, felt by the
