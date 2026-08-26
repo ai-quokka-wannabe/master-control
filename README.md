@@ -37,7 +37,9 @@ sacred 32 Hz:
 - **The chain** — a creature may be a chain of up to eight segments (protocol v7): the head is
   the rigid body physics steps, the trailing segments are placed along the path the head
   walked, a ring of past poses per creature that the state hash covers whole. Kinematic trail,
-  not articulation; the segments touch nothing.
+  not articulation; the segments touch nothing - but the chain undulates as it moves (an
+  authored lateral wave, fixed to the path, swelling with speed) and every dragged segment
+  scrapes the floor, a scratch event of its own, so a worm can hear its own body.
 - **The physics** — the flagship's body step ported here as the one implementation: convex-hull
   proxies from the `REZ` mesh, exact contacts against the terraced floor and its risers,
   hull-against-hull separation, Coulomb friction, and a scratch for every slide, felt by the

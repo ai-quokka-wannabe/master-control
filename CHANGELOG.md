@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The scrape** (Etape 7, the world's part). The owner's ruling: as it undulates, the sharp
+  spikes of the icosahedra scrape against the Grid floor, and the worm hears itself. The
+  undulation is authored motion, said so: a lateral wave laid over the chain's recorded path,
+  fixed to the path by arc length (each recorded sample carries the arc length the head had
+  walked when it stood there), amplitude a function of the head's speed - nothing at rest,
+  0.35 spacings at top speed, approached a share of the way each tick so a launch swells the
+  wave rather than snapping the tail - and the head itself never moved. The trail is walked
+  along the wavy path by arc length, so the joints stay joined. The amplitude and the arc
+  lengths are hashed. Every trailing segment, dragged across the floor as the trail moves,
+  now scrapes by the head's own scratch rule - its drag speed against the load the head
+  stands with, capped at one, under the same threshold - an `EVENT` of kind scratch from the
+  floor under the segment: a worm of eight walking is eight scratches a tick, each at its
+  own place. No wire change.
 - **The stop on request** (issue #31). Until now the only way to end a world was to kill it,
   and every log ended without its end line and every Disk without its farewell - Clu said so
   after every life. Ctrl+C (and Ctrl+Break, the console closing, logoff and shutdown on
