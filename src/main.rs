@@ -22,7 +22,6 @@
 
 use master_control::heartbeat::{Config, Heartbeat};
 use master_control::link_dll::{DEFAULT_PORT, LinkDll};
-use std::sync::atomic::AtomicBool;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -190,9 +189,20 @@ fn main() -> std::process::ExitCode {
         heartbeat.port()
     );
 
-    // The world runs until the operator ends the process; a stop flag exists for the tests,
-    // which own worlds politely.
-    let run_forever = AtomicBool::new(false);
-    heartbeat.run(&run_forever);
+    // The world runs until the operator asks it to stop: Ctrl+C sets the flag the tick loop
+    // polls, the tick in hand finishes, the log ends, the Disk closes, and the exit is clean.
+    // The hook is installed only now, once there is a world worth ending properly.
+    if let Err(refusal) = master_control::stop::install() {
+        eprintln!("[FATAL] {refusal}");
+        return std::process::ExitCode::FAILURE;
+    }
+    println!(
+        "[INFO] Ctrl+C stops the world on request: the tick in hand finishes, the log ends, the Disk closes. A second Ctrl+C ends the process at once."
+    );
+    heartbeat.run(master_control::stop::requested());
+    // The Disk's BYE and the listener's close are the drop; only then may a handler holding
+    // the process open for the world to end let go.
+    drop(heartbeat);
+    master_control::stop::finished();
     std::process::ExitCode::SUCCESS
 }

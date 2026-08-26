@@ -58,6 +58,10 @@ cargo run --release            # Greetings, Programs! Master Control listening o
 Then, from a tron-grid-lite build: `TronGridLite --window` to watch, or `TronGridLite --program
 <name>` to host a creature — the constellation on one machine.
 
+Ctrl+C stops the world on request: the tick in hand finishes, the log gets its `end` line, the
+Disk closes with its `BYE`, and the exit is 0 — a life that ends this way is one Clu accepts
+without a word. A second Ctrl+C ends the process at once, the old way.
+
 ## The Doctrine
 
 - **Authoritative, always.** Master Control owns physics and truth; clients own perception.
