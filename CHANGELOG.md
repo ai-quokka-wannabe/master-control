@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The chain.** Etape 6, the owner's ruling (2026-08-26): a worm is a chain of icosahedra
+  joined spike to spike, and it undulates. The world's part: the head stays the one rigid body
+  physics steps, and every trailing segment is kinematic trail placed one spacing further back
+  along the path the head actually walked - a ring of past head poses per creature, sampled by
+  distance, fixed at rez, seeded straight behind the spawn pose, hashed whole in logical order
+  with the poses beside it. Placement walks back from the head's own pose accumulating arc
+  length and interpolates within the hop that crosses each segment's distance, facing along
+  the path there; segments touch nothing and the pair loop never sees them, so TOPOLOGY.md's
+  deferred solver stays deferred. Link v7 carries it: `REZ` names `segment_count` and
+  `segment_spacing` (refused by name outside 1..=8 and (0, 4] m), a row carries the poses. The
+  input log's `rez` line ends with the count and spacing (an older line is a chain of one) and
+  Clu's Disk diff names a segment that disagrees. One catch on the way: the random walk found
+  the first segment measured from the last recorded sample rather than the head, a sixteenth
+  of a spacing long on a moving head - placement now starts at the head itself.
 - **`/check-coherence`.** A documentation audit for contradictions between clauses that were
   each right when written, orphaned claims about the tree, facts stated twice against the
   single-source-of-truth table, scope drift and stale "today" sections - and one that is willing
