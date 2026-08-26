@@ -101,6 +101,8 @@ impl Model {
             vertex_count: 0,
             triangle_count: 0,
             material_count: 0,
+            segment_count: 1,
+            segment_spacing: 0.0,
         };
         Model {
             header,
@@ -242,6 +244,9 @@ impl Roster {
         if let Err(reason) = body_extent(&model) {
             return Admission::RefusedBounds(reason);
         }
+        if let Err(reason) = chain_bounds(&model.header) {
+            return Admission::RefusedBounds(reason);
+        }
         if model.header.creature_id <= SET_DRESSING_LAST_ID {
             return Admission::RefusedBounds("creature ids 0 to 3 are the set dressing's");
         }
@@ -253,6 +258,14 @@ impl Roster {
                     resident.owner = Some(sender);
                     resident.body.bounds = bounds;
                     resident.body.hull = hull_of(&model);
+                    // A new chain starts straight behind where the head stands: the body
+                    // adopted may be longer or shorter than the one that left, and the
+                    // path it walked belonged to a worm nobody wears any more.
+                    resident.body.chain = crate::chain::Chain::new(
+                        model.header.segment_count,
+                        model.header.segment_spacing,
+                        resident.body.path_sample(),
+                    );
                     resident.model = model;
                     Admission::Adopted
                 }
@@ -278,6 +291,13 @@ impl Roster {
                             if let Some(hull) = body.hull.as_ref() {
                                 body.position[1] = floor(SPAWN_PAD_X, SPAWN_PAD_Z) - hull.lowest();
                             }
+                            // The chain, seeded straight behind the spawn pose so the trail
+                            // is defined from the first tick.
+                            body.chain = crate::chain::Chain::new(
+                                model.header.segment_count,
+                                model.header.segment_spacing,
+                                body.path_sample(),
+                            );
                             body
                         },
                         model,
@@ -419,6 +439,11 @@ impl Roster {
                 }
             }
         }
+        // The chains, after the pairs are stood apart: the path each trail follows is the
+        // head's settled pose, the one the row carries and the hash covers.
+        for resident in self.residents.values_mut() {
+            crate::physics::advance_chain(&mut resident.body);
+        }
         for (id, resident) in &mut self.residents {
             let previous_voice = previous_voices[id];
             let body = &resident.body;
@@ -429,6 +454,8 @@ impl Roster {
                 velocity: body.velocity,
                 yaw_rate: body.turn_rate,
                 vocalisation: body.vocalisation,
+                segment_count: body.chain.segment_count,
+                segments: body.chain.poses,
             });
             // The scratch: the loudest slide this body made along any face this tick, sounded
             // from the contact point - footsteps, a scrape along a riser, a brush past another.
@@ -610,6 +637,29 @@ fn world_bounds(header: &Rez) -> Result<BodyBounds, &'static str> {
         max_vocalisation_strength: header.max_vocalisation_strength,
         max_contact_count: header.max_contact_count as usize,
     })
+}
+
+/// The chain's declaration, admitted only inside the wire's cap and the world's own sense: a
+/// creature has at least its head and at most `SEGMENTS_MAX` segments; a single body has no
+/// spacing, a chain has a positive one no longer than the body extent the world allows - a
+/// spacing that is not a normal number is refused as the vertices are, for the same reason.
+fn chain_bounds(header: &Rez) -> Result<(), &'static str> {
+    if header.segment_count == 0 || header.segment_count > crate::link_dll::SEGMENTS_MAX {
+        return Err("segment_count must lie in [1, 8]");
+    }
+    if header.segment_count == 1 {
+        if header.segment_spacing != 0.0 {
+            return Err("segment_spacing must be 0 for a single body");
+        }
+        return Ok(());
+    }
+    if !header.segment_spacing.is_normal()
+        || header.segment_spacing <= 0.0
+        || header.segment_spacing > BODY_MAX_EXTENT
+    {
+        return Err("segment_spacing must lie in (0, 4] m for a chain");
+    }
+    Ok(())
 }
 
 /// Every vertex within [`BODY_MAX_EXTENT`] of the origin on every axis, and none of them a

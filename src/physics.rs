@@ -183,6 +183,9 @@ pub struct Body {
     /// is a bodiless creature, which keeps the point proxy the goldens hold.
     pub hull: Option<crate::hull::Hull>,
     pub bounds: BodyBounds,
+    /// The chain: the trailing segments placed along this head's recorded path. A single body
+    /// has none. Simulation state, hashed whole (chain.rs).
+    pub chain: crate::chain::Chain,
 }
 
 impl Body {
@@ -201,8 +204,25 @@ impl Body {
             contacts: Vec::new(),
             hull: None,
             bounds,
+            chain: crate::chain::Chain::single(),
         }
     }
+
+    /// The head's pose as the chain records it.
+    #[must_use]
+    pub fn path_sample(&self) -> crate::chain::PathSample {
+        crate::chain::PathSample {
+            position: self.position,
+            yaw: self.yaw,
+        }
+    }
+}
+
+/// The chain's step: the settled head recorded, the trail placed. After the pairs are stood
+/// apart and before the rows are told, so the path is the head's settled truth.
+pub fn advance_chain(body: &mut Body) {
+    let head = body.path_sample();
+    body.chain.advance(head);
 }
 
 /// The direction a body faces: -Z at rest, +Y up, right-handed, so positive yaw turns left.
@@ -593,6 +613,26 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 
                     hasher.floats(vertex);
                 }
             }
+        }
+        // The chain: its length and spacing, the path the trail is placed along - every sample
+        // in logical order, so the ring's bookkeeping is not state - and the poses themselves,
+        // derived but told on the wire, where a divergence must be caught at once.
+        hasher.u32(body.chain.segment_count);
+        hasher.float(body.chain.spacing);
+        hasher.u32(
+            body.chain
+                .path()
+                .count()
+                .try_into()
+                .expect("a ring is small"),
+        );
+        for sample in body.chain.path() {
+            hasher.floats(&sample.position);
+            hasher.float(sample.yaw);
+        }
+        for pose in &body.chain.poses {
+            hasher.floats(&pose.position);
+            hasher.float(pose.yaw);
         }
         // What the body felt this step, as the owner is told it - derived, but a divergence in
         // a contact is a divergence, and one the positions alone would show a tick late.
@@ -1711,6 +1751,20 @@ mod tests {
             slip: [0.0; 3],
         });
         assert_ne!(with_contact, state_hash([(7u32, &shuffled)]));
+        // A chain is state: its length, and where its trail lies.
+        let mut chained = body.clone();
+        chained.chain = crate::chain::Chain::new(3, 0.5, body.path_sample());
+        let with_chain = state_hash([(7u32, &chained)]);
+        assert_ne!(base, with_chain);
+        let mut longer = body.clone();
+        longer.chain = crate::chain::Chain::new(4, 0.5, body.path_sample());
+        assert_ne!(with_chain, state_hash([(7u32, &longer)]));
+        let mut walked = chained.clone();
+        walked.chain.advance(crate::chain::PathSample {
+            position: [body.position[0] + 0.2, body.position[1], body.position[2]],
+            yaw: 0.3,
+        });
+        assert_ne!(with_chain, state_hash([(7u32, &walked)]));
         // Negative zero and zero are two bit patterns, and the hash says so: a world that
         // replays bit for bit agrees on the sign of nothing too.
         let mut minus = body.clone();

@@ -28,6 +28,7 @@ pub mod build_info {
     }
 }
 
+pub mod chain;
 pub mod clu;
 pub mod ground;
 pub mod heartbeat;

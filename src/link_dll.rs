@@ -36,7 +36,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -82,6 +82,11 @@ pub const REZ_MAX_MATERIALS: u32 = 16;
 /// `LNK_CONTACTS_MAX`: the most contacts the owner's letter carries, and so the most a body
 /// may declare.
 pub const CONTACTS_MAX: u32 = 16;
+
+/// `LNK_SEGMENTS_MAX`: the most segments one creature's chain may have, the head counted.
+pub const SEGMENTS_MAX: u32 = 8;
+/// The trailing segments a `CreatureState` row carries: every segment but the head.
+pub const TRAILING_SEGMENTS_MAX: usize = (SEGMENTS_MAX - 1) as usize;
 
 /// `LnkContact`: one contact a body felt this tick - where, and the impulse delivered there.
 #[repr(C)]
@@ -156,6 +161,18 @@ pub struct Rez {
     pub vertex_count: u32,
     pub triangle_count: u32,
     pub material_count: u32,
+    /// Segments in the chain, the head counted: 1 to `SEGMENTS_MAX`.
+    pub segment_count: u32,
+    /// Metres between consecutive segments' origins along the head's path; 0 for one segment.
+    pub segment_spacing: f32,
+}
+
+/// `LnkSegmentPose`: one trailing segment's pose, world space, the head's conventions.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct SegmentPose {
+    pub position: [f32; 3],
+    pub yaw: f32,
 }
 
 #[repr(C)]
@@ -189,6 +206,10 @@ pub struct CreatureState {
     pub velocity: [f32; 3],
     pub yaw_rate: f32,
     pub vocalisation: f32,
+    /// Segments in the chain, the head counted.
+    pub segment_count: u32,
+    /// The trailing segments' poses, `segment_count - 1` meaningful, the rest zero.
+    pub segments: [SegmentPose; TRAILING_SEGMENTS_MAX],
 }
 
 #[repr(C)]
@@ -247,13 +268,14 @@ pub struct Pong {
 const _: () = assert!(size_of::<WorldDefinition>() == 40);
 const _: () = assert!(size_of::<Hello>() == 48);
 const _: () = assert!(size_of::<Welcome>() == 24);
-const _: () = assert!(size_of::<Rez>() == 32);
+const _: () = assert!(size_of::<Rez>() == 40);
+const _: () = assert!(size_of::<SegmentPose>() == 16);
 const _: () = assert!(size_of::<RezVertex>() == 12);
 const _: () = assert!(size_of::<RezTriangle>() == 16);
 const _: () = assert!(size_of::<RezMaterial>() == 32);
 const _: () = assert!(size_of::<Contact>() == 52);
 const _: () = assert!(size_of::<Proprioception>() == 32);
-const _: () = assert!(size_of::<CreatureState>() == 40);
+const _: () = assert!(size_of::<CreatureState>() == 156);
 const _: () = assert!(size_of::<TickStateHeader>() == 16);
 const _: () = assert!(size_of::<Actions>() == 40);
 const _: () = assert!(size_of::<Event>() == 32);
@@ -264,7 +286,7 @@ const _: () = assert!(size_of::<Derez>() == 16);
 // ---------------------------------------------------------------------------------------------
 
 /// `LNK_CLIENT_ABI_VERSION` this binding was written against; the export refuses any other.
-pub const CLIENT_ABI_VERSION: u32 = 6;
+pub const CLIENT_ABI_VERSION: u32 = 7;
 
 pub type LnkStatus = i32;
 
@@ -1048,6 +1070,7 @@ mod tests {
             ("LNK_REZ_MAX_VERTICES", u64::from(REZ_MAX_VERTICES)),
             ("LNK_REZ_MAX_TRIANGLES", u64::from(REZ_MAX_TRIANGLES)),
             ("LNK_REZ_MAX_MATERIALS", u64::from(REZ_MAX_MATERIALS)),
+            ("LNK_SEGMENTS_MAX", u64::from(SEGMENTS_MAX)),
             ("LNK_ROLE_SPECTATOR", u64::from(ROLE_SPECTATOR)),
             ("LNK_ROLE_CREATURE_HOST", u64::from(ROLE_CREATURE_HOST)),
             ("LNK_EVENT_VOCALISATION", u64::from(EVENT_VOCALISATION)),
