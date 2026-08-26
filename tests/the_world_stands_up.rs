@@ -127,10 +127,10 @@ fn the_binary_greets_names_its_port_and_answers_a_dial() {
 /// ended without an end line because the only way to end a world was to kill it.
 #[test]
 fn the_world_stops_on_request_and_its_logs_end_properly() {
-    let scratch = std::env::temp_dir().join(format!(
-        "master-control-stop-on-request-{}",
-        std::process::id()
-    ));
+    // Cargo's own scratch for integration tests (target/tmp), named at compile time: no
+    // environment variable and no operator's word decides where this test writes.
+    let scratch = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("stop-on-request-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).expect("a scratch directory");
     let log = scratch.join("life.log");
     let disk = scratch.join("life.disk");
