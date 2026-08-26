@@ -218,11 +218,18 @@ impl Body {
     }
 }
 
-/// The chain's step: the settled head recorded, the trail placed. After the pairs are stood
-/// apart and before the rows are told, so the path is the head's settled truth.
+/// The chain's step: the settled head recorded, the wave following the head's speed as a
+/// fraction of its top speed, the trail placed. After the pairs are stood apart and before the
+/// rows are told, so the path is the head's settled truth.
 pub fn advance_chain(body: &mut Body) {
     let head = body.path_sample();
-    body.chain.advance(head);
+    let speed = (body.velocity[0] * body.velocity[0] + body.velocity[2] * body.velocity[2]).sqrt();
+    let fraction = if body.bounds.max_forward_speed > 0.0 {
+        (speed / body.bounds.max_forward_speed).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    body.chain.advance(head, fraction);
 }
 
 /// The direction a body faces: -Z at rest, +Y up, right-handed, so positive yaw turns left.
@@ -619,6 +626,7 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 
         // derived but told on the wire, where a divergence must be caught at once.
         hasher.u32(body.chain.segment_count);
         hasher.float(body.chain.spacing);
+        hasher.float(body.chain.amplitude);
         hasher.u32(
             body.chain
                 .path()
@@ -627,8 +635,9 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 
                 .expect("a ring is small"),
         );
         for sample in body.chain.path() {
-            hasher.floats(&sample.position);
-            hasher.float(sample.yaw);
+            hasher.floats(&sample.pose.position);
+            hasher.float(sample.pose.yaw);
+            hasher.float(sample.travelled);
         }
         for pose in &body.chain.poses {
             hasher.floats(&pose.position);
@@ -1760,11 +1769,24 @@ mod tests {
         longer.chain = crate::chain::Chain::new(4, 0.5, body.path_sample());
         assert_ne!(with_chain, state_hash([(7u32, &longer)]));
         let mut walked = chained.clone();
-        walked.chain.advance(crate::chain::PathSample {
-            position: [body.position[0] + 0.2, body.position[1], body.position[2]],
-            yaw: 0.3,
-        });
+        walked.chain.advance(
+            crate::chain::PathSample {
+                position: [body.position[0] + 0.2, body.position[1], body.position[2]],
+                yaw: 0.3,
+            },
+            0.0,
+        );
         assert_ne!(with_chain, state_hash([(7u32, &walked)]));
+        // The wave's amplitude is state: the same walk at speed lays a different trail.
+        let mut wavy = chained.clone();
+        wavy.chain.advance(
+            crate::chain::PathSample {
+                position: [body.position[0] + 0.2, body.position[1], body.position[2]],
+                yaw: 0.3,
+            },
+            1.0,
+        );
+        assert_ne!(state_hash([(7u32, &walked)]), state_hash([(7u32, &wavy)]));
         // Negative zero and zero are two bit patterns, and the hash says so: a world that
         // replays bit for bit agrees on the sign of nothing too.
         let mut minus = body.clone();
