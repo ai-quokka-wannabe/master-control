@@ -157,8 +157,9 @@ mod os {
             // SAFETY: `signal` with a handler of the documented signature that lives for the
             // whole process and touches only an atomic. glibc's `signal` keeps the handler
             // installed across deliveries and restarts interrupted calls (BSD semantics), so
-            // one installation lasts the world's life.
-            let previous = unsafe { signal(signum, on_signal as usize) };
+            // one installation lasts the world's life. The handler travels as the integer the C
+            // signature wants, by way of a pointer - a function item is not an integer.
+            let previous = unsafe { signal(signum, on_signal as *const () as usize) };
             if previous == SIG_ERR {
                 return Err(format!(
                     "the system refused a handler for signal {signum} - a world nobody could stop does not start."
