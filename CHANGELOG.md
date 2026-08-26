@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The stop on request** (issue #31). Until now the only way to end a world was to kill it,
+  and every log ended without its end line and every Disk without its farewell - Clu said so
+  after every life. Ctrl+C (and Ctrl+Break, the console closing, logoff and shutdown on
+  Windows; SIGINT, SIGTERM and SIGHUP on Unix) now sets the flag the tick loop already polled
+  for the tests: the tick in hand finishes, the log gets its `end` line, the Disk closes with
+  `BYE`, every citizen is hung up on, and the exit is 0. A second request while the first is
+  being honoured ends the process at once, the old way. Std only: `src/stop.rs` declares
+  `SetConsoleCtrlHandler` and `signal` itself and is the second of the two modules allowed
+  `unsafe`. The binary is tested end to end with the real signal (Ctrl+Break to its own
+  process group on Windows, SIGINT on Unix): it exits clean, the log's last line is `end`, and
+  Clu agrees with the log and the Disk without missing an end line.
+
 - **The chain.** Etape 6, the owner's ruling (2026-08-26): a worm is a chain of icosahedra
   joined spike to spike, and it undulates. The world's part: the head stays the one rigid body
   physics steps, and every trailing segment is kinematic trail placed one spacing further back

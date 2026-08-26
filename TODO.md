@@ -115,6 +115,15 @@ reaches the size, the tick just told is its last - it closes with `BYE` as a wor
 head, exactly as a late joiner is told, so any one file replays alone and Clu, handed a later
 file than the divergence, names it and asks for the earlier one. Judged every eighth tick.
 
+**Done (2026-08-26), the stop on request (issue #31).** rc-worm's first-life rehearsal found
+that the only way to end a world was to kill it, so every log lacked its end line and every
+Disk its farewell. Ctrl+C is now a request, not a kill: `src/stop.rs` hooks the console
+(`SetConsoleCtrlHandler`) or the signals (`signal` for SIGINT, SIGTERM, SIGHUP) with its own
+std-only declarations and sets the flag the tick loop polls; the tick in hand finishes, the log
+ends, the Disk closes with `BYE`, the citizens are hung up on, the exit is 0. A second request
+ends the process at once - the way out of a wedged world stays the operator's. Tested with the
+real signal against the real binary; Clu is content with what it leaves.
+
 **Still owed, deliberately:** the master seed in the log's header - once the world draws one.
 Nothing in the world is random yet (`creature_seed` exists and nothing calls it), and a field
 for a number nobody draws is the versioning-before-need the owner warned against.
