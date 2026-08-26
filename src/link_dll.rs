@@ -22,7 +22,8 @@
 //! the contract's own: `lnkGetClientVTable` refuses any other ABI version, and `vtable_bytes`
 //! is checked against this mirror's size before a single call is made.
 //!
-//! This is the one module allowed `unsafe`: every foreign call and every union read lives here,
+//! This is the first of the two modules allowed `unsafe` (the other is `stop.rs`, the operating
+//! system's stop signal): every foreign call to the wire and every union read lives here,
 //! behind safe wrappers, so the rest of the server never spells the word.
 
 #![allow(unsafe_code)]

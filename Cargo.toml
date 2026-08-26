@@ -16,8 +16,8 @@ name = "master_control"
 path = "src/lib.rs"
 
 # The link repository's discipline, mirrored. unsafe is denied rather than forbidden so that
-# exactly one module - src/link_dll.rs, the boundary to the loaded wire - may allow it locally.
-# Everywhere else it stays refused.
+# exactly two modules may allow it locally: src/link_dll.rs, the boundary to the loaded wire,
+# and src/stop.rs, the operating system's stop signal. Everywhere else it stays refused.
 [lints.rust]
 warnings = "deny"
 unsafe_code = "deny"
