@@ -212,5 +212,43 @@ order and the poses, the input log's `rez` line carries the count and spacing af
 `chain::tests` (straight seed, a quarter circle followed and faced along, the same walk twice),
 the random walk rezzing chains of two to eight (chords never over the spacing, dead slots
 zero), and a real chain of four told over the wire trailing its head through a turn. Owed: a
-lateral wave as a function of speed - authored motion, said so - once the following looks right
-in the window; a chain golden life in `tests/data/`.
+chain golden life in `tests/data/`. The lateral wave is Etape 7.
+
+## Etape 7 — the scrape
+
+**The owner's ruling (2026-08-26)**: as it undulates, the sharp spikes of the icosahedra scrape
+against the Grid floor, and the worm hears itself.
+
+**Done (2026-08-26), the world's part.** Two things, both authored motion and said so, neither
+a solver. *The undulation* (`src/chain.rs`): a lateral wave laid over the recorded path, fixed to
+the path by arc length the way a real undulator's track is fixed to the ground - every recorded
+sample carries the arc length the head had walked when it stood there, and is pushed to its
+right by the amplitude times a sine of that coordinate over the wavelength (four spacings), less
+the wave under the head so the head itself, physics' truth, is never moved. The amplitude is a
+function of the head's speed - nothing at rest, 0.35 spacings at the body's top speed - and
+state: it moves a share of the way towards the speed's amplitude each tick, so a launch swells
+the wave rather than snapping the tail sideways in one frame (on the ground the command is the
+velocity). The trail is walked along the wavy path by arc length, so no chord between
+neighbours exceeds the spacing and the joints stay joined. Hashed: the amplitude and every
+sample's arc length beside its pose. *The scrape* (`src/roster.rs`): every trailing segment is
+dragged across the floor as the trail moves - kinematic, so its slide is the whole of its
+motion - and each one scrapes with the rule the head's scratch already uses, its drag speed
+against the load the head stands with (the impulse over the head's contacts; a trail through
+the air scrapes nothing), capped at one, under the same threshold, an `EVENT` of kind scratch
+from the floor under the segment. A worm of eight walking is eight scratches a tick, each at
+its own place - which is what its own ears need to hear its own body. Proven: `chain::tests`
+(the wave swells to the speed's amplitude, never past twice it, no chord over the spacing,
+every segment dragged, and at rest the wave subsides and the trail lies straight again), the
+hash test (the amplitude is state), the roster (a dragged chain of four sounds four scratches
+from the floor under its segments; standing, none), the random walk (every scratch within the
+rule). Live: the real chained worm driven straight for 700 ticks under this world, the Disk
+parsed frame by frame - 851 scratches from the one creature, ninety ticks of exactly eight
+(the head and seven segments), every one on the floor, x wandering either side of the head's
+line; Clu agreed over 865 ticks.
+
+**The flagship's part, next**: a creature's ears hear only calls today (`senses.cpp` builds its
+sources from the roster's vocalisations); the spectator's ears hear scratches, the creature's
+do not. The scratch events - the head's and every segment's, own and guests' - become sources
+for the creature's ears too, from the event's position with the scraping body's instance
+range as the caller's, so the worm hears its own spikes on the Grid. Then rc-worm's panel
+shows them in its ear view as it shows a call.
