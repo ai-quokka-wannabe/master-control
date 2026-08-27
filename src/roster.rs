@@ -142,6 +142,22 @@ pub enum Admission {
     RefusedBounds(&'static str),
 }
 
+impl Admission {
+    /// The reason the wire's REFUSED letter names, for a refusal; nothing for an admission.
+    /// The owner of a worn identity stays in the world's log: the letter says only that
+    /// the identity is worn, which is all the refused host can act on.
+    #[must_use]
+    pub fn wire_reason(&self) -> Option<u8> {
+        match self {
+            Admission::Embodied | Admission::Adopted => None,
+            Admission::RefusedOwned { .. } => Some(crate::link_dll::REFUSED_OWNED),
+            Admission::RefusedFull => Some(crate::link_dll::REFUSED_FULL),
+            Admission::RefusedCrowded => Some(crate::link_dll::REFUSED_CROWDED),
+            Admission::RefusedBounds(_) => Some(crate::link_dll::REFUSED_BOUNDS),
+        }
+    }
+}
+
 /// Why a `DEREZ` was not honoured.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DerezRefusal {

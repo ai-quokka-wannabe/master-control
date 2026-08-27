@@ -30,7 +30,7 @@
 
 use crate::link_dll::{
     Actions, Connection, Derez, Hello, LNK_OK, LinkDll, Listener, Message, PROTOCOL_VERSION,
-    ROLE_CREATURE_HOST, ROLE_SPECTATOR, TickStateHeader, Welcome,
+    ROLE_CREATURE_HOST, ROLE_SPECTATOR, Refused, TickStateHeader, Welcome,
 };
 use crate::physics::{BodyBounds, FIRST_BODY, TICK_SECONDS, state_hash, world_definition};
 use crate::record::InputLog;
@@ -331,6 +331,7 @@ impl Heartbeat {
         let stager = &mut self.stager;
         let roster = &mut self.roster;
         let input_log = &mut self.input_log;
+        let disk = &mut self.disk;
         let mut changes: Vec<Change> = Vec::new();
 
         self.citizens.retain_mut(|citizen| {
@@ -404,7 +405,23 @@ impl Heartbeat {
                                     materials,
                                 };
                                 let owner_before = roster.owner_of(creature_id).flatten();
-                                match roster.rez(sender, model.clone()) {
+                                let admission = roster.rez(sender, model.clone());
+                                // A refusal is a letter to the one host that was refused -
+                                // by name, the same name the log gets - and the Disk hears
+                                // it as it hears every letter. It changes nothing else.
+                                if let Some(reason) = admission.wire_reason() {
+                                    let letter = Refused {
+                                        tick,
+                                        creature_id,
+                                        reason,
+                                        reserved0: [0; 3],
+                                    };
+                                    let _ = citizen.connection.send_refused(&letter);
+                                    if let Some(disk) = disk.as_mut() {
+                                        let _ = disk.connection.send_refused(&letter);
+                                    }
+                                }
+                                match admission {
                                     Admission::Embodied => {
                                         stager.reassign(creature_id, sender);
                                         log_info(&format!(
