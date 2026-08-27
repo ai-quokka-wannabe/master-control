@@ -122,7 +122,8 @@ goldens, the rules `clippy.toml` keeps, running and stopping the world, Clu - is
 
 - Follow `cargo fmt` formatting (the toolchain's rustfmt defaults)
 - Use edition-2024 Rust; the standard library only, with zero third-party crates
-- Keep clippy clean — `[lints]` in `Cargo.toml` denies all warnings, and `clippy.toml` keeps the world's hidden-state rules (no `HashMap`, no clock outside the heartbeat, no platform transcendentals)
+- Keep clippy clean — `[lints]` in `Cargo.toml` denies all warnings, and `clippy.toml` keeps the
+  world's hidden-state rules (no `HashMap`, no clock outside the heartbeat, no platform transcendentals)
 - 4-space indentation; `unsafe` is denied crate-wide and allowed in `src/link_dll.rs` and `src/stop.rs` only
 
 ### Naming Conventions
