@@ -5,3 +5,4 @@
 # would be a file that is neither. A conflict there is regenerated, never hand-merged. (Adopted
 # from the owner's queen-of-towers-game.) Diffs stay on - a golden that moved is worth reading.
 tests/data/*.txt -merge
+tests/data/*.log -merge
