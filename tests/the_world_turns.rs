@@ -822,6 +822,19 @@ fn an_identity_another_host_wears_is_refused_and_an_unrezzed_one_cannot_be_steer
 
     // The second host tries to wear 7 too, and steers 9, which nobody wears.
     rez(&mut second, 7);
+    // And is told why, by name, on its own connection - the world's letter, not a relay.
+    let letter = await_message(
+        &mut second,
+        "the REFUSED for creature 7",
+        |m| matches!(m, Message::Refused(refused) if refused.creature_id == 7),
+    );
+    match letter {
+        Message::Refused(refused) => {
+            assert_eq!(refused.reason, master_control::link_dll::REFUSED_OWNED);
+            assert_eq!(refused.reserved0, [0; 3]);
+        }
+        other => panic!("not a refusal: {other:?}"),
+    }
     steer_creature(&mut second, 9, 0, 1.0);
 
     // Neither changes the world: no second REZ of 7 is relayed within a few ticks, and 9
@@ -1859,10 +1872,19 @@ fn clu_names_every_way_a_log_can_lie() {
         "{refusal}"
     );
 
-    // Another protocol: the version bumped.
-    let other_protocol = honest.replacen("protocol 7 ", "protocol 8 ", 1);
+    // Another protocol: the version bumped - relative to this build's own, so the lie stays a
+    // lie through every bump of the wire.
+    let own = master_control::link_dll::PROTOCOL_VERSION;
+    let other_protocol = honest.replacen(
+        &format!("protocol {own} "),
+        &format!("protocol {} ", own + 1),
+        1,
+    );
     let refusal = check(other_protocol).expect_err("protocol");
-    assert!(refusal.contains("Link protocol 8"), "{refusal}");
+    assert!(
+        refusal.contains(&format!("Link protocol {}", own + 1)),
+        "{refusal}"
+    );
 
     // Another build made the log: not a lie, but said, so a later disagreement is read right.
     let build_line = lines

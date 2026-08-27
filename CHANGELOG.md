@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A refused REZ is answered by name (Link v8).** Until now a host whose `REZ` the world
+  refused learned of it only by never hearing its body relayed; the refusal was a line in the
+  world's own log. The world now sends the wire's new `REFUSED` letter to that one host - the
+  tick it was judged at, the creature the `REZ` named, and the reason by name: owned, full,
+  crowded, bounds (`Admission::wire_reason`) - and the Disk hears it as it hears every
+  letter. Nothing else changes: the roster, the stager and the input log are untouched, so
+  Clu re-simulates exactly as before. The Link mirror moves to protocol 8 and client ABI 8
+  (`MSG_REFUSED`, `Refused`, `send_refused`, the `REFUSED_*` reasons, all held to the headers
+  by the twin tests). Proven over the wire: a second host that tries to wear an identity the
+  first wears hears `REFUSED` with the reason `owned` on its own connection.
 - **The world owns its transcendentals.** The owner's ruling (2026-08-27), after the chain
   golden life found the edge on its first run: the arc's and the wave's sines were the
   platform's libm, glibc rounds some arguments a last ulp differently from MSVC's UCRT, and a

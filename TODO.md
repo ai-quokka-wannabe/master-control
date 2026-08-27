@@ -47,8 +47,13 @@ crash or a reap is not a leave - the body stays on the neutral reflex, ownerless
 host rezzes the same identity. Declared bounds are judged against the world's own (`WORLD_MAX_*`)
 and refused by name rather than clamped. The world's own guest remains as the first unowned
 resident, claimable by steering it. The spawn rule landed with Etape 5 (see there). One note for
-a later etape: a refused `REZ` is a log line at the server only - the host learns by not
-hearing its body relayed, which a future `REFUSED` message could make explicit.
+a later etape: a refused `REZ` was a log line at the server only - the host learned by not
+hearing its body relayed. **Done (2026-08-27), with Link v8:** the world now sends `REFUSED`
+to the one host it refused - the tick, the creature, the reason by name (owned, full, crowded,
+bounds; `Admission::wire_reason`) - and the Disk hears it as it hears every letter. The
+owner of a worn identity stays in the log, where the operator reads it; the refused host is
+told the identity is worn, which is all it can act on. The input log is unchanged: a refusal
+changes nothing Clu re-simulates.
 
 ## Etape 3 — validation
 
