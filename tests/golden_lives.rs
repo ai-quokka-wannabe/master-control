@@ -110,10 +110,11 @@ fn the_chain_life_replays_to_the_world_it_describes_and_ended_on_request() {
                 "the chain life diverged at tick {tick}: logged {logged:016X}, re-simulated {resimulated:016X}\n{}",
                 diff.join("\n")
             );
-            assert!(
-                !cfg!(windows),
-                "on the platform that recorded it, the golden must agree to the last hash - {words}"
-            );
+            if cfg!(windows) {
+                panic!(
+                    "on the platform that recorded it, the golden must agree to the last hash - {words}"
+                );
+            }
             eprintln!("reported, not required, off the recording platform: {words}");
         }
         Err(words) => panic!("Clu refused the golden: {words}"),
