@@ -20,14 +20,14 @@
 //! change moves on purpose is regenerated, never hand-edited (`.gitattributes` refuses to merge
 //! one), and the change says so.
 //!
-//! The scope is the doctrine's (TOPOLOGY § Determinism and replay, scoped): the world replays
-//! bit-identically on the server's build and machine, and cross-machine floating-point
-//! divergence is out of scope because only one machine ever simulates. This test found the
-//! edge of that scope on its first run: the arc's and the wave's sines are the platform's libm,
-//! and glibc rounds some arguments a last ulp differently from MSVC's UCRT, so the Windows-
-//! recorded life agreed on the Windows runner and diverged at tick 128 - the first hash after
-//! the rez - on Linux. So the verdict is REQUIRED on the recording platform and REPORTED
-//! elsewhere. The day the world owns its transcendentals (TODO Etape 6), that distinction goes.
+//! The scope is the doctrine's, and since the world owns its transcendentals (`src/trig.rs`)
+//! the doctrine says per build, ANY machine: a life recorded on the owner's Windows desk must
+//! replay bit for bit on the Linux runner and everywhere else. This test found the need on
+//! its first run: the arc's and the wave's sines were the platform's libm, glibc rounds some
+//! arguments a last ulp differently from MSVC's UCRT, and the life diverged at tick 128 - the
+//! first hash after the rez - on Linux while the Windows runner agreed. Now the only
+//! floating-point between one state and the next is IEEE basic arithmetic, and the verdict
+//! is required on every platform.
 //!
 //! `tests/data/chain_life.log`: rc-worm's chain of eight (204 vertices, 212 triangles), driven
 //! from its panel on the owner's desk on 2026-08-27 under the world of #34 - straight while the
@@ -78,8 +78,7 @@ fn the_chain_life_replays_to_the_world_it_describes_and_ended_on_request() {
         "the life ended on request: {last:?}"
     );
 
-    // And Clu's verdict: every hash on the beat agrees - required where the life was recorded
-    // (Windows, MSVC's UCRT), reported elsewhere, as the header says.
+    // And Clu's verdict: every hash on the beat agrees, on whatever machine runs this.
     match check(&path, None, &wire) {
         Ok(Verdict::Agreed {
             ticks,
@@ -106,16 +105,10 @@ fn the_chain_life_replays_to_the_world_it_describes_and_ended_on_request() {
             resimulated,
             diff,
         }) => {
-            let words = format!(
+            panic!(
                 "the chain life diverged at tick {tick}: logged {logged:016X}, re-simulated {resimulated:016X}\n{}",
                 diff.join("\n")
             );
-            if cfg!(windows) {
-                panic!(
-                    "on the platform that recorded it, the golden must agree to the last hash - {words}"
-                );
-            }
-            eprintln!("reported, not required, off the recording platform: {words}");
         }
         Err(words) => panic!("Clu refused the golden: {words}"),
     }

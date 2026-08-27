@@ -44,15 +44,16 @@ fn orbiter(
     let time = tick as f32 * crate::physics::TICK_SECONDS;
     let angle = angular_speed.mul_add(time, phase);
     let yaw = wrap_to_pi(std::f32::consts::PI - angle);
+    let (sin, cos) = crate::trig::sin_cos(angle);
 
     CreatureState {
         creature_id,
-        position: [radius * angle.cos(), 0.05, radius * angle.sin()],
+        position: [radius * cos, 0.05, radius * sin],
         yaw,
         velocity: [
-            -radius * angular_speed * angle.sin(),
+            -radius * angular_speed * sin,
             0.0,
-            radius * angular_speed * angle.cos(),
+            radius * angular_speed * cos,
         ],
         yaw_rate: -angular_speed,
         vocalisation: 0.0,

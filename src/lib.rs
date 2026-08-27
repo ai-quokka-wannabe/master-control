@@ -40,3 +40,4 @@ pub mod roster;
 pub mod script;
 pub mod stager;
 pub mod stop;
+pub mod trig;

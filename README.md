@@ -40,6 +40,10 @@ sacred 32 Hz:
   not articulation; the segments touch nothing - but the chain undulates as it moves (an
   authored lateral wave, fixed to the path, swelling with speed) and every dragged segment
   scrapes the floor, a scratch event of its own, so a worm can hear its own body.
+- **The world's own arithmetic** — every transcendental that reaches state (`src/trig.rs`:
+  `sin`, `cos`, `atan2`) is the world's own, built from IEEE basic arithmetic, so a life
+  recorded on one machine replays bit for bit on any other running the same build; the
+  platform's libm is banned from the crate by `clippy.toml`.
 - **The physics** — the flagship's body step ported here as the one implementation: convex-hull
   proxies from the `REZ` mesh, exact contacts against the terraced floor and its risers,
   hull-against-hull separation, Coulomb friction, and a scratch for every slide, felt by the
