@@ -27,6 +27,7 @@
 use crate::ground::{GRID_FLOOR_CONFIG, grid_mesh_height};
 use crate::link_dll::WorldDefinition;
 use crate::stager::Intent;
+use crate::trig;
 
 /// Seconds per tick: 32 Hz because 0.03125 is exact in binary32, so `tick * dt` is exact for a
 /// hundred and forty-five hours and a recording's timestamps survive the round trip.
@@ -234,13 +235,14 @@ pub fn advance_chain(body: &mut Body) {
 
 /// The direction a body faces: -Z at rest, +Y up, right-handed, so positive yaw turns left.
 fn forward_for(yaw: f32) -> [f32; 3] {
-    [-yaw.sin(), 0.0, -yaw.cos()]
+    let (sin, cos) = trig::sin_cos(yaw);
+    [-sin, 0.0, -cos]
 }
 
 /// A body-frame point carried into the world by a pose: the yaw about +Y, then the translation
 /// - the flagship's `worldFromBody`, clause for clause.
 pub fn body_to_world(point: &[f32; 3], position: [f32; 3], yaw: f32) -> [f32; 3] {
-    let (sin, cos) = yaw.sin_cos();
+    let (sin, cos) = trig::sin_cos(yaw);
     [
         position[0] + point[0].mul_add(cos, point[2] * sin),
         position[1] + point[1],
@@ -250,7 +252,7 @@ pub fn body_to_world(point: &[f32; 3], position: [f32; 3], yaw: f32) -> [f32; 3]
 
 /// A world direction into the body's frame: the inverse yaw, no translation.
 fn world_to_body_direction(direction: [f32; 3], yaw: f32) -> [f32; 3] {
-    let (sin, cos) = (-yaw).sin_cos();
+    let (sin, cos) = trig::sin_cos(-yaw);
     [
         direction[0].mul_add(cos, direction[2] * sin),
         direction[1],
@@ -326,8 +328,10 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
         // keeps the original's answer) falls to the straight walk exactly as the C++ does.
         if turn.abs() > TURN_EPSILON {
             // The exact arc: no chord drift, which matters to a replay measured in bits.
-            x += (speed / turn) * (yaw_after.cos() - yaw_before.cos());
-            z -= (speed / turn) * (yaw_after.sin() - yaw_before.sin());
+            let (sin_after, cos_after) = trig::sin_cos(yaw_after);
+            let (sin_before, cos_before) = trig::sin_cos(yaw_before);
+            x += (speed / turn) * (cos_after - cos_before);
+            z -= (speed / turn) * (sin_after - sin_before);
         } else {
             let forward = forward_for(yaw_before);
             x += forward[0] * speed * DT;
@@ -557,8 +561,7 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
         (body.velocity[2] - velocity_before[2]) * (1.0 / DT),
     ];
     let world = [acceleration[0], acceleration[1] + GRAVITY, acceleration[2]];
-    let sin_yaw = (-yaw_after).sin();
-    let cos_yaw = (-yaw_after).cos();
+    let (sin_yaw, cos_yaw) = trig::sin_cos(-yaw_after);
     body.specific_force = [
         (world[0] * cos_yaw) + (world[2] * sin_yaw),
         world[1],
@@ -737,7 +740,7 @@ fn hull_world_vertices(body: &Body, hull: &crate::hull::Hull) -> Vec<[f32; 3]> {
 }
 
 fn rotate_direction(direction: [f32; 3], yaw: f32) -> [f32; 3] {
-    let (sin, cos) = yaw.sin_cos();
+    let (sin, cos) = trig::sin_cos(yaw);
     [
         direction[0].mul_add(cos, direction[2] * sin),
         direction[1],
