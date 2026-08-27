@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The guides.** The owner's ask (2026-08-27): every repository of the organisation gets a
+  development-environment guide a contributor can follow without struggling. Here:
+  `docs/DEV_ENV_SETUP.md` (the short version, the pins - Rust 1.95.0 through `rust-toolchain.toml`,
+  a linker for the wire, nothing else - Windows and Linux step by step, what CI runs and how to
+  run every leg at home, the deep tier, the goldens and why they are re-recorded rather than
+  edited, the rules `clippy.toml` keeps, running and stopping the world, Clu, troubleshooting)
+  and a `CONTRIBUTING.md` in the organisation's shape, which this repository lacked. The README
+  points at both and at the flagship's `RUNNING_THE_GRID.md`.
 - **A refused REZ is answered by name (Link v8).** Until now a host whose `REZ` the world
   refused learned of it only by never hearing its body relayed; the refusal was a line in the
   world's own log. The world now sends the wire's new `REFUSED` letter to that one host - the
