@@ -41,6 +41,7 @@
 //! this tick is kept beside its pose: that drag is what the roster sounds as its scrape.
 
 use crate::link_dll::{SEGMENTS_MAX, SegmentPose, TRAILING_SEGMENTS_MAX};
+use crate::trig;
 
 /// One recorded head pose.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -206,7 +207,7 @@ impl Chain {
             return 0.0;
         }
         let wavelength = WAVE_LENGTH_SPACINGS * self.spacing;
-        self.amplitude * (std::f32::consts::TAU * travelled / wavelength).sin()
+        self.amplitude * trig::sin(std::f32::consts::TAU * travelled / wavelength)
     }
 
     /// Where a recorded sample lies with the wave laid over it: pushed to its right by the wave
@@ -296,7 +297,8 @@ impl Chain {
 
 /// The direction a head faces, the roster's convention: -Z at rest, positive yaw turns left.
 fn forward_for(yaw: f32) -> [f32; 3] {
-    [-yaw.sin(), 0.0, -yaw.cos()]
+    let (sin, cos) = trig::sin_cos(yaw);
+    [-sin, 0.0, -cos]
 }
 
 fn backward_for(yaw: f32) -> [f32; 3] {
@@ -306,7 +308,8 @@ fn backward_for(yaw: f32) -> [f32; 3] {
 
 /// The head's right hand: +X when facing -Z, turning with the yaw.
 fn right_for(yaw: f32) -> [f32; 3] {
-    [yaw.cos(), 0.0, -yaw.sin()]
+    let (sin, cos) = trig::sin_cos(yaw);
+    [cos, 0.0, -sin]
 }
 
 fn distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
@@ -330,11 +333,12 @@ fn yaw_along(older: &[f32; 3], newer: &[f32; 3], fallback: f32) -> f32 {
         fallback
     } else {
         // forward = (-sin yaw, -cos yaw): yaw = atan2(-dx, -dz).
-        (-dx).atan2(-dz)
+        trig::atan2(-dx, -dz)
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // Expected values may use the platform's: compared within a tolerance.
 mod tests {
     use super::*;
 

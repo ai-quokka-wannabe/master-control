@@ -9,16 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The world owns its transcendentals.** The owner's ruling (2026-08-27), after the chain
+  golden life found the edge on its first run: the arc's and the wave's sines were the
+  platform's libm, glibc rounds some arguments a last ulp differently from MSVC's UCRT, and a
+  life recorded on the Windows desk diverged on the Linux runner at the first hash after the
+  rez. `src/trig.rs` now provides `sin`, `cos`, `sin_cos` and `atan2` built from IEEE basic
+  arithmetic alone - fdlibm's reduction and kernels in f64, rounded once to f32; exactly odd
+  and even, the sign of zero and the axes' conventions kept, within two ulps of the platform's;
+  and everything that reaches state uses them: the physics' facing, frames, exact arc and
+  specific force, the chain's wave, facings, right hand and path yaw, the set dressing's
+  circle. `clippy.toml` bans the platform's transcendentals beside the hidden-state rules.
+  The replay promise is now **per build, any machine**: the golden life's verdict is required
+  on every platform (it needed no re-recording - the world's own arithmetic lands on the same
+  bits as the desk's UCRT for everything that life produced), and the Linux runner agreeing bit
+  for bit with the Windows desk is the proof on every push. Elsewhere a state hash may move by
+  a last ulp against the platform's trigonometry, which 0.0.0 allows.
 - **The chain golden life.** `tests/data/chain_life.log` is a real life, recorded once on the
   owner's desk (rc-worm's chain of eight driven from its panel: straight while the wave swells,
   a call, a weave, a stop; 320 hosted ticks; Master Control asked to stop the proper way, so
   the log ends with its end line) and re-simulated by Clu in `tests/golden_lives.rs` on every
-  push. Every hash on the beat must agree on the platform that recorded it (Windows; the
-  Windows runner agrees bit for bit) and the verdict is reported on any other: the golden's
-  first run found that glibc rounds some of the arc's and the wave's sine arguments a last ulp
-  differently from MSVC's UCRT, which is exactly the per-build, per-machine scope TOPOLOGY
-  gives replay. Owning the transcendentals - and with them cross-machine replay - is named in
-  TODO as a decision with its trigger. Goldens are regenerated, never hand-merged:
+  push. Every hash on the beat must agree on whatever machine runs the test (see the entry
+  above: the golden's first run found the platform's libm in the way, and the world now owns
+  its transcendentals). Goldens are regenerated, never hand-merged:
   `.gitattributes` now refuses to merge a `.log` golden as it did the `.txt` ones.
 - **The scrape** (Etape 7, the world's part). The owner's ruling: as it undulates, the sharp
   spikes of the icosahedra scrape against the Grid floor, and the worm hears itself. The
