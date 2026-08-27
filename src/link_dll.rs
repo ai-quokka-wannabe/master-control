@@ -37,7 +37,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -66,9 +66,16 @@ pub const MSG_PING: u8 = 8;
 pub const MSG_PONG: u8 = 9;
 pub const MSG_BYE: u8 = 10;
 pub const MSG_PROPRIOCEPTION: u8 = 11;
+pub const MSG_REFUSED: u8 = 12;
 
 pub const ROLE_SPECTATOR: u8 = 1;
 pub const ROLE_CREATURE_HOST: u8 = 2;
+
+/// `LNK_REFUSED_*`: why a REZ was not honoured, as the letter names it. Zero is invalid.
+pub const REFUSED_OWNED: u8 = 1;
+pub const REFUSED_FULL: u8 = 2;
+pub const REFUSED_CROWDED: u8 = 3;
+pub const REFUSED_BOUNDS: u8 = 4;
 
 pub const EVENT_VOCALISATION: u8 = 1;
 /// `LNK_EVENT_SCRATCH`: a body sliding along a face - the floor, a riser, another body.
@@ -254,6 +261,17 @@ pub struct Derez {
     pub reserved0: [u8; 4],
 }
 
+/// `LnkRefused`: the world's letter to the one host whose REZ it did not honour - the tick it
+/// was judged at, the creature the REZ named, and the reason, one of `REFUSED_*`.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Refused {
+    pub tick: u64,
+    pub creature_id: u32,
+    pub reason: u8,
+    pub reserved0: [u8; 3],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Ping {
@@ -281,13 +299,14 @@ const _: () = assert!(size_of::<TickStateHeader>() == 16);
 const _: () = assert!(size_of::<Actions>() == 40);
 const _: () = assert!(size_of::<Event>() == 32);
 const _: () = assert!(size_of::<Derez>() == 16);
+const _: () = assert!(size_of::<Refused>() == 16);
 
 // ---------------------------------------------------------------------------------------------
 // lnk_client.h, mirrored: statuses, views, the vtable. The order of vtable fields is the ABI.
 // ---------------------------------------------------------------------------------------------
 
 /// `LNK_CLIENT_ABI_VERSION` this binding was written against; the export refuses any other.
-pub const CLIENT_ABI_VERSION: u32 = 7;
+pub const CLIENT_ABI_VERSION: u32 = 8;
 
 pub type LnkStatus = i32;
 
@@ -348,6 +367,7 @@ pub union MessageViewPayload {
     pub tick_state: TickStateView,
     pub event: Event,
     pub derez: Derez,
+    pub refused: Refused,
     pub ping: Ping,
     pub pong: Pong,
     pub hello: Hello,
@@ -384,6 +404,9 @@ pub enum Message {
     },
     Event(Event),
     Derez(Derez),
+    /// The world's word on a REZ it did not honour; a host reads it, a server never sends
+    /// one it did not mean.
+    Refused(Refused),
     /// The owner's letter, contacts copied out.
     Proprioception {
         header: Proprioception,
@@ -454,6 +477,7 @@ impl MessageView {
                     }
                 }
                 MSG_DEREZ => Message::Derez(self.payload.derez),
+                MSG_REFUSED => Message::Refused(self.payload.refused),
                 MSG_PING => Message::Ping(self.payload.ping),
                 MSG_PONG => Message::Pong(self.payload.pong),
                 MSG_BYE => Message::Bye,
@@ -520,6 +544,8 @@ pub struct LnkClientVTable {
     ) -> LnkStatus,
     pub send_event: extern "C" fn(connection: *mut LnkClient, event: *const Event) -> LnkStatus,
     pub send_derez: extern "C" fn(connection: *mut LnkClient, derez: *const Derez) -> LnkStatus,
+    pub send_refused:
+        extern "C" fn(connection: *mut LnkClient, refused: *const Refused) -> LnkStatus,
     pub send_proprioception: extern "C" fn(
         connection: *mut LnkClient,
         proprioception: *const Proprioception,
@@ -967,6 +993,11 @@ impl Connection {
         (self.vtable.send_derez)(self.client, derez)
     }
 
+    /// The world's word on a REZ it did not honour - to the one host that sent it.
+    pub fn send_refused(&mut self, refused: &Refused) -> LnkStatus {
+        (self.vtable.send_refused)(self.client, refused)
+    }
+
     /// The owner's letter, contacts by borrow; the library copies them and judges the count
     /// against the cap before reading a row.
     pub fn send_proprioception(
@@ -1066,6 +1097,11 @@ mod tests {
             ("LNK_MSG_HELLO", u64::from(MSG_HELLO)),
             ("LNK_MSG_REZ", u64::from(MSG_REZ)),
             ("LNK_MSG_PROPRIOCEPTION", u64::from(MSG_PROPRIOCEPTION)),
+            ("LNK_MSG_REFUSED", u64::from(MSG_REFUSED)),
+            ("LNK_REFUSED_OWNED", u64::from(REFUSED_OWNED)),
+            ("LNK_REFUSED_FULL", u64::from(REFUSED_FULL)),
+            ("LNK_REFUSED_CROWDED", u64::from(REFUSED_CROWDED)),
+            ("LNK_REFUSED_BOUNDS", u64::from(REFUSED_BOUNDS)),
             ("LNK_CONTACTS_MAX", u64::from(CONTACTS_MAX)),
             ("LNK_MSG_BYE", u64::from(MSG_BYE)),
             ("LNK_REZ_MAX_VERTICES", u64::from(REZ_MAX_VERTICES)),
