@@ -211,8 +211,34 @@ order and the poses, the input log's `rez` line carries the count and spacing af
 (an older line is a chain of one), and Clu's Disk diff names a segment that disagrees. Proven:
 `chain::tests` (straight seed, a quarter circle followed and faced along, the same walk twice),
 the random walk rezzing chains of two to eight (chords never over the spacing, dead slots
-zero), and a real chain of four told over the wire trailing its head through a turn. Owed: a
-chain golden life in `tests/data/`. The lateral wave is Etape 7.
+zero), and a real chain of four told over the wire trailing its head through a turn. The
+lateral wave is Etape 7.
+
+**Done (2026-08-27), the chain golden life.** `tests/data/chain_life.log`: rc-worm's chain of
+eight driven from its panel on the owner's desk under the world of Etape 7 - straight while the
+wave swells, a call, a weave, a stop while the scrapes fall silent, 320 hosted ticks, Master
+Control asked to stop the proper way so the log ends with its end line. `tests/golden_lives.rs`
+has Clu re-simulate it on every push: every hash on the beat must agree on the platform that
+recorded it (Windows; the Windows runner agreed bit for bit), and the verdict is reported on
+any other. A golden a physics change moves on purpose is regenerated (the recording recipe is
+the owner's desk: Master Control `--log`, the Grid hosting rc-worm, keys posted to the panel,
+Ctrl+Break to Master Control's own process group for the end line), never hand-edited;
+`.gitattributes` refuses to merge one.
+
+**Found by the golden, and left as a decision (2026-08-27).** Its first run on Linux diverged
+at tick 128, the first hash after the rez: the arc's and the wave's sines are the platform's
+libm, and glibc rounds some arguments a last ulp differently from MSVC's UCRT. That is inside
+the doctrine as written - TOPOLOGY § Determinism and replay scopes bit-identical replay to the
+server's build and machine, because only one machine ever simulates - so the test is scoped the
+same way. The upgrade is real and cheap to name: **the world owns its transcendentals** - a
+std-only `sin`/`cos`/`atan2` of its own from IEEE primitives (add, mul, div, sqrt and `%` are
+correctly rounded everywhere, and Rust never fuses or reorders them), used wherever a
+transcendental reaches state (`physics::forward_for` and the arc, `chain`'s wave, facing and
+right hand) - after which a Disk recorded on one machine replays bit for bit on any other, Clu
+runs on Linux CI against desk recordings, and a stranger can replay the world. Trigger: the
+owner wanting Clu on a different machine from the one that recorded, or the long-term invitation
+(TOPOLOGY § The long-term invitation). The step goldens already compare with a tolerance for
+exactly this reason ("sin/cos in the arc"), so nothing else moves when it lands.
 
 ## Etape 7 — the scrape
 
