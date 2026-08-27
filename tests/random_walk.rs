@@ -26,8 +26,8 @@
 use master_control::link_dll::{RezMaterial, RezTriangle, RezVertex};
 use master_control::physics::{FIRST_BODY, floor, state_hash};
 use master_control::roster::{
-    Admission, GUEST_CREATURE_ID, Model, Roster, SET_DRESSING_LAST_ID, WORLD_MAX_FORWARD_SPEED,
-    WORLD_MAX_TURN_RATE, WORLD_MAX_VOCALISATION,
+    Admission, GUEST_CREATURE_ID, Model, Roster, SET_DRESSING_LAST_ID, Telling,
+    WORLD_MAX_FORWARD_SPEED, WORLD_MAX_TURN_RATE, WORLD_MAX_VOCALISATION,
 };
 use master_control::stager::Intent;
 
@@ -99,6 +99,29 @@ fn intent(rng: &mut SplitMix64) -> Intent {
         forward_speed: hostile(rng, forward),
         turn_rate: hostile(rng, turn),
         vocalisation: hostile(rng, voice),
+    }
+}
+
+/// What must be true of what a step told: every scratch a body or a dragged segment sounds is
+/// within the rule, whatever was asked of the world.
+fn assert_events(told: &Telling, seed: u64, step: u64) {
+    let at = |what: &str| format!("seed {seed} step {step}: {what}");
+    // Every scrape and scratch a chain or a body sounds is within the rule: a strength in
+    // (threshold, 1], a finite place.
+    for event in &told.events {
+        if event.kind == master_control::link_dll::EVENT_SCRATCH {
+            assert!(
+                event.strength >= master_control::physics::SCRATCH_THRESHOLD
+                    && event.strength <= 1.0,
+                "{}",
+                at(&format!("a scratch of strength {}", event.strength))
+            );
+            assert!(
+                event.position.iter().all(|v| v.is_finite()),
+                "{}",
+                at(&format!("a scratch at {:?}", event.position))
+            );
+        }
     }
 }
 
@@ -298,7 +321,8 @@ fn walk(seed: u64, steps: u64) -> Vec<u64> {
             }
             _ => {}
         }
-        let _ = roster.step(step, |_| intent(&mut rng));
+        let told = roster.step(step, |_| intent(&mut rng));
+        assert_events(&told, seed, step);
         assert_invariants(&roster, seed, step);
         hashes.push(state_hash(roster.named_bodies()));
     }

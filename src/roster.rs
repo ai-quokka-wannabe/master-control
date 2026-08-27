@@ -469,6 +469,39 @@ impl Roster {
                     reserved0: [0; 3],
                 });
             }
+            // The scrape: every trailing segment is dragged across the floor as the trail moves -
+            // kinematic, so its slide is the whole of its motion - and a spike dragged over the
+            // Grid scrapes, as loud as its drag against the load the head stands with, sounded
+            // from the floor under it. The owner's ruling: as it undulates, the spikes scrape,
+            // and the worm hears itself.
+            if body.chain.trails() {
+                let load = normal_load(body);
+                let trailing = (body.chain.segment_count - 1) as usize;
+                for (pose, drag) in body
+                    .chain
+                    .poses
+                    .iter()
+                    .zip(body.chain.drags.iter())
+                    .take(trailing)
+                {
+                    let slip = drag / crate::physics::TICK_SECONDS;
+                    let strength = (slip * load).min(1.0);
+                    if strength >= crate::physics::SCRATCH_THRESHOLD {
+                        events.push(Event {
+                            tick,
+                            position: [
+                                pose.position[0],
+                                crate::physics::floor(pose.position[0], pose.position[2]),
+                                pose.position[2],
+                            ],
+                            strength,
+                            creature_id: *id,
+                            kind: EVENT_SCRATCH,
+                            reserved0: [0; 3],
+                        });
+                    }
+                }
+            }
             // A call that starts is news; a call that continues is already in the rows.
             if body.vocalisation > 0.0 && previous_voice <= 0.0 {
                 events.push(Event {
@@ -557,6 +590,21 @@ fn loudest_scratch(body: &Body) -> Option<(f32, [f32; 3])> {
         }
     }
     loudest
+}
+
+/// The load a body stands with this tick: the impulse over all its contacts, newton-seconds -
+/// what a trailing segment, bearing as the head bears, is dragged against. Nothing when the
+/// head is off the ground: a trail through the air scrapes nothing.
+fn normal_load(body: &Body) -> f32 {
+    body.contacts
+        .iter()
+        .map(|contact| {
+            (contact.impulse[0] * contact.impulse[0]
+                + contact.impulse[1] * contact.impulse[1]
+                + contact.impulse[2] * contact.impulse[2])
+                .sqrt()
+        })
+        .sum()
 }
 
 /// The ground-plane footprint of a body around its origin, (low, high) on x and z: the hull's
@@ -1071,6 +1119,75 @@ mod tests {
                 .contacts
                 .iter()
                 .all(|c| c.normal == [0.0, 1.0, 0.0])
+        );
+    }
+
+    #[test]
+    fn a_dragged_chain_scrapes_with_every_segment_and_a_standing_one_is_silent() {
+        let mut roster = Roster::with_the_guest();
+        let mut model = shaped(7);
+        model.header.segment_count = 4;
+        model.header.segment_spacing = 0.6;
+        assert_eq!(roster.rez(1, model), Admission::Embodied);
+        let standing = roster.step(1, |_| Intent::default());
+        assert!(
+            !standing.events.iter().any(|e| e.kind == EVENT_SCRATCH),
+            "nothing slides, nothing scrapes: {:?}",
+            standing.events
+        );
+        // Walk: the head scratches as any body does, and every trailing segment, dragged
+        // along behind it, scrapes - four scratches from one worm.
+        let walk = |id: u32| {
+            if id == 7 {
+                Intent {
+                    forward_speed: 1.0,
+                    turn_rate: 0.0,
+                    vocalisation: 0.0,
+                }
+            } else {
+                Intent::default()
+            }
+        };
+        let mut walking = roster.step(2, walk);
+        for tick in 3..12 {
+            walking = roster.step(tick, walk);
+        }
+        let scrapes: Vec<&Event> = walking
+            .events
+            .iter()
+            .filter(|e| e.kind == EVENT_SCRATCH && e.creature_id == 7)
+            .collect();
+        assert_eq!(
+            scrapes.len(),
+            4,
+            "the head and three segments: {:?}",
+            walking.events
+        );
+        let body = &roster.resident(7).expect("7").body;
+        for (slot, scrape) in scrapes.iter().skip(1).enumerate() {
+            assert!(
+                scrape.strength > 0.0 && scrape.strength <= 1.0,
+                "segment {}: {scrape:?}",
+                slot + 1
+            );
+            // Sounded from the floor under the segment, at the segment's own place.
+            let pose = body.chain.poses[slot];
+            assert_eq!(scrape.position[0], pose.position[0]);
+            assert_eq!(scrape.position[2], pose.position[2]);
+            assert_eq!(
+                scrape.position[1],
+                crate::physics::floor(pose.position[0], pose.position[2])
+            );
+        }
+        // Stop: the trail stands, the wave subsides, and within a second nothing scrapes.
+        let mut resting = roster.step(12, |_| Intent::default());
+        for tick in 13..60 {
+            resting = roster.step(tick, |_| Intent::default());
+        }
+        assert!(
+            !resting.events.iter().any(|e| e.kind == EVENT_SCRATCH),
+            "a standing worm scrapes nothing: {:?}",
+            resting.events
         );
     }
 
