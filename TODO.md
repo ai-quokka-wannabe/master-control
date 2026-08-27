@@ -211,8 +211,18 @@ order and the poses, the input log's `rez` line carries the count and spacing af
 (an older line is a chain of one), and Clu's Disk diff names a segment that disagrees. Proven:
 `chain::tests` (straight seed, a quarter circle followed and faced along, the same walk twice),
 the random walk rezzing chains of two to eight (chords never over the spacing, dead slots
-zero), and a real chain of four told over the wire trailing its head through a turn. Owed: a
-chain golden life in `tests/data/`. The lateral wave is Etape 7.
+zero), and a real chain of four told over the wire trailing its head through a turn. The
+lateral wave is Etape 7.
+
+**Done (2026-08-27), the chain golden life.** `tests/data/chain_life.log`: rc-worm's chain of
+eight driven from its panel on the owner's desk under the world of Etape 7 - straight while the
+wave swells, a call, a weave, a stop while the scrapes fall silent, 320 hosted ticks, Master
+Control asked to stop the proper way so the log ends with its end line. `tests/golden_lives.rs`
+has Clu re-simulate it on every push: every hash on the beat must agree on whatever machine
+runs the test, which is the one check that can catch the platform's libm computing the wave's
+sine a last ulp differently from the desk that recorded the life. A golden a physics change
+moves on purpose is regenerated (the recording recipe is in the test's header), never
+hand-edited; `.gitattributes` refuses to merge one.
 
 ## Etape 7 — the scrape
 

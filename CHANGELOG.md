@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The chain golden life.** `tests/data/chain_life.log` is a real life, recorded once on the
+  owner's desk (rc-worm's chain of eight driven from its panel: straight while the wave swells,
+  a call, a weave, a stop; 320 hosted ticks; Master Control asked to stop the proper way, so
+  the log ends with its end line) and re-simulated by Clu in `tests/golden_lives.rs` on every
+  push. Every hash on the beat must agree on whatever machine runs the test - the one check
+  that crosses every seam at once and can catch a platform's libm computing the wave's sine a
+  last ulp differently from the desk that recorded it. Goldens are regenerated, never
+  hand-merged: `.gitattributes` now refuses to merge a `.log` golden as it did the `.txt` ones.
 - **The scrape** (Etape 7, the world's part). The owner's ruling: as it undulates, the sharp
   spikes of the icosahedra scrape against the Grid floor, and the worm hears itself. The
   undulation is authored motion, said so: a lateral wave laid over the chain's recorded path,
