@@ -218,27 +218,34 @@ lateral wave is Etape 7.
 eight driven from its panel on the owner's desk under the world of Etape 7 - straight while the
 wave swells, a call, a weave, a stop while the scrapes fall silent, 320 hosted ticks, Master
 Control asked to stop the proper way so the log ends with its end line. `tests/golden_lives.rs`
-has Clu re-simulate it on every push: every hash on the beat must agree on the platform that
-recorded it (Windows; the Windows runner agreed bit for bit), and the verdict is reported on
-any other. A golden a physics change moves on purpose is regenerated (the recording recipe is
+has Clu re-simulate it on every push: every hash on the beat must agree on whatever machine
+runs the test. A golden a physics change moves on purpose is regenerated (the recording recipe is
 the owner's desk: Master Control `--log`, the Grid hosting rc-worm, keys posted to the panel,
 Ctrl+Break to Master Control's own process group for the end line), never hand-edited;
 `.gitattributes` refuses to merge one.
 
-**Found by the golden, and left as a decision (2026-08-27).** Its first run on Linux diverged
-at tick 128, the first hash after the rez: the arc's and the wave's sines are the platform's
-libm, and glibc rounds some arguments a last ulp differently from MSVC's UCRT. That is inside
-the doctrine as written - TOPOLOGY § Determinism and replay scopes bit-identical replay to the
-server's build and machine, because only one machine ever simulates - so the test is scoped the
-same way. The upgrade is real and cheap to name: **the world owns its transcendentals** - a
-std-only `sin`/`cos`/`atan2` of its own from IEEE primitives (add, mul, div, sqrt and `%` are
-correctly rounded everywhere, and Rust never fuses or reorders them), used wherever a
-transcendental reaches state (`physics::forward_for` and the arc, `chain`'s wave, facing and
-right hand) - after which a Disk recorded on one machine replays bit for bit on any other, Clu
-runs on Linux CI against desk recordings, and a stranger can replay the world. Trigger: the
-owner wanting Clu on a different machine from the one that recorded, or the long-term invitation
-(TOPOLOGY § The long-term invitation). The step goldens already compare with a tolerance for
-exactly this reason ("sin/cos in the arc"), so nothing else moves when it lands.
+**Found by the golden, ruled the same day (2026-08-27): the world owns its transcendentals.**
+The golden's first run on Linux diverged at tick 128, the first hash after the rez: the arc's
+and the wave's sines were the platform's libm, and glibc rounds some arguments a last ulp
+differently from MSVC's UCRT - inside the doctrine as it stood (bit-identical replay per build,
+per machine), and the owner ruled the doctrine up rather than the test down. `src/trig.rs`:
+`sin`, `cos`, `sin_cos`, `atan2` for f32, fdlibm's kernels evaluated in f64 from IEEE basic
+arithmetic alone (add, multiply, divide, remainder, `floor`, `round`, `abs` - every machine
+rounds them identically, and Rust never fuses or reorders), rounded once to f32; the sine
+exactly odd and the cosine exactly even, the sign of zero kept, the axes' IEEE conventions
+kept, within two ulps of the platform's across a sweep of four hundred thousand arguments.
+Used wherever a transcendental reaches state - `physics` (the facing, the frames, the exact
+arc, the specific force), `chain` (the wave, the facings, the right hand, the path's yaw),
+`script` (the set dressing's circle) - and the platform's are banned by `clippy.toml` beside
+the hidden-state rules (tests that hold ours against the platform's within a tolerance say so
+with an allow). The promise is now per build, ANY machine: the golden's verdict is required
+everywhere. The golden did not need re-recording - the world's own arithmetic lands on the same
+bits as the desk's UCRT for every argument that life produced, which is what a last-ulp
+difference looks like from the other side - and the Linux runner agreeing with the Windows desk
+is the proof on every push. Not attempted, deliberately:
+cross-build agreement (another compiler, another `target-cpu`) - the log carries its build
+stamp and Clu names it. The step goldens' tolerance comparison stays: they are held against
+the C++ side's libm.
 
 ## Etape 7 — the scrape
 
