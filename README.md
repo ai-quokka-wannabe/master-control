@@ -82,6 +82,11 @@ without a word. A second Ctrl+C ends the process at once, the old way.
 
 ## Building
 
+> **New here?** [docs/DEV_ENV_SETUP.md](docs/DEV_ENV_SETUP.md) builds, tests and runs the world from
+> nothing on Windows or Linux, exactly as CI does; the flagship's
+> [RUNNING_THE_GRID.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/RUNNING_THE_GRID.md)
+> stands the whole ecosystem up around it.
+
 Stable Rust, no dependencies. `git submodule update --init` brings the wire
 (`external/link`); `build.rs` builds its cdylib and puts it beside the executable, which is the
 only place this server ever looks for it. `cargo test` runs the unit suite and the integration
