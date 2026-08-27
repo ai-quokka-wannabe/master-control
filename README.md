@@ -31,7 +31,8 @@ sacred 32 Hz:
   flood posture.
 - **The roster of record** — a host's `REZ` embodies a creature (or adopts an orphan), `DEREZ`
   and `BYE` are a leave, a crash leaves the body on the neutral reflex for the next host; every
-  body is seated by the spawn rule on a spot of its own.
+  body is seated by the spawn rule on a spot of its own, and a `REZ` the world will not honour
+  is answered with a `REFUSED` letter naming why.
 - **The validator, the only path in** — bounds refused by name, subnormals flushed or refused,
   a body's extent capped, every malformed frame hung up on at the wire.
 - **The chain** — a creature may be a chain of up to eight segments (protocol v7): the head is
