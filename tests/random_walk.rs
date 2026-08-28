@@ -158,8 +158,10 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
             );
         }
         // The chain: a length in range, every trailing pose finite and a chord no longer than
-        // the spacing from the one before it (an arc is never shorter than its chord), the
-        // slots beyond the chain exactly zero - the wire's rule, kept at the source.
+        // the spacing from the one before it plus the joint's residual (two rods sharing a tip
+        // stand at most a spacing apart at their origins, and the tip is held to a few
+        // millimetres, asserted below), the slots beyond the chain exactly zero - the wire's
+        // rule, kept at the source.
         let chain = &body.chain;
         assert!(
             (1..=master_control::link_dll::SEGMENTS_MAX).contains(&chain.segment_count),
@@ -185,7 +187,7 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                     + (pose.position[2] - previous[2]).powi(2))
                 .sqrt();
                 assert!(
-                    chord <= chain.spacing + 1e-3,
+                    chord <= chain.spacing + 5e-3,
                     "{}",
                     at(&format!(
                         "creature {creature_id} segment {} is {chord} m from the one before, spacing {}",
@@ -216,17 +218,49 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                 body.position[1]
             ))
         );
-        // The validator is the only path in: what the body does obeys its own bounds.
-        assert!(
-            body.forward_speed.abs() <= body.bounds.max_forward_speed + 1e-5,
-            "{}",
-            at(&format!("creature {creature_id} outran its bound"))
-        );
-        assert!(
-            body.turn_rate.abs() <= body.bounds.max_turn_rate + 1e-5,
-            "{}",
-            at(&format!("creature {creature_id} out-turned its bound"))
-        );
+        // The validator is the only path in: what a single body does obeys its own bounds. An
+        // articulated body's head goes where its chain's push against the floor takes it, so
+        // its bounds bound the gait - the wave's phase speed is the top speed - and the head
+        // itself is held to what friction can make of that: twice the top speed at the very
+        // most, a yank along the chain included, and a wag as fast as the wave.
+        if body.chain.trails() {
+            assert!(
+                body.forward_speed.abs() <= 2.0 * body.bounds.max_forward_speed + 1e-5,
+                "{}",
+                at(&format!(
+                    "creature {creature_id} outran its wave: {} m/s against a top speed of {}",
+                    body.forward_speed, body.bounds.max_forward_speed
+                ))
+            );
+            for joint in 0..(body.chain.segment_count - 1) as usize {
+                let gap = body.chain.joint_gap(joint);
+                let joints = (body.chain.segment_count - 1) as usize;
+                let gaps: Vec<f32> = (0..joints).map(|j| body.chain.joint_gap(j)).collect();
+                assert!(
+                    gap < 5e-3,
+                    "{}",
+                    at(&format!(
+                        "creature {creature_id} joint {joint} came apart by {gap} m: {} segments {} m apart, targets {:?}, gaps {gaps:?}, head {:?}, grounded {}",
+                        body.chain.segment_count,
+                        body.chain.spacing,
+                        &body.chain.targets[..joints],
+                        body.chain.head(),
+                        body.grounded
+                    ))
+                );
+            }
+        } else {
+            assert!(
+                body.forward_speed.abs() <= body.bounds.max_forward_speed + 1e-5,
+                "{}",
+                at(&format!("creature {creature_id} outran its bound"))
+            );
+            assert!(
+                body.turn_rate.abs() <= body.bounds.max_turn_rate + 1e-5,
+                "{}",
+                at(&format!("creature {creature_id} out-turned its bound"))
+            );
+        }
         assert!(
             (0.0..=body.bounds.max_vocalisation_strength + 1e-6).contains(&body.vocalisation),
             "{}",

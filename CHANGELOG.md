@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Etape 8, movement 1: the articulated chain - the undulation propels.** The owner's third
+  ruling (2026-08-28): the worm seemed pushed by an invisible force rather than propelled by
+  its undulation; model it physically, and think of the pivots where the spikes touch as servo
+  motors. `src/chain.rs` is rewritten: every segment, the head included, is a rigid body;
+  consecutive segments share a joint tip held by a position constraint; a servo at every joint
+  holds a commanded angle through a spring of a muscle's stiffness; each segment's spikes rub
+  on the floor with Coulomb friction. XPBD, four substeps of sixteen sweeps, motors then
+  pivots, IEEE and `trig.rs` only - replay per build any machine holds, and the deep tier
+  walks it. On the ground the command is no longer the velocity: the intent is the gait - a
+  travelling wave of servo targets, bounded so the wave's phase speed is the declared top
+  speed, amplitude and bias eased - until movement 3 puts the Program's own gait on the wire.
+  A head the world moved pulls its chain after it within the tick; proprioception reports the
+  head's displacement over the tick. Friction is isotropic in this movement, so the wave
+  wriggles in place (held under 0.3 m in ten seconds); movement 2's anisotropy is what makes
+  it move. A single body keeps the traction it always had; the physics goldens hold; the chain
+  golden is re-recorded. The random walk's chain invariants are the articulated body's: joints
+  held within five millimetres, a chord at most the spacing plus that, the head's speed
+  within twice its top speed, its wag unbounded by the old turn clamp.
 - **The guides.** The owner's ask (2026-08-27): every repository of the organisation gets a
   development-environment guide a contributor can follow without struggling. Here:
   `docs/DEV_ENV_SETUP.md` (the short version, the pins - Rust 1.95.0 through `rust-toolchain.toml`,
