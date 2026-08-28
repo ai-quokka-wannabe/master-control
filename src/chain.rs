@@ -24,10 +24,12 @@
 //! The path is a ring of past head poses, sampled by distance (never by time, so a head that
 //! stands still records nothing and its tail stays where it lies), fixed in size at rez and
 //! never grown - a bounded, allocation-free, replayed-bit-for-bit piece of simulation state
-//! that the state hash covers whole. Placement walks back along the ring accumulating arc
-//! length and interpolates within the sample that crosses each segment's distance; a segment
-//! faces the way the path runs there. Physics stays on the near side of TOPOLOGY.md's deferred
-//! rigid-body solver: nothing here is articulated, nothing is solved.
+//! that the state hash covers whole. Placement walks back along the ring pivot to pivot: each
+//! segment is a rigid rod a spacing long from nose tip to tail tip, its rear tip the first point
+//! of the path a whole spacing from its front tip, so consecutive segments share a tip - the
+//! pivot the chain bends around - and a segment stands at the midpoint of its two, facing along
+//! its rod. Physics stays on the near side of TOPOLOGY.md's deferred rigid-body solver: nothing
+//! here is articulated, nothing is solved - the rods are placed, not constrained.
 
 //!
 //! The undulation, the owner's ruling of 2026-08-26, is authored motion and says so: a lateral
@@ -35,8 +37,9 @@
 //! real undulating body is fixed to the ground, its amplitude a function of the head's speed
 //! (nothing at rest, full at the body's top speed, approached a share of the way each tick so
 //! a launch never snaps the tail sideways in one frame). The trail is walked along the wavy
-//! path by arc length, so a chord between neighbours is never longer than the spacing and the
-//! joints stay joined. Every trailing segment is dragged across the floor as the trail moves -
+//! path pivot to pivot, so the joints are joined at one point wherever the path bends (the
+//! owner's report, 2026-08-28: walked by arc length and faced along the tangent, two tips met
+//! only on a straight run). Every trailing segment is dragged across the floor as the trail moves -
 //! it is kinematic, so its slide is the whole of its motion - and the distance each one moved
 //! this tick is kept beside its pose: that drag is what the roster sounds as its scrape.
 
@@ -223,12 +226,16 @@ impl Chain {
         ]
     }
 
-    /// Every trailing segment at its arc distance back along the wavy path from where the head
-    /// stands now, facing the way the path runs there. Segment `k` (1-based) stands
-    /// `k * spacing` behind the head: the walk starts at the head itself, then hops back through
-    /// the recorded samples with the wave laid over them, newest first, accumulating arc length
-    /// and interpolating within the hop that crosses each segment's distance. Arc length along
-    /// the wavy path, so no chord is ever longer than the spacing however the wave bends it.
+    /// Every trailing segment as one rigid rod of the chain: nose tip to tail tip is exactly
+    /// the spacing, and consecutive rods share a tip - a pivot the chain bends around. (The
+    /// owner's report, 2026-08-28: placed by arc length and faced along the local tangent, two
+    /// neighbours' tips met only on a dead-straight run.) The walk starts at the head's own tail
+    /// tip, half a spacing behind its origin, and hops back through the recorded samples with
+    /// the wave laid over them, newest first, until the wavy path stands a whole spacing from
+    /// the last pivot in a straight line: that point is the next pivot. A segment stands at the
+    /// midpoint of its two pivots and faces from the rear one to the front one. The pivots lie
+    /// on the wavy path; the origins sit a little inside its bends, as a chain of rods laid on
+    /// a curve does.
     fn place(&mut self, head: PathSample) {
         let len = self.ring.len();
         let newest = self.ring[self.newest];
@@ -236,60 +243,56 @@ impl Chain {
         let head_wave = self.wave_at(head_travelled);
         let mut poses = [SegmentPose::default(); TRAILING_SEGMENTS_MAX];
         let trailing = (self.segment_count - 1) as usize;
-        // The walk is monotone - each segment wants more path than the one before - so the
-        // point walked from, the sample walked to, the hops taken and the arc length behind
-        // carry over from slot to slot.
+        let half = 0.5 * self.spacing;
+        let head_back = backward_for(head.yaw);
+        let mut pivot = [
+            head.position[0] + head_back[0] * half,
+            head.position[1],
+            head.position[2] + head_back[2] * half,
+        ];
+        // Where the walk stands on the path - the point walked from, the sample walked to, the
+        // hops taken - carries from rod to rod, because each rod's tail tip is the next one's
+        // nose tip.
         let mut from = head.position;
         let mut from_yaw = head.yaw;
         let mut cursor = self.newest;
-        let mut behind = 0.0f32;
         let mut hops = 0usize;
-        for (slot, pose) in poses.iter_mut().enumerate().take(trailing) {
-            #[allow(clippy::cast_precision_loss)]
-            let wanted = (slot as f32 + 1.0) * self.spacing;
-            let mut placed = None;
+        for pose in poses.iter_mut().take(trailing) {
+            let mut rear = None;
             while hops < len {
                 let recorded = self.ring[cursor];
                 let to = self.laid(&recorded, head_wave);
-                let hop = distance(&from, &to);
-                if behind + hop >= wanted {
-                    // The wanted point lies on this hop: interpolate between its two ends.
-                    let fraction = if hop > 0.0 {
-                        (wanted - behind) / hop
-                    } else {
-                        0.0
-                    };
-                    placed = Some(SegmentPose {
-                        position: [
-                            from[0] + (to[0] - from[0]) * fraction,
-                            from[1] + (to[1] - from[1]) * fraction,
-                            from[2] + (to[2] - from[2]) * fraction,
-                        ],
-                        yaw: yaw_along(&to, &from, from_yaw),
-                    });
+                if let Some(point) = rod_end(&pivot, &from, &to, self.spacing) {
+                    rear = Some(point);
+                    // The walk goes on from this pivot, on this same hop.
+                    from = point;
                     break;
                 }
-                behind += hop;
                 from = to;
                 from_yaw = recorded.pose.yaw;
                 cursor = (cursor + len - 1) % len;
                 hops += 1;
             }
-            *pose = placed.unwrap_or_else(|| {
+            let rear = rear.unwrap_or_else(|| {
                 // The ring ran out - it never does, the seed fills it and the ring is longer
                 // than the trail - and the honest fallback is straight back from the last
-                // point reached along its own facing, so a pose is always a place, never a zero.
+                // pivot along the last facing, so a pose is always a place, never a zero.
                 let back = backward_for(from_yaw);
-                let remaining = wanted - behind;
-                SegmentPose {
-                    position: [
-                        from[0] + back[0] * remaining,
-                        from[1],
-                        from[2] + back[2] * remaining,
-                    ],
-                    yaw: from_yaw,
-                }
+                [
+                    pivot[0] + back[0] * self.spacing,
+                    pivot[1],
+                    pivot[2] + back[2] * self.spacing,
+                ]
             });
+            *pose = SegmentPose {
+                position: [
+                    0.5 * (pivot[0] + rear[0]),
+                    0.5 * (pivot[1] + rear[1]),
+                    0.5 * (pivot[2] + rear[2]),
+                ],
+                yaw: yaw_along(&rear, &pivot, from_yaw),
+            };
+            pivot = rear;
         }
         self.poses = poses;
     }
@@ -324,6 +327,30 @@ fn horizontal_distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
     (dx * dx + dz * dz).sqrt()
 }
 
+/// The first point of the hop from `from` to `to`, walking from `from`, that stands exactly
+/// `rod` away from `pivot` - where a rod of that length pinned at the pivot meets the path -
+/// or none if the hop never gets that far. The larger root of the quadratic is the exit from
+/// the sphere around the pivot, which is the crossing a walk that starts inside it makes.
+fn rod_end(pivot: &[f32; 3], from: &[f32; 3], to: &[f32; 3], rod: f32) -> Option<[f32; 3]> {
+    let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    let f = [from[0] - pivot[0], from[1] - pivot[1], from[2] - pivot[2]];
+    let a = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+    if a <= 0.0 {
+        return None;
+    }
+    let b = 2.0 * (f[0] * d[0] + f[1] * d[1] + f[2] * d[2]);
+    let c = f[0] * f[0] + f[1] * f[1] + f[2] * f[2] - rod * rod;
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 {
+        return None;
+    }
+    let t = (-b + discriminant.sqrt()) / (2.0 * a);
+    if !(0.0..=1.0).contains(&t) {
+        return None;
+    }
+    Some([from[0] + d[0] * t, from[1] + d[1] * t, from[2] + d[2] * t])
+}
+
 /// The yaw of the path running from `older` to `newer` - the way a segment on that hop faces.
 /// A hop with no horizontal length keeps the facing it was given.
 fn yaw_along(older: &[f32; 3], newer: &[f32; 3], fallback: f32) -> f32 {
@@ -346,6 +373,41 @@ mod tests {
         PathSample {
             position: [x, 0.25, z],
             yaw,
+        }
+    }
+
+    #[test]
+    fn consecutive_segments_share_a_tip_wherever_the_path_bends() {
+        // The head swims a tight half circle of radius one metre to its left at full speed, so
+        // the wave swells and the trail bends hard both ways. The owner's report (2026-08-28):
+        // the neighbours' tips were not touching. Every rod's tail tip is the next rod's nose
+        // tip - one point, a pivot - wherever the path bends.
+        let spacing = 0.56f32;
+        let half = 0.5 * spacing;
+        let mut chain = Chain::new(8, spacing, head_at(0.0, 0.0, 0.0));
+        let radius = 1.0f32;
+        let steps = 800;
+        let mut head = head_at(0.0, 0.0, 0.0);
+        for step in 1..=steps {
+            #[allow(clippy::cast_precision_loss)]
+            let angle = (step as f32 / steps as f32) * std::f32::consts::PI;
+            head = head_at(-radius + radius * angle.cos(), -radius * angle.sin(), angle);
+            chain.advance(head, 1.0);
+        }
+        let tip = |position: &[f32; 3], yaw: f32, sign: f32| {
+            let forward = forward_for(yaw);
+            [
+                position[0] + forward[0] * half * sign,
+                position[1],
+                position[2] + forward[2] * half * sign,
+            ]
+        };
+        let mut front = tip(&head.position, head.yaw, -1.0);
+        for (slot, pose) in chain.poses.iter().enumerate().take(7) {
+            let nose = tip(&pose.position, pose.yaw, 1.0);
+            let gap = distance(&front, &nose);
+            assert!(gap < 1e-3, "slot {slot}: the tips miss by {gap} m");
+            front = tip(&pose.position, pose.yaw, -1.0);
         }
     }
 

@@ -388,6 +388,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The chain's segments share their tips.** The owner's report (2026-08-28): the neighbours
+  of the chain were not touching. Placed by arc length along the wavy path and faced along the
+  local tangent, two neighbours' tips coincided only on a dead-straight run; on any bend the
+  chord between origins fell short of the spacing and the two stubs pointed along different
+  tangents. Every trailing segment is now one rigid rod of the chain - nose tip to tail tip
+  exactly the spacing - and consecutive rods share a tip, a pivot the chain bends around: the
+  walk starts at the head's own tail tip and finds, hop by hop along the wavy path, the first
+  point a whole spacing away in a straight line; a segment stands at the midpoint of its two
+  pivots facing from the rear one to the front one. The pivots lie on the path, the origins a
+  little inside its bends, as a chain of rods laid on a curve does. Held by a test on a tight
+  half circle at full speed: every tail tip is the next nose tip to a millimetre. The chain
+  golden is re-recorded, as any physics change re-records it. rc-worm's companion puts the
+  body's two tips exactly on its axis, where the world's pivots are.
 - **Clu tells the truth: the log carries the mesh, the claim, and the order.** A bug hunt
   found three ways the record could disagree with the world. The input log wrote a rez as
   bounds alone, so Clu re-simulated every shaped body as a point - and the hull is simulation
