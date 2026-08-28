@@ -254,6 +254,54 @@ cross-build agreement (another compiler, another `target-cpu`) - the log carries
 stamp and Clu names it. The step goldens' tolerance comparison stays: they are held against
 the C++ side's libm.
 
+## Etape 8 — the undulation propels
+
+**The owner's third ruling (2026-08-28)**: the worm still seems pushed by an invisible force
+rather than propelled by its undulation; model it physically - "realism is everything, not
+just the bio side". And the picture to build to: the worm is a robot, and the pivots where
+the spikes touch are servo motors. This is the rigid-body dynamics TOPOLOGY.md kept deferred,
+at its trigger - a creature whose body is articulated - and it retires the sentence there
+that said a trail was not the trigger.
+
+**Movement 1, done (2026-08-28): the articulated chain.** `src/chain.rs` is rewritten. Every
+segment, the head included, is a rigid body of its own - position, yaw, planar velocity, yaw
+rate; its height is its own floor's plus the head's standing height. Consecutive segments
+share a joint tip held by a position constraint - the pivot - and a servo at every joint
+holds the angle between neighbours to a commanded target through a spring of a muscle's
+stiffness (five newton-metres per radian); each segment's spikes rub on the floor with
+Coulomb friction, along the segment's axis and across it, and against spinning. The solver is
+XPBD: four substeps of sixteen Gauss-Seidel sweeps, the motors first and the pivots last in
+every sweep so the joints have the last word, velocities from the positions moved, friction on
+those velocities; a fixed count, a fixed order, IEEE arithmetic and `trig.rs` only, so replay
+per build any machine holds - the deep tier walks it. The head still meets risers and the air
+with `physics.rs`'s hull code, and what it meets there is written back: a head the world moved
+pulls its chain after it within the tick, each trailing segment carried by its nose to the
+pivot before it. Proprioception reports the head's displacement over the tick, not what was
+asked. The scrape is sounded from what every segment actually slid. A single body - one
+segment, nothing to undulate with - keeps the actuators' traction on the floor as it always
+had, and the physics goldens hold.
+
+*The gait bridge.* The gait is the creature's, not the world's, and movement 3 puts it on the
+wire. Until then `Chain::gait` turns the speed and turn the wire still carries into a
+travelling wave of servo targets: frequency the speed command over the wave's length (four
+segments), so the wave's phase speed is at most the declared top speed and the body can never
+outrun its own wave; amplitude and turn bias eased a share of the way each tick, so a launch
+swells the wave and a turn bends the body rather than snapping either - a resting undulator
+relaxes. A bridge, documented as one.
+
+*Friction is isotropic in this movement*, the same coefficient along and across, which is why
+the wave here goes nowhere much: with nothing it can push against sideways that it cannot
+also slide along, an undulator only wriggles in place - the chain test holds it under 0.3 m
+in ten seconds at full command. The next movement declares the anisotropy the spikes give,
+and that is the movement in which the worm moves.
+
+**Movements to come.** 2: anisotropic friction (the spikes bite sideways, slide lengthwise) -
+propulsion emerges, and its test is movement 1's mirror. 3: the wire and the ABI - servo
+targets from the Program (rc-worm's own wave generator, the panel's keys driving it), the
+servo's torque declared by the body, `desired_forward_speed`/`turn_rate` retired; link v9,
+client ABI 9. 4: proprioception of every joint's angle in `TglSenses`. 5: every segment
+meeting risers and the air for itself. Goldens re-recorded per movement.
+
 ## Etape 7 — the scrape
 
 **The owner's ruling (2026-08-26)**: as it undulates, the sharp spikes of the icosahedra scrape
