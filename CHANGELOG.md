@@ -388,6 +388,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The chain golden is re-recorded against rc-worm's pitched body** (its #20: the spikes
+  themselves on the axis, the body standing on one spike rather than flat on a face). The
+  contacts change with the posture, so the hashes do: 426 ticks, 13 hashes, ended on request.
+  Nothing in the world's code moves.
 - **The chain's segments share their tips.** The owner's report (2026-08-28): the neighbours
   of the chain were not touching. Placed by arc length along the wavy path and faced along the
   local tangent, two neighbours' tips coincided only on a dead-straight run; on any bend the
