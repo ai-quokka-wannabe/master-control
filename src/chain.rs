@@ -37,6 +37,7 @@
 //! targets, with the frequency bounded so the wave's phase speed is the body's declared top
 //! speed - the body can never outrun its own wave. A bridge, documented as one, retired when
 //! the Program brings the gait itself.
+use crate::hull::KEELS_MAX;
 use crate::link_dll::{SEGMENTS_MAX, SegmentPose, TRAILING_SEGMENTS_MAX};
 use crate::physics::{BODY_CIRCUMRADIUS_FOR_INERTIA, BODY_MASS_KG, GRAVITY, TICK_SECONDS};
 use crate::trig;
@@ -85,24 +86,34 @@ pub const SEGMENT_INERTIA: f32 =
 /// joint it works lets the pivots win every sweep, which is what a joint is.
 pub const MOTOR_COMPLIANCE: f32 = 0.2;
 
-/// Coulomb friction between a segment's spikes and the floor along the segment's own axis,
-/// and across it. Isotropic in this movement - the same coefficient both ways, the floor's
-/// old one - which is why the wave here goes nowhere much: with nothing to push against
-/// sideways that it cannot also slide along, an undulator only wriggles in place. The next
-/// movement declares the anisotropy the spikes give, and that is the movement in which the
-/// worm moves.
-pub const FRICTION_ALONG: f32 = crate::physics::FRICTION;
-pub const FRICTION_ACROSS: f32 = crate::physics::FRICTION;
+/// Coulomb friction between a tube lying along the Grid floor and the floor, sliding along
+/// the tube's length: a runner glides. A sharp point on a hard floor rubs the same in every
+/// direction and could propel nothing; what a spiky body rests on is its tubes, and a tube
+/// is a keel - it glides along itself and ploughs across itself, and that anisotropy is
+/// where an undulator's push comes from. The keels are read from the hull ([`crate::hull::Hull::keels`]),
+/// not declared: the worm's are two runners thirty degrees either side of its axis.
+pub const FRICTION_GLIDE: f32 = 0.1;
 
-/// Friction against a segment spinning on its spikes, as a fraction of gravity over the
-/// circumradius: the spikes resist a twist as they resist a slide.
-pub const FRICTION_SPIN: f32 = crate::physics::FRICTION;
+/// Coulomb friction of a tube shoved across its length: it ploughs. The Grid floor's answer
+/// to a runner pushed sideways - two, because a plough is not a slide: the tube bites. With
+/// the glide above, the worm's two runners at thirty degrees give it about six times the
+/// resistance across its axis that it meets along it, which is what a sled has; measured on
+/// the desk, the same wave that wriggled in place on a point carries the body 1.3 m in ten
+/// seconds on them, straight to a few millimetres, and as far backwards when the wave runs
+/// the other way.
+pub const FRICTION_PLOUGH: f32 = 2.0;
 
-/// The gait bridge: the wave's amplitude at every joint at the body's top speed, radians.
+/// Friction against a segment spinning on its runners, as a fraction of gravity over the
+/// circumradius: a twist drags every runner across itself.
+pub const FRICTION_SPIN: f32 = FRICTION_PLOUGH;
+
+/// The gait bridge: the wave's amplitude at every joint at the body's top speed, radians -
+/// about fifty degrees, what a lateral undulator's joints swing; less and the push is weak,
+/// more and the body folds on itself and drifts.
 /// Nothing at rest - a resting undulator relaxes, it does not hold a frozen wave - and the
 /// amplitude follows the speed command a share of the way each tick, so a launch swells
 /// the wave over half a second rather than snapping the body into it.
-pub const GAIT_AMPLITUDE: f32 = 0.6;
+pub const GAIT_AMPLITUDE: f32 = 0.9;
 
 /// The gait bridge: the share of the way the amplitude moves towards the command's each
 /// tick. State, hashed - the motors' targets depend on it.
@@ -139,6 +150,11 @@ pub struct Chain {
     /// The joint targets last driven, `segment_count - 1` meaningful: state, hashed - the
     /// motors hold them between one drive and the next.
     pub targets: [f32; TRAILING_SEGMENTS_MAX],
+    /// The keels every segment rests on, body frame, unit (x, z), `keel_count` meaningful:
+    /// read from the hull at rez, fixed for the life, hashed - a body with other runners
+    /// slides elsewhere. None: the body rests on a point and rubs the same every way.
+    pub keels: [[f32; 2]; KEELS_MAX],
+    pub keel_count: u32,
     /// The trailing segments' poses, `segment_count - 1` meaningful, the rest zero - the wire's
     /// own rule, kept here so the row is a copy and nothing else. Derived from `segments`.
     pub poses: [SegmentPose; TRAILING_SEGMENTS_MAX],
@@ -160,6 +176,8 @@ impl Chain {
             amplitude: 0.0,
             bias: 0.0,
             targets: [0.0; TRAILING_SEGMENTS_MAX],
+            keels: [[0.0; 2]; KEELS_MAX],
+            keel_count: 0,
             poses: [SegmentPose::default(); TRAILING_SEGMENTS_MAX],
             drags: [0.0; TRAILING_SEGMENTS_MAX],
         }
@@ -198,11 +216,43 @@ impl Chain {
             amplitude: 0.0,
             bias: 0.0,
             targets: [0.0; TRAILING_SEGMENTS_MAX],
+            keels: [[0.0; 2]; KEELS_MAX],
+            keel_count: 0,
             poses: [SegmentPose::default(); TRAILING_SEGMENTS_MAX],
             drags: [0.0; TRAILING_SEGMENTS_MAX],
         };
         chain.tell_poses();
         chain
+    }
+
+    /// The runners the body rests on, from its hull: what every segment slides on.
+    pub fn set_keels(&mut self, keels: &[[f32; 2]]) {
+        self.keels = [[0.0; 2]; KEELS_MAX];
+        self.keel_count = 0;
+        for (slot, keel) in self.keels.iter_mut().zip(keels.iter()) {
+            *slot = *keel;
+            self.keel_count += 1;
+        }
+    }
+
+    /// Coulomb's coefficient for a slide in the body-frame direction `along` (unit, x and z):
+    /// each runner glides by its share of the motion along itself and ploughs by the rest,
+    /// and the body's friction is the runners' mean. With no runners, the floor's own.
+    #[must_use]
+    pub fn friction_along(&self, along: [f32; 2]) -> f32 {
+        let count = self.keel_count as usize;
+        if count == 0 {
+            return crate::physics::FRICTION;
+        }
+        let mut sum = 0.0;
+        for keel in self.keels.iter().take(count) {
+            let glide = along[0] * keel[0] + along[1] * keel[1];
+            let share = (glide * glide).min(1.0);
+            sum += FRICTION_GLIDE * share + FRICTION_PLOUGH * (1.0 - share);
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let mean = sum / count as f32;
+        mean
     }
 
     /// Whether there is a trail behind the head at all.
@@ -324,8 +374,6 @@ impl Chain {
         #[allow(clippy::cast_precision_loss)]
         let h = TICK_SECONDS / SUBSTEPS as f32;
         let compliance = MOTOR_COMPLIANCE / (h * h);
-        let cap_along = FRICTION_ALONG * GRAVITY * h;
-        let cap_across = FRICTION_ACROSS * GRAVITY * h;
         let cap_spin = FRICTION_SPIN * GRAVITY * h / BODY_CIRCUMRADIUS_FOR_INERTIA;
 
         for _ in 0..SUBSTEPS {
@@ -372,21 +420,48 @@ impl Chain {
                 segment.yaw_rate = (segment.yaw - was.yaw) / h;
             }
 
-            // Friction: each segment's velocity in its own frame, along its axis and across it,
-            // each component losing what Coulomb allows this substep - the spikes' answer to the
-            // push.
+            // Friction: each segment's slide against the runners it lies on, runner by runner,
+            // component by component - what Coulomb allows along a runner (a glide) and what it
+            // allows across it (a plough) are capped separately, each runner bearing its share
+            // of the load. The force this makes is not opposite the slide: it leans away from
+            // it towards the ploughed direction, and that lean is the thrust - a segment shoved
+            // sideways by the wave gives back a push along its runners, which is the whole of
+            // an undulator's propulsion. A body on a point rubs the same every way and gets none.
             for segment in self.segments.iter_mut().take(count) {
-                let forward = forward_for(segment.yaw);
-                let right = right_for(segment.yaw);
-                let along = segment.velocity[0] * forward[0] + segment.velocity[2] * forward[2];
-                let across = segment.velocity[0] * right[0] + segment.velocity[2] * right[2];
-                let along = rubbed(along, cap_along);
-                let across = rubbed(across, cap_across);
-                segment.velocity = [
-                    forward[0] * along + right[0] * across,
-                    0.0,
-                    forward[2] * along + right[2] * across,
-                ];
+                let v = [segment.velocity[0], segment.velocity[2]];
+                let runners = self.keel_count as usize;
+                if runners == 0 {
+                    let speed = (v[0] * v[0] + v[1] * v[1]).sqrt();
+                    if speed > 0.0 {
+                        let after = rubbed(speed, crate::physics::FRICTION * GRAVITY * h);
+                        segment.velocity = [v[0] / speed * after, 0.0, v[1] / speed * after];
+                    }
+                } else {
+                    let forward = forward_for(segment.yaw);
+                    let right = right_for(segment.yaw);
+                    #[allow(clippy::cast_precision_loss)]
+                    let share = 1.0 / runners as f32;
+                    let cap_glide = FRICTION_GLIDE * GRAVITY * h * share;
+                    let cap_plough = FRICTION_PLOUGH * GRAVITY * h * share;
+                    let mut change = [0.0f32, 0.0];
+                    for keel in self.keels.iter().take(runners) {
+                        // The runner in the world: body x is the right hand, body z is backwards.
+                        let along = [
+                            keel[0] * right[0] - keel[1] * forward[0],
+                            keel[0] * right[2] - keel[1] * forward[2],
+                        ];
+                        let across = [-along[1], along[0]];
+                        let glide = v[0] * along[0] + v[1] * along[1];
+                        let plough = v[0] * across[0] + v[1] * across[1];
+                        let glide_after = rubbed(glide, cap_glide);
+                        let plough_after = rubbed(plough, cap_plough);
+                        change[0] +=
+                            (glide_after - glide) * along[0] + (plough_after - plough) * across[0];
+                        change[1] +=
+                            (glide_after - glide) * along[1] + (plough_after - plough) * across[1];
+                    }
+                    segment.velocity = [v[0] + change[0], 0.0, v[1] + change[1]];
+                }
                 segment.yaw_rate = rubbed(segment.yaw_rate, cap_spin);
             }
         }
@@ -698,11 +773,50 @@ mod tests {
         );
     }
 
+    /// The worm's runners, as the hull test finds them: two, thirty degrees either side of
+    /// the axis, leaving the front spike backwards.
+    fn worm_keels() -> [[f32; 2]; 2] {
+        let (s, c) = (30.0f32.to_radians().sin(), 30.0f32.to_radians().cos());
+        [[-s, c], [s, c]]
+    }
+
     #[test]
-    fn under_isotropic_friction_a_travelling_wave_goes_nowhere_much() {
-        // The undulator wriggles in place: with nothing it can push against sideways that it
-        // cannot equally slide along, the wave's pushes cancel. The next movement's anisotropy
-        // is what turns this into propulsion, and its test is this one's mirror.
+    fn on_the_worms_runners_the_same_wave_advances_and_reverse_backs_up() {
+        // The mirror of the wriggle below: the same wave, the same ten seconds, but the
+        // segments lie on runners that glide along the axis and plough across it - and the
+        // body goes forward, the way the wave's crest runs backwards along it. Reverse the
+        // wave and it backs up.
+        for (command, sign) in [(1.0f32, -1.0f32), (-1.0, 1.0)] {
+            let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+            chain.set_keels(&worm_keels());
+            let start = centre_of_mass(&chain);
+            for _ in 0..(32 * 10) {
+                let drive = chain.gait(command, 0.0, 1.0);
+                chain.step(&drive, 0.25);
+            }
+            let end = centre_of_mass(&chain);
+            let advance = (end[1] - start[1]) * sign;
+            let sideways = (end[0] - start[0]).abs();
+            eprintln!(
+                "command {command}: advanced {advance:.3} m, drifted {sideways:.3} m sideways, in ten seconds"
+            );
+            assert!(
+                advance > 0.5,
+                "command {command}: advanced {advance} m along its heading in ten seconds"
+            );
+            assert!(
+                sideways < advance,
+                "command {command}: drifted {sideways} m sideways against {advance} m ahead"
+            );
+        }
+    }
+
+    #[test]
+    fn on_a_point_a_travelling_wave_goes_nowhere_much() {
+        // A body that rests on a point rubs the same in every direction, and the undulator
+        // wriggles in place: with nothing it can push against sideways that it cannot equally
+        // slide along, the wave's pushes cancel. The runners are what make the difference,
+        // and the test above is this one's mirror.
         let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
         let start = centre_of_mass(&chain);
         for _ in 0..(32 * 10) {
