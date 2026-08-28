@@ -282,6 +282,9 @@ impl Roster {
                         model.header.segment_spacing,
                         resident.body.path_sample(),
                     );
+                    if let Some(hull) = resident.body.hull.as_ref() {
+                        resident.body.chain.set_keels(&hull.keels());
+                    }
                     resident.model = model;
                     Admission::Adopted
                 }
@@ -314,6 +317,10 @@ impl Roster {
                                 model.header.segment_spacing,
                                 body.path_sample(),
                             );
+                            // The runners the body rests on: what every segment slides on.
+                            if let Some(hull) = body.hull.as_ref() {
+                                body.chain.set_keels(&hull.keels());
+                            }
                             body
                         },
                         model,
@@ -1204,14 +1211,11 @@ mod tests {
                 }
             }
         }
-        // The three trailing segments each scraped. The head's own scratch is one contact's
-        // slip against that contact's share of the load, and under this movement's isotropic
-        // friction the head only wriggles - too slowly to sound on any one of a shaped body's
-        // resting vertices. The next movement, in which the worm moves, hears it again.
+        // The head and the three trailing segments each scraped: on its runners the body
+        // moves, and the head's own contacts slide fast enough to sound.
         assert_eq!(
-            heard[1..],
-            [true; 3],
-            "the three segments each scraped: {heard:?}"
+            heard, [true; 4],
+            "the head and three segments each scraped: {heard:?}"
         );
         // Stop: the wave relaxes, momentum is friction's within a few ticks, and within a
         // second and a half nothing scrapes.

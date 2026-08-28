@@ -290,14 +290,40 @@ outrun its own wave; amplitude and turn bias eased a share of the way each tick,
 swells the wave and a turn bends the body rather than snapping either - a resting undulator
 relaxes. A bridge, documented as one.
 
-*Friction is isotropic in this movement*, the same coefficient along and across, which is why
-the wave here goes nowhere much: with nothing it can push against sideways that it cannot
-also slide along, an undulator only wriggles in place - the chain test holds it under 0.3 m
-in ten seconds at full command. The next movement declares the anisotropy the spikes give,
-and that is the movement in which the worm moves.
+*Friction was isotropic in movement 1*, the same coefficient along and across, which is why
+the wave went nowhere much: with nothing it could push against sideways that it could not
+also slide along, an undulator only wriggles in place - the chain test still holds a body on
+a point under 0.3 m in ten seconds at full command.
 
-**Movements to come.** 2: anisotropic friction (the spikes bite sideways, slide lengthwise) -
-propulsion emerges, and its test is movement 1's mirror. 3: the wire and the ABI - servo
+**Movement 2, done (2026-08-29): the keels.** The owner's mandate: use your imagination to
+make it behave as realistically as possible. So, honestly: a sharp spike on a hard floor rubs
+the same in every direction and could propel nothing. What a spiky body actually rests on is
+its tubes - a worm lies on its tubes, as rc-worm's BODY.md says - and a tube lying along the
+floor is a runner: it glides along its length and ploughs across it, and that anisotropy is
+where an undulator's push comes from. `Hull::keels()` (`src/hull.rs`) reads the runners from
+the hull at rez - the long, low-rising edges leaving the region the body rests on - and the
+real worm, parsed from the chain golden's own `rez` line, rests on two of them, thirty degrees
+either side of its axis: the two bottom-face tubes of the pitched icosahedron, a V-keel, the
+way a sled has two. A box on a face has runners along both its edges (and slides the same
+every way); a body on a point has none and keeps the floor's own coefficient. Friction in the
+chain is now Coulomb's per runner, component by component: the slide's glide along a runner
+is capped by `FRICTION_GLIDE` (0.1, a smooth tube on polished glass) and its plough across by
+`FRICTION_PLOUGH` (2.0, the tube bites), each runner bearing its share of the load. The force
+this makes is not opposite the slide - it leans towards the ploughed direction, and that lean
+is the thrust. Measured: the same wave that wriggled in place on a point carries the worm
+1.3 m in ten seconds on its runners, straight to a few millimetres, and as far backwards when
+the wave runs the other way; the bridge's amplitude is 0.9 rad now, about fifty degrees, what
+an undulator's joints swing (1.2 saturates and drifts). A lesson kept in the code: friction
+whose magnitude varies with direction but whose force stays opposite the velocity gives no
+propulsion at all - two centimetres in ten seconds - because a force antiparallel to the slide
+can only slow it; the ellipse is the physics. The head's own scratch is heard again in the
+roster's scrape test. The random walk's speed line is a sanity bound now (ten metres a second):
+the steady speed is the wave's, but a tick's yank of a one-metre-rod head by seven kilograms of
+moving body is dynamics, and the deep tier found four metres a second of it with every joint
+held. The chain lies in the head's plane (a fix the first deep tier found and movement 1's
+merge missed, carried here). Golden re-recorded.
+
+**Movements to come.** 3: the wire and the ABI - servo
 targets from the Program (rc-worm's own wave generator, the panel's keys driving it), the
 servo's torque declared by the body, `desired_forward_speed`/`turn_rate` retired; link v9,
 client ABI 9. 4: proprioception of every joint's angle in `TglSenses`. 5: every segment

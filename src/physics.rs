@@ -696,6 +696,10 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 
         hasher.float(body.chain.amplitude);
         hasher.float(body.chain.bias);
         hasher.floats(&body.chain.targets);
+        hasher.u32(body.chain.keel_count);
+        for keel in &body.chain.keels {
+            hasher.floats(keel);
+        }
         for segment in &body.chain.segments {
             hasher.floats(&segment.position);
             hasher.float(segment.yaw);
