@@ -265,7 +265,8 @@ that said a trail was not the trigger.
 
 **Movement 1, done (2026-08-28): the articulated chain.** `src/chain.rs` is rewritten. Every
 segment, the head included, is a rigid body of its own - position, yaw, planar velocity, yaw
-rate; its height is its own floor's plus the head's standing height. Consecutive segments
+rate - and the chain lies in the head's plane, a segment over a terrace edge hanging level
+until movement 5 lets it fall or stops it at the riser. Consecutive segments
 share a joint tip held by a position constraint - the pivot - and a servo at every joint
 holds the angle between neighbours to a commanded target through a spring of a muscle's
 stiffness (five newton-metres per radian); each segment's spikes rub on the floor with

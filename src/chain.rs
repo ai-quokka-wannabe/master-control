@@ -16,12 +16,14 @@
 //! command's. This is the rigid-body dynamics TOPOLOGY.md kept deferred, at its trigger: a
 //! creature whose body is articulated.
 //!
-//! Planar, on purpose: a segment has a position, a yaw, a planar velocity and a yaw rate; its
-//! height is its own floor's - the terrain under it - plus the standing height the head has,
-//! because on the Grid a worm lies on the floor and the floor is flat under a segment. The
-//! head still meets risers and the air with the hull code in `physics.rs`; what it meets there
-//! is written back here so the chain stays one body. Every segment meeting risers and the air
-//! for itself is the etape's later movement.
+//! Planar, on purpose: a segment has a position, a yaw, a planar velocity and a yaw rate, and
+//! the chain lies in the head's plane - every segment at the head's height, as the kinematic
+//! trail always lay - because on the Grid a worm lies on the floor and the floor is flat
+//! under a segment. A segment whose origin crosses a terrace edge hangs level with the head
+//! rather than dropping to the lower cell or standing inside the higher one: what it should
+//! do there - fall, or be stopped by the riser - is the etape's later movement, every segment
+//! meeting risers and the air for itself. The head meets them now with the hull code in
+//! `physics.rs`, and what it meets there is written back here so the chain stays one body.
 //!
 //! The solver is position-based (XPBD, Müller et al. 2007/2020): predict, then a fixed number
 //! of Gauss-Seidel sweeps over the constraints in a fixed order, then velocities from the
@@ -304,10 +306,10 @@ impl Chain {
     }
 
     /// One tick of the articulated body: the motors driven to `drive`, the pivots held, every
-    /// segment's spikes rubbing on its own floor. `standing` is how high a segment's origin
-    /// stands over its floor - the head's, shared by the chain. The head's result is read by
-    /// `physics.rs`, which meets the risers and the air with it and writes back what it settled.
-    pub fn step(&mut self, drive: &Drive, ground: impl Fn(f32, f32) -> f32, standing: f32) {
+    /// segment's spikes rubbing on the floor, the chain lying at `height` - the head's. The
+    /// head's result is read by `physics.rs`, which meets the risers and the air with it and
+    /// writes back what it settled.
+    pub fn step(&mut self, drive: &Drive, height: f32) {
         if !self.trails() {
             return;
         }
@@ -389,7 +391,7 @@ impl Chain {
             }
         }
 
-        // Heights from the floor, the drags from the moves, the poses for the wire.
+        // The chain at the head's height, the drags from the moves, the poses for the wire.
         for (index, (segment, was)) in self
             .segments
             .iter_mut()
@@ -397,7 +399,7 @@ impl Chain {
             .enumerate()
             .take(count)
         {
-            segment.position[1] = ground(segment.position[0], segment.position[2]) + standing;
+            segment.position[1] = height;
             if index >= 1 {
                 let dx = segment.position[0] - was.position[0];
                 let dz = segment.position[2] - was.position[2];
@@ -560,10 +562,6 @@ mod tests {
         }
     }
 
-    fn flat(_x: f32, _z: f32) -> f32 {
-        0.0
-    }
-
     fn centre_of_mass(chain: &Chain) -> [f32; 2] {
         let count = chain.segment_count as usize;
         let mut x = 0.0;
@@ -610,7 +608,7 @@ mod tests {
         let start = chain.segments;
         for _ in 0..64 {
             let drive = Drive::default();
-            chain.step(&drive, flat, 0.25);
+            chain.step(&drive, 0.25);
         }
         for (index, (now, was)) in chain.segments.iter().zip(start.iter()).enumerate().take(8) {
             let moved = ((now.position[0] - was.position[0]).powi(2)
@@ -641,7 +639,7 @@ mod tests {
             *target = 0.5 * sign;
         }
         for _ in 0..96 {
-            chain.step(&drive, flat, 0.25);
+            chain.step(&drive, 0.25);
             for joint in 0..7 {
                 let gap = chain.joint_gap(joint);
                 assert!(gap < 2e-3, "joint {joint} gap {gap} m while bending");
@@ -709,7 +707,7 @@ mod tests {
         let start = centre_of_mass(&chain);
         for _ in 0..(32 * 10) {
             let drive = chain.gait(1.0, 0.0, 1.0);
-            chain.step(&drive, flat, 0.25);
+            chain.step(&drive, 0.25);
             for joint in 0..7 {
                 assert!(
                     chain.joint_gap(joint) < 2e-3,
@@ -761,7 +759,7 @@ mod tests {
                 #[allow(clippy::cast_precision_loss)]
                 let turn = ((tick % 40) as f32 / 40.0) - 0.5;
                 let drive = chain.gait(0.8, turn, 1.0);
-                chain.step(&drive, |x, z| 0.01 * (x + z), 0.25);
+                chain.step(&drive, 0.25);
             }
             chain
         };
