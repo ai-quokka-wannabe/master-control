@@ -206,8 +206,10 @@ physics steps; every trailing segment is kinematic trail, placed one spacing fur
 the path the head actually walked - a ring of 128 past head poses per creature, sampled by
 distance (a head standing still records nothing), fixed at rez and never grown, seeded straight
 behind the spawn pose so the trail is defined from the first tick. Placement walks back from
-the head's own pose, accumulating arc length, interpolating within the hop that crosses each
-segment's distance, facing along the path there. Segments touch nothing: the contacts are the
+the head's own tail tip, pivot to pivot: each segment is a rigid rod a spacing long from nose
+tip to tail tip, its rear tip the first point of the path a whole spacing from its front tip,
+so consecutive segments share a tip - a pivot - and a segment stands at the midpoint of its
+two, facing along its rod. Segments touch nothing: the contacts are the
 head's, the pair loop never sees them, and TOPOLOGY.md's deferred rigid-body solver stays
 deferred - nothing here is articulated. The `REZ` names the chain (`segment_count` 1..=8,
 `segment_spacing` 0 for one, (0, 4] m otherwise - refused by name, `refusals_change_nothing`
@@ -266,8 +268,10 @@ the wave under the head so the head itself, physics' truth, is never moved. The 
 function of the head's speed - nothing at rest, 0.35 spacings at the body's top speed - and
 state: it moves a share of the way towards the speed's amplitude each tick, so a launch swells
 the wave rather than snapping the tail sideways in one frame (on the ground the command is the
-velocity). The trail is walked along the wavy path by arc length, so no chord between
-neighbours exceeds the spacing and the joints stay joined. Hashed: the amplitude and every
+velocity). The trail is walked along the wavy path pivot to pivot - each segment a rigid rod a spacing
+long whose tips lie on the path, consecutive rods sharing a tip (the owner's report,
+2026-08-28: walked by arc length and faced along the tangent, two tips met only on a straight
+run) - so the joints are joined at one point wherever the path bends. Hashed: the amplitude and every
 sample's arc length beside its pose. *The scrape* (`src/roster.rs`): every trailing segment is
 dragged across the floor as the trail moves - kinematic, so its slide is the whole of its
 motion - and each one scrapes with the rule the head's scratch already uses, its drag speed
