@@ -1,304 +1,537 @@
-/*
-    Copyright (C) 2026 Matej Gomboc <https://github.com/ai-quokka-wannabe/master-control>
-
-    This program is free software: you can redistribute it and/or modify it under the terms of
-    the GNU General Public License as published by the Free Software Foundation, either version
-    3 of the License, or (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
-    without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-    See the GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License along with this program.
-    If not, see <https://www.gnu.org/licenses/>.
-*/
-
-//! The chain: a creature's trailing segments, placed along the head's recorded path.
+//! The chain, articulated: the undulation propels.
 //!
-//! The owner's ruling (2026-08-26): a worm is a chain of icosahedra joined spike to spike, and
-//! it undulates. The head is the one rigid body physics steps; every trailing segment is
-//! kinematic trail - placed one spacing further back along the path the head actually walked,
-//! so the chain bends where the head turned and the undulation is whatever the User weaves.
-//! Segments do not collide and touch nothing: the world's contacts are the head's.
+//! The owner's rulings: a worm is a chain of icosahedra joined spike to spike, and it
+//! undulates (2026-08-26); as it undulates its spikes scrape the Grid floor and it hears itself
+//! (2026-08-26); and the undulation must *propel* it - "not pushed by an invisible force",
+//! "realism is everything, not just the bio side" (2026-08-28). Until that third ruling the head
+//! was the one rigid body physics stepped, on the ground its command was its velocity, and the
+//! trail was kinematic, placed along the path the head had walked with a lateral wave laid over
+//! it for the look. Nothing pushed against anything. This module is the articulated body that
+//! replaces it: every segment, the head included, is a rigid body of its own; consecutive
+//! segments share a joint tip - the pivot the chain bends around - held by a constraint; a
+//! motor at every joint drives the angle between neighbours to a target - a servo at the
+//! spike-touch pivot, in the owner's words, holding a commanded angle through a spring of a
+//! muscle's stiffness; and each segment's spikes sit on the floor with Coulomb friction. A travelling wave of joint targets makes the
+//! body push its flanks against the floor, and how far it gets is friction's answer, not a
+//! command's. This is the rigid-body dynamics TOPOLOGY.md kept deferred, at its trigger: a
+//! creature whose body is articulated.
 //!
-//! The path is a ring of past head poses, sampled by distance (never by time, so a head that
-//! stands still records nothing and its tail stays where it lies), fixed in size at rez and
-//! never grown - a bounded, allocation-free, replayed-bit-for-bit piece of simulation state
-//! that the state hash covers whole. Placement walks back along the ring pivot to pivot: each
-//! segment is a rigid rod a spacing long from nose tip to tail tip, its rear tip the first point
-//! of the path a whole spacing from its front tip, so consecutive segments share a tip - the
-//! pivot the chain bends around - and a segment stands at the midpoint of its two, facing along
-//! its rod. Physics stays on the near side of TOPOLOGY.md's deferred rigid-body solver: nothing
-//! here is articulated, nothing is solved - the rods are placed, not constrained.
-
+//! Planar, on purpose: a segment has a position, a yaw, a planar velocity and a yaw rate; its
+//! height is its own floor's - the terrain under it - plus the standing height the head has,
+//! because on the Grid a worm lies on the floor and the floor is flat under a segment. The
+//! head still meets risers and the air with the hull code in `physics.rs`; what it meets there
+//! is written back here so the chain stays one body. Every segment meeting risers and the air
+//! for itself is the etape's later movement.
 //!
-//! The undulation, the owner's ruling of 2026-08-26, is authored motion and says so: a lateral
-//! wave laid over the recorded path, fixed to the path by arc length the way the track of a
-//! real undulating body is fixed to the ground, its amplitude a function of the head's speed
-//! (nothing at rest, full at the body's top speed, approached a share of the way each tick so
-//! a launch never snaps the tail sideways in one frame). The trail is walked along the wavy
-//! path pivot to pivot, so the joints are joined at one point wherever the path bends (the
-//! owner's report, 2026-08-28: walked by arc length and faced along the tangent, two tips met
-//! only on a straight run). Every trailing segment is dragged across the floor as the trail moves -
-//! it is kinematic, so its slide is the whole of its motion - and the distance each one moved
-//! this tick is kept beside its pose: that drag is what the roster sounds as its scrape.
-
+//! The solver is position-based (XPBD, Müller et al. 2007/2020): predict, then a fixed number
+//! of Gauss-Seidel sweeps over the constraints in a fixed order, then velocities from the
+//! positions moved, then friction on those velocities. A fixed count and a fixed order, IEEE
+//! arithmetic and the world's own [`trig`] - no platform transcendental - so the replay
+//! promise holds: per build, any machine. Nothing here allocates.
+//!
+//! The gait - which joint bends when - is the creature's, not the world's: a Program's muscles.
+//! Until the wire carries joint targets (the etape's third movement), [`Chain::gait`] is the
+//! bridge: it turns the speed and turn the wire still carries into a travelling wave of joint
+//! targets, with the frequency bounded so the wave's phase speed is the body's declared top
+//! speed - the body can never outrun its own wave. A bridge, documented as one, retired when
+//! the Program brings the gait itself.
 use crate::link_dll::{SEGMENTS_MAX, SegmentPose, TRAILING_SEGMENTS_MAX};
+use crate::physics::{BODY_CIRCUMRADIUS_FOR_INERTIA, BODY_MASS_KG, GRAVITY, TICK_SECONDS};
 use crate::trig;
 
-/// One recorded head pose.
+/// A head's pose as the chain takes it: where it stands and which way it faces.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct PathSample {
     pub position: [f32; 3],
     pub yaw: f32,
 }
 
-/// One recorded head pose with the arc length the head had walked when it stood there - the
-/// coordinate the wave is a function of. The head's start is zero; the seeded trail behind it
-/// is negative, as if walked before the first tick.
+/// One rigid segment of the chain, the head at index zero. Planar: the position's height is
+/// derived from the floor each step; the velocity's is always zero here.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub struct Recorded {
-    pub pose: PathSample,
-    pub travelled: f32,
+pub struct Segment {
+    pub position: [f32; 3],
+    pub yaw: f32,
+    pub velocity: [f32; 3],
+    pub yaw_rate: f32,
 }
 
-/// Samples kept per chain. At a sixteenth of a spacing between samples, seven spacings of
-/// trail need 112; the rest is slack, so the walk back never runs off the ring.
-pub const RING: usize = 128;
-/// Samples per spacing along the path.
-const SAMPLES_PER_SPACING: f32 = 16.0;
-/// The wave's length along the path, in spacings: four, so an eight-segment worm carries two
-/// waves - the proportion of a lateral undulator, one wavelength to a body length or so.
-pub const WAVE_LENGTH_SPACINGS: f32 = 4.0;
-/// The wave's amplitude at the body's top speed, in spacings.
-pub const WAVE_AMPLITUDE_SPACINGS: f32 = 0.35;
-/// The share of the way the amplitude moves towards the speed's amplitude each tick: about
-/// half a second from rest to nearly full, so a launch swells the wave rather than snapping
-/// it. State, hashed - the trail depends on it.
-pub const WAVE_RISE: f32 = 0.15;
+/// What drives the joints for one tick: the angle each servo is asked to hold, radians,
+/// positive bending the chain to the head's left, joint `k` between segments `k` and `k + 1`.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct Drive {
+    pub targets: [f32; TRAILING_SEGMENTS_MAX],
+}
 
-/// A creature's chain: its length, its recorded path, and where its trailing segments stand.
+/// Substeps per tick, and Gauss-Seidel sweeps per substep. Substeps are what XPBD found
+/// beats sweeps: a sweep's residual scales with the move it has to resolve, so four
+/// substeps of sixteen sweeps resolve what sixty-four sweeps would and leave a fraction of the
+/// gap. The pivots are solved after the motors in every sweep so they have the last word.
+/// The tests hold every pivot within a millimetre even when every joint snaps at once.
+pub const SUBSTEPS: usize = 4;
+pub const ITERATIONS: usize = 16;
+
+/// A segment's moment of inertia about its vertical axis: an icosahedron is nearly a sphere,
+/// and a solid sphere's is two fifths of its mass times its radius squared.
+pub const SEGMENT_INERTIA: f32 =
+    0.4 * BODY_MASS_KG * BODY_CIRCUMRADIUS_FOR_INERTIA * BODY_CIRCUMRADIUS_FOR_INERTIA;
+
+/// The motors' compliance, radians per newton-metre: a muscle's, five newton-metres per
+/// radian, which on a kilogram body is a joint that reaches a new target over a few ticks
+/// rather than snapping to it. A stiffer motor than the pivots also fights them sweep after
+/// sweep - each pass undoing the other's - and never settles; a muscle softer than the
+/// joint it works lets the pivots win every sweep, which is what a joint is.
+pub const MOTOR_COMPLIANCE: f32 = 0.2;
+
+/// Coulomb friction between a segment's spikes and the floor along the segment's own axis,
+/// and across it. Isotropic in this movement - the same coefficient both ways, the floor's
+/// old one - which is why the wave here goes nowhere much: with nothing to push against
+/// sideways that it cannot also slide along, an undulator only wriggles in place. The next
+/// movement declares the anisotropy the spikes give, and that is the movement in which the
+/// worm moves.
+pub const FRICTION_ALONG: f32 = crate::physics::FRICTION;
+pub const FRICTION_ACROSS: f32 = crate::physics::FRICTION;
+
+/// Friction against a segment spinning on its spikes, as a fraction of gravity over the
+/// circumradius: the spikes resist a twist as they resist a slide.
+pub const FRICTION_SPIN: f32 = crate::physics::FRICTION;
+
+/// The gait bridge: the wave's amplitude at every joint at the body's top speed, radians.
+/// Nothing at rest - a resting undulator relaxes, it does not hold a frozen wave - and the
+/// amplitude follows the speed command a share of the way each tick, so a launch swells
+/// the wave over half a second rather than snapping the body into it.
+pub const GAIT_AMPLITUDE: f32 = 0.6;
+
+/// The gait bridge: the share of the way the amplitude moves towards the command's each
+/// tick. State, hashed - the motors' targets depend on it.
+pub const GAIT_RISE: f32 = 0.15;
+
+/// The gait bridge: the wave's length along the body, in segments - four, so an eight-segment
+/// worm carries two waves, the proportion of a lateral undulator.
+pub const GAIT_WAVELENGTH_SEGMENTS: f32 = 4.0;
+
+/// The gait bridge: the most a turn command bends every joint the same way, radians. Eased
+/// like the amplitude - a turn is a muscle too, and a joint asked to jump would be asked
+/// for a snap no muscle makes.
+pub const GAIT_BIAS: f32 = 0.4;
+
+/// A creature's chain: its segments as rigid bodies, the joints between them, and the gait's
+/// phase while the world still generates the gait.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Chain {
     /// Segments in the chain, the head counted: 1 for a single body.
     pub segment_count: u32,
-    /// Metres between consecutive segments' origins along the path; 0 for a single body.
+    /// Metres from a segment's nose tip to its tail tip - and so between consecutive segments'
+    /// origins when the chain lies straight; 0 for a single body.
     pub spacing: f32,
-    /// The path, oldest to newest in logical order; empty for a single body. Ring-indexed:
-    /// the newest sample sits at `newest`, the one before it at `newest - 1` wrapping.
-    ring: Vec<Recorded>,
-    newest: usize,
-    /// The wave's amplitude as it stands this tick, metres: state, since it follows the
-    /// speed a share of the way each tick rather than jumping to it.
+    /// Every segment, the head at zero; the slots beyond `segment_count` stay default.
+    pub segments: [Segment; SEGMENTS_MAX as usize],
+    /// The gait bridge's phase, radians in [0, tau): state, hashed - the wave is a function
+    /// of it.
+    pub phase: f32,
+    /// The gait bridge's amplitude as it stands, radians: state, hashed - it follows the
+    /// speed command a share of the way each tick rather than jumping to it.
     pub amplitude: f32,
+    /// The gait bridge's bias as it stands, radians: state, hashed, eased the same way.
+    pub bias: f32,
+    /// The joint targets last driven, `segment_count - 1` meaningful: state, hashed - the
+    /// motors hold them between one drive and the next.
+    pub targets: [f32; TRAILING_SEGMENTS_MAX],
     /// The trailing segments' poses, `segment_count - 1` meaningful, the rest zero - the wire's
-    /// own rule, kept here so the row is a copy and nothing else.
+    /// own rule, kept here so the row is a copy and nothing else. Derived from `segments`.
     pub poses: [SegmentPose; TRAILING_SEGMENTS_MAX],
-    /// How far along the floor each trailing segment was dragged by the last `advance`, metres,
-    /// `segment_count - 1` meaningful - derived from the poses before and after, so not state,
-    /// but kept beside them because the scrape is sounded from it.
+    /// How far along the floor each trailing segment moved in the last step, metres,
+    /// `segment_count - 1` meaningful - derived, kept beside the poses because the scrape is
+    /// sounded from it.
     pub drags: [f32; TRAILING_SEGMENTS_MAX],
 }
 
 impl Chain {
-    /// A single body: no trail, no poses.
+    /// A single body: no joints, no trail, nothing to step.
     #[must_use]
     pub fn single() -> Chain {
         Chain {
             segment_count: 1,
             spacing: 0.0,
-            ring: Vec::new(),
-            newest: 0,
+            segments: [Segment::default(); SEGMENTS_MAX as usize],
+            phase: 0.0,
             amplitude: 0.0,
+            bias: 0.0,
+            targets: [0.0; TRAILING_SEGMENTS_MAX],
             poses: [SegmentPose::default(); TRAILING_SEGMENTS_MAX],
             drags: [0.0; TRAILING_SEGMENTS_MAX],
         }
     }
 
-    /// A chain of `segment_count` segments `spacing` apart behind a head standing at `head`,
-    /// its path seeded straight back the way the head faces, so the trail is well-defined from
-    /// its first tick. `segment_count` is the roster's to judge; here it is clamped to the wire's
-    /// cap only so that a hostile count can never index past the poses.
+    /// A chain of `segment_count` segments `spacing` apart lying straight behind a head standing
+    /// at `head`, at rest. `segment_count` is 1..=8 and `spacing` positive for a chain - the
+    /// validator's business - and a count of one is a single body whatever the spacing.
     #[must_use]
     pub fn new(segment_count: u32, spacing: f32, head: PathSample) -> Chain {
-        let segment_count = segment_count.clamp(1, SEGMENTS_MAX);
-        if segment_count == 1 {
+        if segment_count <= 1 {
             return Chain::single();
         }
-        let step = spacing / SAMPLES_PER_SPACING;
+        let count = segment_count.min(SEGMENTS_MAX) as usize;
         let back = backward_for(head.yaw);
-        let mut ring = Vec::with_capacity(RING);
-        // Oldest first: the sample farthest behind the head, then closer, the head's own last.
-        for index in (0..RING).rev() {
+        let mut segments = [Segment::default(); SEGMENTS_MAX as usize];
+        for (index, segment) in segments.iter_mut().enumerate().take(count) {
             #[allow(clippy::cast_precision_loss)]
-            let distance = index as f32 * step;
-            ring.push(Recorded {
-                pose: PathSample {
-                    position: [
-                        head.position[0] + back[0] * distance,
-                        head.position[1],
-                        head.position[2] + back[2] * distance,
-                    ],
-                    yaw: head.yaw,
-                },
-                travelled: -distance,
-            });
+            let distance = index as f32 * spacing;
+            *segment = Segment {
+                position: [
+                    head.position[0] + back[0] * distance,
+                    head.position[1],
+                    head.position[2] + back[2] * distance,
+                ],
+                yaw: head.yaw,
+                velocity: [0.0; 3],
+                yaw_rate: 0.0,
+            };
         }
         let mut chain = Chain {
-            segment_count,
+            segment_count: count as u32,
             spacing,
-            ring,
-            newest: RING - 1,
+            segments,
+            phase: 0.0,
             amplitude: 0.0,
+            bias: 0.0,
+            targets: [0.0; TRAILING_SEGMENTS_MAX],
             poses: [SegmentPose::default(); TRAILING_SEGMENTS_MAX],
             drags: [0.0; TRAILING_SEGMENTS_MAX],
         };
-        chain.place(head);
+        chain.tell_poses();
         chain
     }
 
-    /// Whether this chain has trailing segments at all.
+    /// Whether there is a trail behind the head at all.
     #[must_use]
     pub fn trails(&self) -> bool {
         self.segment_count > 1
     }
 
-    /// The path, oldest to newest - the logical order the hash walks, so the ring's own
-    /// bookkeeping (where `newest` happens to sit) is not state.
-    pub fn path(&self) -> impl Iterator<Item = &Recorded> {
-        let len = self.ring.len();
-        (0..len).map(move |offset| &self.ring[(self.newest + 1 + offset) % len])
+    /// The head as the chain holds it.
+    #[must_use]
+    pub fn head(&self) -> Segment {
+        self.segments[0]
     }
 
-    /// The head settled this tick, moving at `speed_fraction` of its top speed: record it if it
-    /// moved a sample's worth, let the wave's amplitude follow the speed, place the trail, and
-    /// note how far each segment was dragged. A head standing still with the wave at rest
-    /// records nothing and its trail does not move.
-    pub fn advance(&mut self, head: PathSample, speed_fraction: f32) {
+    /// The head's pose and velocity as `physics.rs` settled them - against a riser, the air,
+    /// another body - written back so the chain and the head are one body. A head the world
+    /// moved pulls its chain after it within the tick, as a rigid joint does: the pivots are
+    /// swept again with the head pinned where the world put it, and what the trailing
+    /// segments moved to follow is added to their drags, because it is a slide across the
+    /// floor like any other.
+    pub fn set_head(&mut self, position: [f32; 3], yaw: f32, velocity: [f32; 3]) {
         if !self.trails() {
             return;
         }
-        let step = self.spacing / SAMPLES_PER_SPACING;
-        let last = self.ring[self.newest];
-        let moved = distance(&last.pose.position, &head.position);
-        if moved >= step {
-            self.newest = (self.newest + 1) % self.ring.len();
-            self.ring[self.newest] = Recorded {
-                pose: head,
-                travelled: last.travelled + moved,
-            };
-        }
-        let target = WAVE_AMPLITUDE_SPACINGS * self.spacing * speed_fraction.clamp(0.0, 1.0);
-        self.amplitude += (target - self.amplitude) * WAVE_RISE;
-        let before = self.poses;
-        self.place(head);
-        let trailing = (self.segment_count - 1) as usize;
-        for (slot, drag) in self.drags.iter_mut().enumerate() {
-            *drag = if slot < trailing {
-                horizontal_distance(&before[slot].position, &self.poses[slot].position)
-            } else {
-                0.0
-            };
+        let moved = {
+            let head = self.segments[0];
+            head.position != position || head.yaw != yaw
+        };
+        let head = &mut self.segments[0];
+        head.position = position;
+        head.yaw = yaw;
+        head.velocity = [velocity[0], 0.0, velocity[2]];
+        if moved {
+            self.settle();
         }
     }
 
-    /// The wave's lateral offset at an arc-length coordinate along the path: the amplitude
-    /// times a sine over the wavelength. Fixed to the path, not to time - a segment slides
-    /// through the wave as the body advances, the way a real undulator follows its own track.
-    fn wave_at(&self, travelled: f32) -> f32 {
-        if self.amplitude == 0.0 {
-            return 0.0;
-        }
-        let wavelength = WAVE_LENGTH_SPACINGS * self.spacing;
-        self.amplitude * trig::sin(std::f32::consts::TAU * travelled / wavelength)
-    }
-
-    /// Where a recorded sample lies with the wave laid over it: pushed to its right by the wave
-    /// there less the wave under the head, so the head itself is never moved - the head is
-    /// physics' truth, the wave is the trail's.
-    fn laid(&self, recorded: &Recorded, head_wave: f32) -> [f32; 3] {
-        let offset = self.wave_at(recorded.travelled) - head_wave;
-        let right = right_for(recorded.pose.yaw);
-        [
-            recorded.pose.position[0] + right[0] * offset,
-            recorded.pose.position[1],
-            recorded.pose.position[2] + right[2] * offset,
-        ]
-    }
-
-    /// Every trailing segment as one rigid rod of the chain: nose tip to tail tip is exactly
-    /// the spacing, and consecutive rods share a tip - a pivot the chain bends around. (The
-    /// owner's report, 2026-08-28: placed by arc length and faced along the local tangent, two
-    /// neighbours' tips met only on a dead-straight run.) The walk starts at the head's own tail
-    /// tip, half a spacing behind its origin, and hops back through the recorded samples with
-    /// the wave laid over them, newest first, until the wavy path stands a whole spacing from
-    /// the last pivot in a straight line: that point is the next pivot. A segment stands at the
-    /// midpoint of its two pivots and faces from the rear one to the front one. The pivots lie
-    /// on the wavy path; the origins sit a little inside its bends, as a chain of rods laid on
-    /// a curve does.
-    fn place(&mut self, head: PathSample) {
-        let len = self.ring.len();
-        let newest = self.ring[self.newest];
-        let head_travelled = newest.travelled + distance(&newest.pose.position, &head.position);
-        let head_wave = self.wave_at(head_travelled);
-        let mut poses = [SegmentPose::default(); TRAILING_SEGMENTS_MAX];
-        let trailing = (self.segment_count - 1) as usize;
+    /// The trailing segments carried after a head the world moved: with the head pinned the
+    /// answer is exact in one pass, head to tail - each segment is carried by its nose to the
+    /// pivot before it, its heading kept, as rods hooked at their tips follow a pulled first
+    /// rod. Heights follow the head's, as in `step`; what each segment moved is added to its
+    /// drag.
+    fn settle(&mut self) {
+        let count = self.segment_count as usize;
         let half = 0.5 * self.spacing;
-        let head_back = backward_for(head.yaw);
-        let mut pivot = [
-            head.position[0] + head_back[0] * half,
-            head.position[1],
-            head.position[2] + head_back[2] * half,
-        ];
-        // Where the walk stands on the path - the point walked from, the sample walked to, the
-        // hops taken - carries from rod to rod, because each rod's tail tip is the next one's
-        // nose tip.
-        let mut from = head.position;
-        let mut from_yaw = head.yaw;
-        let mut cursor = self.newest;
-        let mut hops = 0usize;
-        for pose in poses.iter_mut().take(trailing) {
-            let mut rear = None;
-            while hops < len {
-                let recorded = self.ring[cursor];
-                let to = self.laid(&recorded, head_wave);
-                if let Some(point) = rod_end(&pivot, &from, &to, self.spacing) {
-                    rear = Some(point);
-                    // The walk goes on from this pivot, on this same hop.
-                    from = point;
-                    break;
-                }
-                from = to;
-                from_yaw = recorded.pose.yaw;
-                cursor = (cursor + len - 1) % len;
-                hops += 1;
-            }
-            let rear = rear.unwrap_or_else(|| {
-                // The ring ran out - it never does, the seed fills it and the ring is longer
-                // than the trail - and the honest fallback is straight back from the last
-                // pivot along the last facing, so a pose is always a place, never a zero.
-                let back = backward_for(from_yaw);
-                [
-                    pivot[0] + back[0] * self.spacing,
-                    pivot[1],
-                    pivot[2] + back[2] * self.spacing,
-                ]
-            });
-            *pose = SegmentPose {
-                position: [
-                    0.5 * (pivot[0] + rear[0]),
-                    0.5 * (pivot[1] + rear[1]),
-                    0.5 * (pivot[2] + rear[2]),
-                ],
-                yaw: yaw_along(&rear, &pivot, from_yaw),
-            };
-            pivot = rear;
+        let head_height = self.segments[0].position[1];
+        for index in 1..count {
+            let ahead = self.segments[index - 1];
+            let back = backward_for(ahead.yaw);
+            let pivot = [
+                ahead.position[0] + back[0] * half,
+                ahead.position[2] + back[2] * half,
+            ];
+            let segment = &mut self.segments[index];
+            let forward = forward_for(segment.yaw);
+            let nose = [
+                segment.position[0] + forward[0] * half,
+                segment.position[2] + forward[2] * half,
+            ];
+            let dx = pivot[0] - nose[0];
+            let dz = pivot[1] - nose[1];
+            segment.position[0] += dx;
+            segment.position[2] += dz;
+            segment.position[1] = head_height;
+            self.drags[index - 1] += (dx * dx + dz * dz).sqrt();
         }
-        self.poses = poses;
+        self.tell_poses();
+    }
+
+    /// The gait bridge: the speed and turn the wire carries, as fractions of the body's bounds
+    /// in [-1, 1], become a travelling wave of joint targets. The wave's frequency is the speed
+    /// command over the wave's length, so its phase speed is at most the declared top speed and
+    /// a body pushing against it can never outrun its own bound; a negative speed runs the wave
+    /// the other way, and the worm backs up. The turn bends every joint the same way, a bias on
+    /// the wave. The phase is state.
+    pub fn gait(&mut self, forward_fraction: f32, turn_fraction: f32, top_speed: f32) -> Drive {
+        let mut drive = Drive::default();
+        if !self.trails() {
+            return drive;
+        }
+        let wavelength = GAIT_WAVELENGTH_SEGMENTS * self.spacing;
+        let frequency = if wavelength > 0.0 {
+            forward_fraction.clamp(-1.0, 1.0) * top_speed / wavelength
+        } else {
+            0.0
+        };
+        self.phase = (self.phase + std::f32::consts::TAU * frequency * TICK_SECONDS)
+            .rem_euclid(std::f32::consts::TAU);
+        let wanted = GAIT_AMPLITUDE * forward_fraction.clamp(-1.0, 1.0).abs();
+        self.amplitude += (wanted - self.amplitude) * GAIT_RISE;
+        let wanted_bias = turn_fraction.clamp(-1.0, 1.0) * GAIT_BIAS;
+        self.bias += (wanted_bias - self.bias) * GAIT_RISE;
+        let bias = self.bias;
+        let joints = (self.segment_count - 1) as usize;
+        for (joint, target) in drive.targets.iter_mut().enumerate().take(joints) {
+            #[allow(clippy::cast_precision_loss)]
+            let lag = joint as f32 * std::f32::consts::TAU / GAIT_WAVELENGTH_SEGMENTS;
+            *target = self.amplitude * trig::sin(self.phase - lag) + bias;
+        }
+        drive
+    }
+
+    /// One tick of the articulated body: the motors driven to `drive`, the pivots held, every
+    /// segment's spikes rubbing on its own floor. `standing` is how high a segment's origin
+    /// stands over its floor - the head's, shared by the chain. The head's result is read by
+    /// `physics.rs`, which meets the risers and the air with it and writes back what it settled.
+    pub fn step(&mut self, drive: &Drive, ground: impl Fn(f32, f32) -> f32, standing: f32) {
+        if !self.trails() {
+            return;
+        }
+        let count = self.segment_count as usize;
+        let joints = count - 1;
+        self.targets = drive.targets;
+
+        let before = self.segments;
+        let half = 0.5 * self.spacing;
+        let inverse_mass = 1.0 / BODY_MASS_KG;
+        let inverse_inertia = 1.0 / SEGMENT_INERTIA;
+        #[allow(clippy::cast_precision_loss)]
+        let h = TICK_SECONDS / SUBSTEPS as f32;
+        let compliance = MOTOR_COMPLIANCE / (h * h);
+        let cap_along = FRICTION_ALONG * GRAVITY * h;
+        let cap_across = FRICTION_ACROSS * GRAVITY * h;
+        let cap_spin = FRICTION_SPIN * GRAVITY * h / BODY_CIRCUMRADIUS_FOR_INERTIA;
+
+        for _ in 0..SUBSTEPS {
+            let previous = self.segments;
+
+            // Predict: every segment carries on as it was moving.
+            for segment in self.segments.iter_mut().take(count) {
+                segment.position[0] += segment.velocity[0] * h;
+                segment.position[2] += segment.velocity[2] * h;
+                segment.yaw += segment.yaw_rate * h;
+            }
+
+            // Solve: the pivots and the motors, joint by joint, sweep after sweep, in one order.
+            for _ in 0..ITERATIONS {
+                // The motors first, then the pivots: a motor turns a segment and moves its tips,
+                // so the pivots must have the last word in every sweep.
+                for joint in 0..joints {
+                    drive_motor(
+                        &mut self.segments,
+                        joint,
+                        self.targets[joint],
+                        inverse_inertia,
+                        compliance,
+                    );
+                }
+                for joint in 0..joints {
+                    hold_pivot(
+                        &mut self.segments,
+                        joint,
+                        half,
+                        inverse_mass,
+                        inverse_inertia,
+                    );
+                }
+            }
+
+            // Velocities are what the positions did.
+            for (segment, was) in self.segments.iter_mut().zip(previous.iter()).take(count) {
+                segment.velocity = [
+                    (segment.position[0] - was.position[0]) / h,
+                    0.0,
+                    (segment.position[2] - was.position[2]) / h,
+                ];
+                segment.yaw_rate = (segment.yaw - was.yaw) / h;
+            }
+
+            // Friction: each segment's velocity in its own frame, along its axis and across it,
+            // each component losing what Coulomb allows this substep - the spikes' answer to the
+            // push.
+            for segment in self.segments.iter_mut().take(count) {
+                let forward = forward_for(segment.yaw);
+                let right = right_for(segment.yaw);
+                let along = segment.velocity[0] * forward[0] + segment.velocity[2] * forward[2];
+                let across = segment.velocity[0] * right[0] + segment.velocity[2] * right[2];
+                let along = rubbed(along, cap_along);
+                let across = rubbed(across, cap_across);
+                segment.velocity = [
+                    forward[0] * along + right[0] * across,
+                    0.0,
+                    forward[2] * along + right[2] * across,
+                ];
+                segment.yaw_rate = rubbed(segment.yaw_rate, cap_spin);
+            }
+        }
+
+        // Heights from the floor, the drags from the moves, the poses for the wire.
+        for (index, (segment, was)) in self
+            .segments
+            .iter_mut()
+            .zip(before.iter())
+            .enumerate()
+            .take(count)
+        {
+            segment.position[1] = ground(segment.position[0], segment.position[2]) + standing;
+            if index >= 1 {
+                let dx = segment.position[0] - was.position[0];
+                let dz = segment.position[2] - was.position[2];
+                self.drags[index - 1] = (dx * dx + dz * dz).sqrt();
+            }
+        }
+        self.tell_poses();
+    }
+
+    /// The world-space joint tips: for a chain of n, n - 1 points, tip `k` where segment `k`'s
+    /// tail meets segment `k + 1`'s nose - each the mean of the two ends the constraint holds
+    /// together. For the tests and the record.
+    #[must_use]
+    pub fn pivots(&self) -> [[f32; 3]; TRAILING_SEGMENTS_MAX] {
+        let mut pivots = [[0.0; 3]; TRAILING_SEGMENTS_MAX];
+        let half = 0.5 * self.spacing;
+        let joints = self.segment_count.saturating_sub(1) as usize;
+        for (joint, pivot) in pivots.iter_mut().enumerate().take(joints) {
+            let a = self.segments[joint];
+            let b = self.segments[joint + 1];
+            let back = backward_for(a.yaw);
+            let forward = forward_for(b.yaw);
+            *pivot = [
+                0.5 * ((a.position[0] + back[0] * half) + (b.position[0] + forward[0] * half)),
+                0.5 * (a.position[1] + b.position[1]),
+                0.5 * ((a.position[2] + back[2] * half) + (b.position[2] + forward[2] * half)),
+            ];
+        }
+        pivots
+    }
+
+    /// How far apart the two ends of joint `k` stand - zero when the constraint is met.
+    #[must_use]
+    pub fn joint_gap(&self, joint: usize) -> f32 {
+        let half = 0.5 * self.spacing;
+        let a = self.segments[joint];
+        let b = self.segments[joint + 1];
+        let back = backward_for(a.yaw);
+        let forward = forward_for(b.yaw);
+        let dx = (a.position[0] + back[0] * half) - (b.position[0] + forward[0] * half);
+        let dz = (a.position[2] + back[2] * half) - (b.position[2] + forward[2] * half);
+        (dx * dx + dz * dz).sqrt()
+    }
+
+    /// The angle joint `k` holds: the yaw of segment `k + 1` less that of segment `k`.
+    #[must_use]
+    pub fn joint_angle(&self, joint: usize) -> f32 {
+        self.segments[joint + 1].yaw - self.segments[joint].yaw
+    }
+
+    fn tell_poses(&mut self) {
+        let count = self.segment_count as usize;
+        for (slot, pose) in self.poses.iter_mut().enumerate() {
+            *pose = if slot + 1 < count {
+                let segment = self.segments[slot + 1];
+                SegmentPose {
+                    position: segment.position,
+                    yaw: segment.yaw,
+                }
+            } else {
+                SegmentPose::default()
+            };
+        }
     }
 }
 
-/// The direction a head faces, the roster's convention: -Z at rest, positive yaw turns left.
+/// The pivot between segments `k` and `k + 1`: the tail tip of the one and the nose tip of the
+/// other are one point. A position constraint on two rigid bodies, solved for positions and
+/// yaws together with each body's inverse mass and inverse inertia, as XPBD does.
+fn hold_pivot(
+    segments: &mut [Segment],
+    joint: usize,
+    half: f32,
+    inverse_mass: f32,
+    inverse_inertia: f32,
+) {
+    let (a, b) = (segments[joint], segments[joint + 1]);
+    let back = backward_for(a.yaw);
+    let forward = forward_for(b.yaw);
+    // Each tip's offset from its body's origin, world frame, in the plane.
+    let ra = [back[0] * half, back[2] * half];
+    let rb = [forward[0] * half, forward[2] * half];
+    let dx = (a.position[0] + ra[0]) - (b.position[0] + rb[0]);
+    let dz = (a.position[2] + ra[1]) - (b.position[2] + rb[1]);
+    let gap = (dx * dx + dz * dz).sqrt();
+    if gap <= 0.0 {
+        return;
+    }
+    let n = [dx / gap, dz / gap];
+    // How a turn of each body moves its tip along the gap: the tip's perpendicular, projected.
+    let ka = n[0] * ra[1] - n[1] * ra[0];
+    let kb = n[0] * rb[1] - n[1] * rb[0];
+    let w = inverse_mass + ka * ka * inverse_inertia + inverse_mass + kb * kb * inverse_inertia;
+    let lambda = -gap / w;
+    let a = &mut segments[joint];
+    a.position[0] += n[0] * lambda * inverse_mass;
+    a.position[2] += n[1] * lambda * inverse_mass;
+    a.yaw += lambda * ka * inverse_inertia;
+    let b = &mut segments[joint + 1];
+    b.position[0] -= n[0] * lambda * inverse_mass;
+    b.position[2] -= n[1] * lambda * inverse_mass;
+    b.yaw -= lambda * kb * inverse_inertia;
+}
+
+/// The motor at joint `k`: the angle between the two segments driven to its target, a
+/// compliant angular constraint - the muscle.
+fn drive_motor(
+    segments: &mut [Segment],
+    joint: usize,
+    target: f32,
+    inverse_inertia: f32,
+    compliance: f32,
+) {
+    let angle = segments[joint + 1].yaw - segments[joint].yaw;
+    let error = angle - target;
+    let w = inverse_inertia + inverse_inertia + compliance;
+    let lambda = -error / w;
+    segments[joint].yaw -= lambda * inverse_inertia;
+    segments[joint + 1].yaw += lambda * inverse_inertia;
+}
+
+/// A speed less what friction takes of it this tick: to zero if the cap covers it, else the
+/// cap off it, sign kept.
+fn rubbed(speed: f32, cap: f32) -> f32 {
+    if speed > cap {
+        speed - cap
+    } else if speed < -cap {
+        speed + cap
+    } else {
+        0.0
+    }
+}
+
+/// The direction a segment faces, the roster's convention: -Z at rest, positive yaw turns left.
 fn forward_for(yaw: f32) -> [f32; 3] {
     let (sin, cos) = trig::sin_cos(yaw);
     [-sin, 0.0, -cos]
@@ -309,59 +542,10 @@ fn backward_for(yaw: f32) -> [f32; 3] {
     [-forward[0], 0.0, -forward[2]]
 }
 
-/// The head's right hand: +X when facing -Z, turning with the yaw.
+/// A segment's right hand: +X when facing -Z, turning with the yaw.
 fn right_for(yaw: f32) -> [f32; 3] {
     let (sin, cos) = trig::sin_cos(yaw);
     [cos, 0.0, -sin]
-}
-
-fn distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
-    let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
-}
-
-/// The distance along the floor, the height ignored: what a drag across the Grid is.
-fn horizontal_distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
-    let dx = a[0] - b[0];
-    let dz = a[2] - b[2];
-    (dx * dx + dz * dz).sqrt()
-}
-
-/// The first point of the hop from `from` to `to`, walking from `from`, that stands exactly
-/// `rod` away from `pivot` - where a rod of that length pinned at the pivot meets the path -
-/// or none if the hop never gets that far. The larger root of the quadratic is the exit from
-/// the sphere around the pivot, which is the crossing a walk that starts inside it makes.
-fn rod_end(pivot: &[f32; 3], from: &[f32; 3], to: &[f32; 3], rod: f32) -> Option<[f32; 3]> {
-    let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
-    let f = [from[0] - pivot[0], from[1] - pivot[1], from[2] - pivot[2]];
-    let a = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-    if a <= 0.0 {
-        return None;
-    }
-    let b = 2.0 * (f[0] * d[0] + f[1] * d[1] + f[2] * d[2]);
-    let c = f[0] * f[0] + f[1] * f[1] + f[2] * f[2] - rod * rod;
-    let discriminant = b * b - 4.0 * a * c;
-    if discriminant < 0.0 {
-        return None;
-    }
-    let t = (-b + discriminant.sqrt()) / (2.0 * a);
-    if !(0.0..=1.0).contains(&t) {
-        return None;
-    }
-    Some([from[0] + d[0] * t, from[1] + d[1] * t, from[2] + d[2] * t])
-}
-
-/// The yaw of the path running from `older` to `newer` - the way a segment on that hop faces.
-/// A hop with no horizontal length keeps the facing it was given.
-fn yaw_along(older: &[f32; 3], newer: &[f32; 3], fallback: f32) -> f32 {
-    let dx = newer[0] - older[0];
-    let dz = newer[2] - older[2];
-    if dx == 0.0 && dz == 0.0 {
-        fallback
-    } else {
-        // forward = (-sin yaw, -cos yaw): yaw = atan2(-dx, -dz).
-        trig::atan2(-dx, -dz)
-    }
 }
 
 #[cfg(test)]
@@ -376,39 +560,21 @@ mod tests {
         }
     }
 
-    #[test]
-    fn consecutive_segments_share_a_tip_wherever_the_path_bends() {
-        // The head swims a tight half circle of radius one metre to its left at full speed, so
-        // the wave swells and the trail bends hard both ways. The owner's report (2026-08-28):
-        // the neighbours' tips were not touching. Every rod's tail tip is the next rod's nose
-        // tip - one point, a pivot - wherever the path bends.
-        let spacing = 0.56f32;
-        let half = 0.5 * spacing;
-        let mut chain = Chain::new(8, spacing, head_at(0.0, 0.0, 0.0));
-        let radius = 1.0f32;
-        let steps = 800;
-        let mut head = head_at(0.0, 0.0, 0.0);
-        for step in 1..=steps {
-            #[allow(clippy::cast_precision_loss)]
-            let angle = (step as f32 / steps as f32) * std::f32::consts::PI;
-            head = head_at(-radius + radius * angle.cos(), -radius * angle.sin(), angle);
-            chain.advance(head, 1.0);
+    fn flat(_x: f32, _z: f32) -> f32 {
+        0.0
+    }
+
+    fn centre_of_mass(chain: &Chain) -> [f32; 2] {
+        let count = chain.segment_count as usize;
+        let mut x = 0.0;
+        let mut z = 0.0;
+        for segment in chain.segments.iter().take(count) {
+            x += segment.position[0];
+            z += segment.position[2];
         }
-        let tip = |position: &[f32; 3], yaw: f32, sign: f32| {
-            let forward = forward_for(yaw);
-            [
-                position[0] + forward[0] * half * sign,
-                position[1],
-                position[2] + forward[2] * half * sign,
-            ]
-        };
-        let mut front = tip(&head.position, head.yaw, -1.0);
-        for (slot, pose) in chain.poses.iter().enumerate().take(7) {
-            let nose = tip(&pose.position, pose.yaw, 1.0);
-            let gap = distance(&front, &nose);
-            assert!(gap < 1e-3, "slot {slot}: the tips miss by {gap} m");
-            front = tip(&pose.position, pose.yaw, -1.0);
-        }
+        #[allow(clippy::cast_precision_loss)]
+        let n = count as f32;
+        [x / n, z / n]
     }
 
     #[test]
@@ -419,184 +585,186 @@ mod tests {
             single.poses,
             [SegmentPose::default(); TRAILING_SEGMENTS_MAX]
         );
-        assert_eq!(single.path().count(), 0);
 
-        // Facing -Z at the origin: the trail lies along +Z, one spacing apart, facing -Z too.
-        let chain = Chain::new(4, 0.5, head_at(0.0, 0.0, 0.0));
+        let chain = Chain::new(4, 0.5, head_at(1.0, -2.0, 0.0));
         assert!(chain.trails());
-        assert_eq!(chain.path().count(), RING);
         for (slot, pose) in chain.poses.iter().enumerate().take(3) {
             #[allow(clippy::cast_precision_loss)]
-            let expected_z = 0.5 * (slot as f32 + 1.0);
-            assert!((pose.position[0]).abs() < 1e-5, "slot {slot}: {pose:?}");
+            let expected = -2.0 + 0.5 * (slot as f32 + 1.0);
+            assert!((pose.position[0] - 1.0).abs() < 1e-6);
             assert!(
-                (pose.position[2] - expected_z).abs() < 1e-5,
+                (pose.position[2] - expected).abs() < 1e-6,
                 "slot {slot}: {pose:?}"
             );
-            assert!((pose.position[1] - 0.25).abs() < 1e-6);
-            assert!(pose.yaw.abs() < 1e-6);
+            assert_eq!(pose.yaw, 0.0);
         }
-        // The slots beyond the chain are zero: the wire's rule, kept at the source.
-        for pose in &chain.poses[3..] {
-            assert_eq!(*pose, SegmentPose::default());
+        assert_eq!(chain.poses[3], SegmentPose::default());
+        for joint in 0..3 {
+            assert!(chain.joint_gap(joint) < 1e-6);
         }
     }
 
     #[test]
-    fn the_trail_follows_the_path_the_head_walked_and_faces_along_it() {
-        // The head walks a quarter circle of radius two metres to its left, a centimetre a step.
-        let radius = 2.0f32;
-        let mut chain = Chain::new(3, 0.5, head_at(0.0, 0.0, 0.0));
-        let steps = 400;
-        for step in 1..=steps {
-            #[allow(clippy::cast_precision_loss)]
-            let angle = (step as f32 / steps as f32) * std::f32::consts::FRAC_PI_2;
-            // Centre at (-r, 0): start (0,0) facing -Z, turning left.
-            let x = -radius + radius * angle.cos();
-            let z = -radius * angle.sin();
-            chain.advance(head_at(x, z, angle), 0.0);
+    fn a_chain_at_rest_stays_where_it_stands_and_its_joints_hold() {
+        let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.3));
+        let start = chain.segments;
+        for _ in 0..64 {
+            let drive = Drive::default();
+            chain.step(&drive, flat, 0.25);
         }
-        // Every trailing segment stands on the circle, behind the head by its arc length.
-        for (slot, pose) in chain.poses.iter().enumerate().take(2) {
-            let from_centre =
-                ((pose.position[0] + radius).powi(2) + pose.position[2].powi(2)).sqrt();
-            assert!(
-                (from_centre - radius).abs() < 0.02,
-                "slot {slot} off the circle: {pose:?}"
-            );
-            #[allow(clippy::cast_precision_loss)]
-            let arc_back = 0.5 * (slot as f32 + 1.0);
-            let head_angle = std::f32::consts::FRAC_PI_2;
-            let expected_angle = head_angle - arc_back / radius;
-            let angle = (-pose.position[2]).atan2(pose.position[0] + radius);
-            assert!(
-                (angle - expected_angle).abs() < 0.03,
-                "slot {slot} not its arc back: {angle} vs {expected_angle}"
-            );
-            // Facing along the path: the tangent's yaw at that angle.
-            assert!(
-                (pose.yaw - expected_angle).abs() < 0.05,
-                "slot {slot} faces {} not {expected_angle}",
-                pose.yaw
-            );
-        }
-        // Standing still records nothing and moves nothing; a nudge too small to record still
-        // moves the trail by exactly that nudge, because the walk starts at the head itself.
-        let before = chain.poses;
-        let last = chain.path().last().expect("a path").pose;
-        chain.advance(last, 0.0);
-        assert_eq!(chain.poses, before);
-        assert!(
-            chain.drags.iter().all(|drag| *drag == 0.0),
-            "nothing dragged"
-        );
-        chain.advance(
-            PathSample {
-                position: [last.position[0] + 1e-4, last.position[1], last.position[2]],
-                ..last
-            },
-            0.0,
-        );
-        assert_eq!(chain.path().count(), RING, "nothing was recorded");
-        for (pose, was) in chain.poses.iter().zip(before.iter()).take(2) {
-            let moved = ((pose.position[0] - was.position[0]).powi(2)
-                + (pose.position[2] - was.position[2]).powi(2))
+        for (index, (now, was)) in chain.segments.iter().zip(start.iter()).enumerate().take(8) {
+            let moved = ((now.position[0] - was.position[0]).powi(2)
+                + (now.position[2] - was.position[2]).powi(2))
             .sqrt();
+            assert!(moved < 1e-4, "segment {index} moved {moved} m at rest");
             assert!(
-                moved <= 2e-4,
-                "the trail moved {moved}, more than the nudge"
+                (now.yaw - was.yaw).abs() < 1e-4,
+                "segment {index} turned at rest"
+            );
+        }
+        for joint in 0..7 {
+            assert!(
+                chain.joint_gap(joint) < 1e-4,
+                "joint {joint} gap {}",
+                chain.joint_gap(joint)
             );
         }
     }
 
     #[test]
-    fn the_same_walk_places_the_same_trail_bit_for_bit() {
-        let walk = || {
-            let mut chain = Chain::new(8, 0.3, head_at(1.5, 4.5, 0.0));
-            for step in 0..300 {
+    fn the_motors_bend_the_chain_to_its_targets_and_the_pivots_hold_while_it_bends() {
+        let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        let mut drive = Drive::default();
+        for (joint, target) in drive.targets.iter_mut().enumerate().take(7) {
+            #[allow(clippy::cast_precision_loss)]
+            let sign = if joint % 2 == 0 { 1.0 } else { -1.0 };
+            *target = 0.5 * sign;
+        }
+        for _ in 0..96 {
+            chain.step(&drive, flat, 0.25);
+            for joint in 0..7 {
+                let gap = chain.joint_gap(joint);
+                assert!(gap < 2e-3, "joint {joint} gap {gap} m while bending");
+            }
+        }
+        for joint in 0..7 {
+            let angle = chain.joint_angle(joint);
+            assert!(
+                (angle - drive.targets[joint]).abs() < 0.02,
+                "joint {joint} holds {angle} not {}",
+                drive.targets[joint]
+            );
+        }
+    }
+
+    #[test]
+    fn the_gait_is_a_travelling_wave_bounded_by_the_top_speed() {
+        let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        // Full speed ahead: the frequency is the top speed over the wavelength.
+        let wavelength = GAIT_WAVELENGTH_SEGMENTS * 0.56;
+        let expected_advance = std::f32::consts::TAU * (1.0 / wavelength) * TICK_SECONDS;
+        let first = chain.gait(1.0, 0.0, 1.0);
+        assert!((chain.phase - expected_advance).abs() < 1e-6);
+        let second = chain.gait(1.0, 0.0, 1.0);
+        // The amplitude swells from rest a share at a time rather than snapping to full.
+        assert!(
+            (chain.amplitude - GAIT_AMPLITUDE * (1.0 - (1.0 - GAIT_RISE) * (1.0 - GAIT_RISE)))
+                .abs()
+                < 1e-6
+        );
+        assert!(first.targets[0].abs() <= GAIT_AMPLITUDE + 1e-6);
+        assert_ne!(first.targets, second.targets);
+        // At rest the wave relaxes: a chain never asked to move holds every joint straight.
+        let mut resting = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        let relaxed = resting.gait(0.0, 0.0, 1.0);
+        assert_eq!(relaxed.targets, [0.0; TRAILING_SEGMENTS_MAX]);
+        // A turn biases every joint the same way; the bias is bounded.
+        let mut turning = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        let straight = turning.gait(0.0, 0.0, 1.0);
+        let mut turning_left = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        let left = turning_left.gait(0.0, 1.0, 1.0);
+        // Eased: one tick in, the bias is a share of the way to the command's.
+        for joint in 0..7 {
+            assert!(
+                (left.targets[joint] - straight.targets[joint] - GAIT_BIAS * GAIT_RISE).abs()
+                    < 1e-6
+            );
+        }
+        // Reverse runs the wave the other way.
+        let mut reversing = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        reversing.gait(-1.0, 0.0, 1.0);
+        assert!(
+            reversing.phase > std::f32::consts::PI,
+            "phase {} did not run backwards",
+            reversing.phase
+        );
+    }
+
+    #[test]
+    fn under_isotropic_friction_a_travelling_wave_goes_nowhere_much() {
+        // The undulator wriggles in place: with nothing it can push against sideways that it
+        // cannot equally slide along, the wave's pushes cancel. The next movement's anisotropy
+        // is what turns this into propulsion, and its test is this one's mirror.
+        let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        let start = centre_of_mass(&chain);
+        for _ in 0..(32 * 10) {
+            let drive = chain.gait(1.0, 0.0, 1.0);
+            chain.step(&drive, flat, 0.25);
+            for joint in 0..7 {
+                assert!(
+                    chain.joint_gap(joint) < 2e-3,
+                    "joint {joint} gap {}",
+                    chain.joint_gap(joint)
+                );
+            }
+        }
+        let end = centre_of_mass(&chain);
+        let travelled = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
+        assert!(
+            travelled < 0.3,
+            "an isotropic wriggle travelled {travelled} m in ten seconds"
+        );
+    }
+
+    #[test]
+    fn a_head_the_world_moved_pulls_its_chain_after_it_within_the_tick() {
+        // A wall stopped the head, or a neighbour shoved it: physics.rs writes the settled
+        // head back, and the joints must hold at once - a rigid joint does not lag a tick.
+        let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        let head = chain.head();
+        chain.set_head(
+            [
+                head.position[0] + 0.05,
+                head.position[1],
+                head.position[2] - 0.03,
+            ],
+            head.yaw + 0.2,
+            [0.0; 3],
+        );
+        for joint in 0..7 {
+            let gap = chain.joint_gap(joint);
+            assert!(
+                gap < 1e-5,
+                "joint {joint} gap {gap} m after the head was moved"
+            );
+        }
+        // The head stayed where the world put it, and the trail slid to follow.
+        assert_eq!(chain.head().position[0], 0.05);
+        assert!(chain.drags[0] > 0.0, "the first segment slid to follow");
+    }
+
+    #[test]
+    fn the_same_walk_steps_the_same_chain_bit_for_bit() {
+        let run = || {
+            let mut chain = Chain::new(8, 0.56, head_at(0.5, -1.0, 0.7));
+            for tick in 0..200u32 {
                 #[allow(clippy::cast_precision_loss)]
-                let t = step as f32 * 0.02;
-                chain.advance(head_at(1.5 + t.sin(), 4.5 - t, 0.4 * t.cos()), 0.7);
+                let turn = ((tick % 40) as f32 / 40.0) - 0.5;
+                let drive = chain.gait(0.8, turn, 1.0);
+                chain.step(&drive, |x, z| 0.01 * (x + z), 0.25);
             }
             chain
         };
-        assert_eq!(walk(), walk());
-    }
-
-    #[test]
-    fn the_trail_undulates_with_speed_and_lies_straight_again_at_rest() {
-        // Eight segments half a metre apart, walked straight down -Z a centimetre a step at top
-        // speed: the wave swells, the trail leaves the line, and no joint stretches.
-        let spacing = 0.5f32;
-        let amplitude = WAVE_AMPLITUDE_SPACINGS * spacing;
-        let mut chain = Chain::new(8, spacing, head_at(0.0, 0.0, 0.0));
-        let mut widest = 0.0f32;
-        for step in 1..=600 {
-            #[allow(clippy::cast_precision_loss)]
-            let z = -0.01 * step as f32;
-            chain.advance(head_at(0.0, z, 0.0), 1.0);
-            let mut previous = [0.0, 0.25, z];
-            for (slot, pose) in chain.poses.iter().enumerate().take(7) {
-                widest = widest.max(pose.position[0].abs());
-                // Never further from the line than the wave can push it: its own wave less the
-                // head's, each within the amplitude.
-                assert!(
-                    pose.position[0].abs() <= 2.0 * amplitude + 1e-4,
-                    "step {step} slot {slot} beyond the wave: {pose:?}"
-                );
-                // Joined: the chord from the one before never exceeds the spacing.
-                let chord = distance(&previous, &pose.position);
-                assert!(
-                    chord <= spacing + 1e-4,
-                    "step {step} slot {slot} chord {chord} over the spacing"
-                );
-                previous = pose.position;
-            }
-        }
-        assert!(
-            (chain.amplitude - amplitude).abs() < 1e-3,
-            "the amplitude reached the speed's: {}",
-            chain.amplitude
-        );
-        assert!(
-            widest > 0.5 * amplitude,
-            "the trail left the line: widest {widest}"
-        );
-        // Dragged: every trailing segment moved this tick, and more than the head's own step
-        // for some, because the wave carries them sideways as well as along.
-        assert!(
-            chain.drags.iter().take(7).all(|drag| *drag > 0.0),
-            "{:?}",
-            chain.drags
-        );
-        assert!(
-            chain.drags.iter().take(7).any(|drag| *drag > 0.0101),
-            "{:?}",
-            chain.drags
-        );
-        assert_eq!(chain.drags[7..], [0.0; TRAILING_SEGMENTS_MAX - 7]);
-
-        // At rest the wave subsides, the trail settles back onto the line, and the drags
-        // dwindle with it: a standing worm scrapes nothing.
-        let head = chain.path().last().expect("a path").pose;
-        for _ in 0..200 {
-            chain.advance(head, 0.0);
-        }
-        assert!(
-            chain.amplitude < 1e-6,
-            "the wave subsided: {}",
-            chain.amplitude
-        );
-        for (slot, pose) in chain.poses.iter().enumerate().take(7) {
-            assert!(
-                pose.position[0].abs() < 1e-4,
-                "slot {slot} still off the line: {pose:?}"
-            );
-        }
-        assert!(
-            chain.drags.iter().all(|drag| *drag < 1e-6),
-            "{:?}",
-            chain.drags
-        );
+        assert_eq!(run(), run());
     }
 }

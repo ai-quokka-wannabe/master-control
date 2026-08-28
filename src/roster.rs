@@ -1164,40 +1164,60 @@ mod tests {
                 Intent::default()
             }
         };
-        let mut walking = roster.step(2, walk);
-        for tick in 3..12 {
-            walking = roster.step(tick, walk);
+        // Walk: the gait swells over half a second and the body gets under way. Once it has,
+        // the head scratches as any body does and every trailing segment, pushed across the
+        // floor by the wave, scrapes - each of the three at least once over a second's walk,
+        // each sounded from the floor under the segment, at the segment's own place.
+        let mut tick = 2u64;
+        for _ in 0..32 {
+            roster.step(tick, walk);
+            tick += 1;
         }
-        let scrapes: Vec<&Event> = walking
-            .events
-            .iter()
-            .filter(|e| e.kind == EVENT_SCRATCH && e.creature_id == 7)
-            .collect();
+        let mut heard = [false; 4];
+        for _ in 0..32 {
+            let walking = roster.step(tick, walk);
+            tick += 1;
+            let body = &roster.resident(7).expect("7").body;
+            for scrape in walking
+                .events
+                .iter()
+                .filter(|e| e.kind == EVENT_SCRATCH && e.creature_id == 7)
+            {
+                assert!(
+                    scrape.strength > 0.0 && scrape.strength <= 1.0,
+                    "{scrape:?}"
+                );
+                let slot = body.chain.poses.iter().take(3).position(|pose| {
+                    pose.position[0] == scrape.position[0] && pose.position[2] == scrape.position[2]
+                });
+                match slot {
+                    Some(slot) => {
+                        let pose = body.chain.poses[slot];
+                        assert_eq!(
+                            scrape.position[1],
+                            crate::physics::floor(pose.position[0], pose.position[2])
+                        );
+                        heard[slot + 1] = true;
+                    }
+                    // Not a segment's place: the head's own scratch, from its contact.
+                    None => heard[0] = true,
+                }
+            }
+        }
+        // The three trailing segments each scraped. The head's own scratch is one contact's
+        // slip against that contact's share of the load, and under this movement's isotropic
+        // friction the head only wriggles - too slowly to sound on any one of a shaped body's
+        // resting vertices. The next movement, in which the worm moves, hears it again.
         assert_eq!(
-            scrapes.len(),
-            4,
-            "the head and three segments: {:?}",
-            walking.events
+            heard[1..],
+            [true; 3],
+            "the three segments each scraped: {heard:?}"
         );
-        let body = &roster.resident(7).expect("7").body;
-        for (slot, scrape) in scrapes.iter().skip(1).enumerate() {
-            assert!(
-                scrape.strength > 0.0 && scrape.strength <= 1.0,
-                "segment {}: {scrape:?}",
-                slot + 1
-            );
-            // Sounded from the floor under the segment, at the segment's own place.
-            let pose = body.chain.poses[slot];
-            assert_eq!(scrape.position[0], pose.position[0]);
-            assert_eq!(scrape.position[2], pose.position[2]);
-            assert_eq!(
-                scrape.position[1],
-                crate::physics::floor(pose.position[0], pose.position[2])
-            );
-        }
-        // Stop: the trail stands, the wave subsides, and within a second nothing scrapes.
-        let mut resting = roster.step(12, |_| Intent::default());
-        for tick in 13..60 {
+        // Stop: the wave relaxes, momentum is friction's within a few ticks, and within a
+        // second and a half nothing scrapes.
+        let mut resting = roster.step(tick, |_| Intent::default());
+        for _ in 0..47 {
+            tick += 1;
             resting = roster.step(tick, |_| Intent::default());
         }
         assert!(

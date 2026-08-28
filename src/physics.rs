@@ -43,6 +43,11 @@ pub const BODY_MASS_KG: f32 = 1.0;
 /// Half the body's height, metres: how far its origin stands above what it stands on.
 pub const BODY_HALF_HEIGHT: f32 = 0.05;
 
+/// The circumradius the chain's segments spin with - an icosahedron's, the first body's -
+/// for their moment of inertia. The hull is the truth of what touches; this is only how
+/// hard a segment is to twist.
+pub const BODY_CIRCUMRADIUS_FOR_INERTIA: f32 = 0.25;
+
 /// The floor every body walks - the world's own, never a stand-in.
 #[must_use]
 pub fn floor(x: f32, z: f32) -> f32 {
@@ -76,10 +81,12 @@ pub const BODY_HALF_LENGTH: f32 = 0.215;
 /// height. A terrace riser above this is a wall.
 pub const CLIMB_LIMIT_METRES: f32 = 0.1;
 
-/// Coulomb friction on every face but the floor's own traction: a body sliding along a riser
-/// or another body loses, along the face, as much speed as the coefficient says of what the
-/// face arrested - and keeps the rest, which is the slide. The floor keeps the actuators'
-/// traction: there the command is the velocity, as it has always been.
+/// Coulomb friction on every face: a body sliding along a riser or another body loses, along
+/// the face, as much speed as the coefficient says of what the face arrested - and keeps the
+/// rest, which is the slide. On the floor it is what a chain's segments rub with (chain.rs),
+/// and what an articulated body's undulation pushes against. A single body - one segment,
+/// no joints, nothing to undulate with - keeps the actuators' traction on the floor: there
+/// its command is its velocity, as it always was, because a lone icosahedron has no gait.
 pub const FRICTION: f32 = 0.5;
 
 /// A scratch quieter than this is not sounded - a threshold, not a rounding: the contact still
@@ -219,18 +226,13 @@ impl Body {
     }
 }
 
-/// The chain's step: the settled head recorded, the wave following the head's speed as a
-/// fraction of its top speed, the trail placed. After the pairs are stood apart and before the
-/// rows are told, so the path is the head's settled truth.
+/// After the pairs are stood apart and before the rows are told: the head's settled pose -
+/// the one the row carries and the hash covers - written back into the chain, so the chain
+/// and the head are one body. The chain itself stepped inside `step_body`, where the gait
+/// drives it; standing a pair apart moves only the head, and the next step's pivots take
+/// that difference up.
 pub fn advance_chain(body: &mut Body) {
-    let head = body.path_sample();
-    let speed = (body.velocity[0] * body.velocity[0] + body.velocity[2] * body.velocity[2]).sqrt();
-    let fraction = if body.bounds.max_forward_speed > 0.0 {
-        (speed / body.bounds.max_forward_speed).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    body.chain.advance(head, fraction);
+    body.chain.set_head(body.position, body.yaw, body.velocity);
 }
 
 /// The direction a body faces: -Z at rest, +Y up, right-handed, so positive yaw turns left.
@@ -318,9 +320,52 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
     let mut x = position_before[0];
     let mut z = position_before[2];
     let yaw_before = body.yaw;
-    let yaw_after = body.turn_rate.mul_add(DT, yaw_before);
+    let mut yaw_after = body.turn_rate.mul_add(DT, yaw_before);
+    // The head's planar velocity as the chain settled it, when there is a chain: what the
+    // floor contacts' slip and the row's velocity are made of.
+    let mut chain_velocity: Option<[f32; 3]> = None;
 
-    if body.grounded {
+    if body.grounded && body.chain.trails() {
+        // The articulated body (chain.rs, Etape 8): the intent is the gait - a travelling
+        // wave of joint targets, until the Program brings its own - and the head goes where
+        // the chain's push against the floor takes it. Nothing commands a velocity.
+        let forward_fraction = if body.bounds.max_forward_speed > 0.0 {
+            staged.forward_speed / body.bounds.max_forward_speed
+        } else {
+            0.0
+        };
+        let turn_fraction = if body.bounds.max_turn_rate > 0.0 {
+            staged.turn_rate / body.bounds.max_turn_rate
+        } else {
+            0.0
+        };
+        let drive = body.chain.gait(
+            forward_fraction,
+            turn_fraction,
+            body.bounds.max_forward_speed,
+        );
+        let standing = position_before[1] - ground(position_before[0], position_before[2]);
+        body.chain
+            .set_head(position_before, yaw_before, velocity_before);
+        body.chain.step(&drive, &ground, standing);
+        let head = body.chain.head();
+        x = head.position[0];
+        z = head.position[2];
+        yaw_after = head.yaw;
+        // Proprioception reports what the body did this tick, not what was asked and not a
+        // substep's instant: the head's displacement over the tick as a rate, along its own
+        // facing, and the yaw it actually turned through. The chain's own velocities stay
+        // inside its integrator.
+        let over_tick = [
+            (x - position_before[0]) * (1.0 / DT),
+            0.0,
+            (z - position_before[2]) * (1.0 / DT),
+        ];
+        let forward = forward_for(yaw_after);
+        body.forward_speed = over_tick[0] * forward[0] + over_tick[2] * forward[2];
+        body.turn_rate = (yaw_after - yaw_before) * (1.0 / DT);
+        chain_velocity = Some(over_tick);
+    } else if body.grounded {
         let speed = body.forward_speed;
         let turn = body.turn_rate;
 
@@ -472,7 +517,9 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
                 // The point proxy's one foot slips as any foot does: the walk, in the body's
                 // frame - straight down -Z when grounded, the carried velocity when landing.
                 let forward = forward_for(yaw_after);
-                let slip_world = if body.grounded || arrested >= 0.0 {
+                let slip_world = if let Some(velocity) = chain_velocity {
+                    velocity
+                } else if body.grounded || arrested >= 0.0 {
                     [
                         forward[0] * body.forward_speed,
                         0.0,
@@ -504,9 +551,12 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
                     .map(|(index, _)| index)
                     .collect();
                 let share = support / resting.len().max(1) as f32;
-                // The slip: the body's horizontal velocity along the floor, in the body's frame.
+                // The slip: the body's horizontal velocity along the floor, in the body's frame -
+                // the whole of it for a chain's head, which slides sideways as it wags.
                 let forward = forward_for(yaw_after);
-                let slip_world = if body.grounded || arrested >= 0.0 {
+                let slip_world = if let Some(velocity) = chain_velocity {
+                    velocity
+                } else if body.grounded || arrested >= 0.0 {
                     [
                         forward[0] * body.forward_speed,
                         0.0,
@@ -538,7 +588,18 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
     body.position = [x, y, z];
     body.yaw = yaw_after;
 
-    if body.grounded {
+    if let (true, Some(velocity)) = (body.grounded, chain_velocity) {
+        // A chain's head moves as the chain moved it, sideways included; a wall's arrest
+        // above reduced its forward speed, and that reduction is kept along its facing.
+        let forward = forward_for(yaw_after);
+        let along = velocity[0] * forward[0] + velocity[2] * forward[2];
+        let lost = along - body.forward_speed;
+        body.velocity = [
+            velocity[0] - forward[0] * lost,
+            velocity_y,
+            velocity[2] - forward[2] * lost,
+        ];
+    } else if body.grounded {
         let forward = forward_for(yaw_after);
         body.velocity = [
             forward[0] * body.forward_speed,
@@ -567,6 +628,9 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
         world[1],
         (world[2] * cos_yaw) - (world[0] * sin_yaw),
     ];
+
+    // What the head met - a wall, the air - the chain must know: the head is its first segment.
+    body.chain.set_head(body.position, body.yaw, body.velocity);
 
     truncate_contacts(body);
 }
@@ -624,23 +688,20 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 
                 }
             }
         }
-        // The chain: its length and spacing, the path the trail is placed along - every sample
-        // in logical order, so the ring's bookkeeping is not state - and the poses themselves,
-        // derived but told on the wire, where a divergence must be caught at once.
+        // The chain: its length and spacing, the gait's phase and the targets the motors hold,
+        // every segment's pose and velocity - the articulated state whole - and the poses
+        // told on the wire, derived but where a divergence must be caught at once.
         hasher.u32(body.chain.segment_count);
         hasher.float(body.chain.spacing);
+        hasher.float(body.chain.phase);
         hasher.float(body.chain.amplitude);
-        hasher.u32(
-            body.chain
-                .path()
-                .count()
-                .try_into()
-                .expect("a ring is small"),
-        );
-        for sample in body.chain.path() {
-            hasher.floats(&sample.pose.position);
-            hasher.float(sample.pose.yaw);
-            hasher.float(sample.travelled);
+        hasher.float(body.chain.bias);
+        hasher.floats(&body.chain.targets);
+        for segment in &body.chain.segments {
+            hasher.floats(&segment.position);
+            hasher.float(segment.yaw);
+            hasher.floats(&segment.velocity);
+            hasher.float(segment.yaw_rate);
         }
         for pose in &body.chain.poses {
             hasher.floats(&pose.position);
@@ -1771,25 +1832,15 @@ mod tests {
         let mut longer = body.clone();
         longer.chain = crate::chain::Chain::new(4, 0.5, body.path_sample());
         assert_ne!(with_chain, state_hash([(7u32, &longer)]));
-        let mut walked = chained.clone();
-        walked.chain.advance(
-            crate::chain::PathSample {
-                position: [body.position[0] + 0.2, body.position[1], body.position[2]],
-                yaw: 0.3,
-            },
-            0.0,
-        );
-        assert_ne!(with_chain, state_hash([(7u32, &walked)]));
-        // The wave's amplitude is state: the same walk at speed lays a different trail.
-        let mut wavy = chained.clone();
-        wavy.chain.advance(
-            crate::chain::PathSample {
-                position: [body.position[0] + 0.2, body.position[1], body.position[2]],
-                yaw: 0.3,
-            },
-            1.0,
-        );
-        assert_ne!(state_hash([(7u32, &walked)]), state_hash([(7u32, &wavy)]));
+        let mut bent = chained.clone();
+        let mut drive = crate::chain::Drive::default();
+        drive.targets[0] = 0.4;
+        bent.chain.step(&drive, floor, BODY_HALF_HEIGHT);
+        assert_ne!(with_chain, state_hash([(7u32, &bent)]));
+        // The gait's phase is state: the same chain a beat into its wave hashes apart.
+        let mut beating = chained.clone();
+        beating.chain.gait(1.0, 0.0, 1.0);
+        assert_ne!(with_chain, state_hash([(7u32, &beating)]));
         // Negative zero and zero are two bit patterns, and the hash says so: a world that
         // replays bit for bit agrees on the sign of nothing too.
         let mut minus = body.clone();
