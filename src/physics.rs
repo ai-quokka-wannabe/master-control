@@ -344,10 +344,9 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
             turn_fraction,
             body.bounds.max_forward_speed,
         );
-        let standing = position_before[1] - ground(position_before[0], position_before[2]);
         body.chain
             .set_head(position_before, yaw_before, velocity_before);
-        body.chain.step(&drive, &ground, standing);
+        body.chain.step(&drive, position_before[1]);
         let head = body.chain.head();
         x = head.position[0];
         z = head.position[2];
@@ -697,6 +696,10 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 
         hasher.float(body.chain.amplitude);
         hasher.float(body.chain.bias);
         hasher.floats(&body.chain.targets);
+        hasher.u32(body.chain.keel_count);
+        for keel in &body.chain.keels {
+            hasher.floats(keel);
+        }
         for segment in &body.chain.segments {
             hasher.floats(&segment.position);
             hasher.float(segment.yaw);
@@ -1835,7 +1838,7 @@ mod tests {
         let mut bent = chained.clone();
         let mut drive = crate::chain::Drive::default();
         drive.targets[0] = 0.4;
-        bent.chain.step(&drive, floor, BODY_HALF_HEIGHT);
+        bent.chain.step(&drive, BODY_HALF_HEIGHT);
         assert_ne!(with_chain, state_hash([(7u32, &bent)]));
         // The gait's phase is state: the same chain a beat into its wave hashes apart.
         let mut beating = chained.clone();

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Etape 8, movement 2: the keels - the worm moves.** The owner's mandate: as realistically
+  as possible. A sharp spike on a hard floor rubs the same every way and propels nothing; what
+  a spiky body rests on is its tubes, and a tube along the floor is a runner that glides along
+  itself and ploughs across itself. `Hull::keels()` reads the runners from the hull at rez -
+  the real worm rests on two, thirty degrees either side of its axis, a V-keel - and the
+  chain's friction is Coulomb's per runner, component by component (glide 0.1, plough 2.0),
+  the force leaning away from the slide: that lean is the thrust. The same wave that wriggled
+  in place carries the worm 1.3 m in ten seconds, straight, and as far backwards in reverse;
+  the bridge's amplitude is about fifty degrees now. Carried with it: the chain lies in the
+  head's plane (the terrace-edge tear the first deep tier found, missed by movement 1's merge),
+  and the random walk's speed line is a sanity bound - a tick's yank is dynamics. The head's
+  scratch is heard again; the chain golden is re-recorded.
 - **Etape 8, movement 1: the articulated chain - the undulation propels.** The owner's third
   ruling (2026-08-28): the worm seemed pushed by an invisible force rather than propelled by
   its undulation; model it physically, and think of the pivots where the spikes touch as servo
