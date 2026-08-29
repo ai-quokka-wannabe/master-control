@@ -235,6 +235,59 @@ impl Hull {
     }
 }
 
+/// The most keels a hull declares; more than this and the body is a sled with many runners,
+/// and the rest are folded into the average the same way.
+pub const KEELS_MAX: usize = 8;
+
+/// How far above the hull's lowest point a vertex still counts as touching the floor: the ring
+/// of tube rails around a spike, not the far ends of the tubes.
+pub const KEEL_DEPTH: f32 = 0.02;
+
+/// The most an edge may rise, per metre of run, and still lie on the floor as a runner: a tube
+/// rising nine degrees behind a spike does, the tubes climbing to the crown do not.
+pub const KEEL_SLOPE: f32 = 0.3;
+
+/// The shortest edge that is a runner rather than a prism's own side.
+pub const KEEL_LENGTH: f32 = 0.1;
+
+impl Hull {
+    /// The keels: the directions, in the body's horizontal plane, of the hull's edges that lie
+    /// along the floor - long, low-rising edges leaving the region the body rests on. What the
+    /// body slides on. A sharp point on a hard floor rubs the same in every direction; what a
+    /// spiky body actually rests on is its tubes, and a tube lying along the floor is a runner:
+    /// it glides along its length and ploughs across it, which is where an undulator's
+    /// anisotropy comes from - and so its propulsion. Unit vectors in (x, z), sign-free (a
+    /// runner is the same runner either way), at most [`KEELS_MAX`], in the hull's own order.
+    /// None for a body that rests on a point: it slides the same every way.
+    #[must_use]
+    pub fn keels(&self) -> Vec<[f32; 2]> {
+        let lowest = self.lowest();
+        let mut keels = Vec::new();
+        for edge in &self.edges {
+            let a = self.vertices[edge[0] as usize];
+            let b = self.vertices[edge[1] as usize];
+            // From the region resting on the floor.
+            let (near, far) = if a[1] <= b[1] { (a, b) } else { (b, a) };
+            if near[1] - lowest > KEEL_DEPTH {
+                continue;
+            }
+            let dx = far[0] - near[0];
+            let dz = far[2] - near[2];
+            let run = (dx * dx + dz * dz).sqrt();
+            if run < KEEL_LENGTH {
+                continue;
+            }
+            if (far[1] - near[1]) / run > KEEL_SLOPE {
+                continue;
+            }
+            if keels.len() < KEELS_MAX {
+                keels.push([dx / run, dz / run]);
+            }
+        }
+        keels
+    }
+}
+
 fn farthest_by(
     points: &[[f32; 3]],
     measure: impl Fn([f32; 3]) -> f32,
@@ -252,6 +305,7 @@ fn farthest_by(
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // Expected values may use the platform's: compared within a tolerance.
 mod tests {
     use super::*;
 
@@ -267,6 +321,81 @@ mod tests {
             [-h, h, h],
             [h, h, h],
         ]
+    }
+
+    #[test]
+    fn a_box_lying_on_a_face_has_keels_along_that_face_and_a_point_has_none() {
+        // A box on its face: the edges of that face lie on the floor - the four sides and the
+        // two diagonals the triangulation adds - in the hull's own order.
+        let hull = Hull::from_points(&cube(1.0)).expect("a cube has a hull");
+        let keels = hull.keels();
+        assert!(keels.len() >= 4, "{keels:?}");
+        for keel in &keels {
+            let length = (keel[0] * keel[0] + keel[1] * keel[1]).sqrt();
+            assert!((length - 1.0).abs() < 1e-5);
+        }
+        assert!(
+            keels.iter().any(|k| k[0].abs() > 0.999),
+            "a runner along x: {keels:?}"
+        );
+        assert!(
+            keels.iter().any(|k| k[1].abs() > 0.999),
+            "a runner along z: {keels:?}"
+        );
+        // A pyramid standing on its apex rests on a point: no runner, nothing to glide along.
+        let apex_down = vec![
+            [0.0, -0.5, 0.0],
+            [-0.5, 0.5, -0.5],
+            [0.5, 0.5, -0.5],
+            [-0.5, 0.5, 0.5],
+            [0.5, 0.5, 0.5],
+        ];
+        let hull = Hull::from_points(&apex_down).expect("a pyramid has a hull");
+        assert!(hull.keels().is_empty(), "{:?}", hull.keels());
+    }
+
+    #[test]
+    fn the_worm_rests_on_two_runners_thirty_degrees_either_side_of_its_axis() {
+        // The real body, read from the chain golden's own rez line: the pitched icosahedron
+        // standing on one spike, its tubes proud of its edges. Of the tubes meeting the spike
+        // it stands on, the two that run back along the bottom face lie lowest - a V of
+        // runners, thirty degrees either side of the axis, the way a sled has two.
+        let log = include_str!("../tests/data/chain_life.log");
+        let rez = log
+            .lines()
+            .find(|line| line.starts_with("rez "))
+            .expect("a rez in the golden");
+        let tokens: Vec<&str> = rez.split_whitespace().collect();
+        let count: usize = tokens[7].parse().expect("vertex count");
+        let points: Vec<[f32; 3]> = (0..count)
+            .map(|index| {
+                let at = 8 + index * 3;
+                let bits =
+                    |token: &str| f32::from_bits(u32::from_str_radix(token, 16).expect("hex"));
+                [bits(tokens[at]), bits(tokens[at + 1]), bits(tokens[at + 2])]
+            })
+            .collect();
+        let hull = Hull::from_points(&points).expect("the worm has a hull");
+        let keels = hull.keels();
+        assert!(!keels.is_empty(), "the worm lies on its tubes");
+        // Every runner leaves the front spike backwards (+z) at about thirty degrees from the
+        // axis, on one side or the other - and both sides are there.
+        let mut left = false;
+        let mut right = false;
+        for keel in &keels {
+            let backward = keel[1].abs();
+            let angle = keel[0].abs().atan2(backward).to_degrees();
+            assert!(
+                (angle - 30.0).abs() < 6.0,
+                "a runner {angle} degrees off the axis: {keels:?}"
+            );
+            if keel[0] * keel[1] < 0.0 {
+                left = true;
+            } else {
+                right = true;
+            }
+        }
+        assert!(left && right, "runners on both sides: {keels:?}");
     }
 
     #[test]
