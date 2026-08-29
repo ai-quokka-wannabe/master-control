@@ -298,15 +298,20 @@ pub fn first_cell_crossing(before: [f32; 3], after: [f32; 3]) -> (f32, [f32; 3])
         } else {
             ((before[axis] + half) / cell).ceil().mul_add(cell, -cell) - half
         };
-        let fraction = (line - before[axis]) / delta;
-        if (0.0..=1.0).contains(&fraction) && fraction < best.0 {
+        // A hair before the line, so the vertex stands against the riser and not inside the
+        // cell: a tenth of a millimetre, in metres - not a share of the sweep, which near the
+        // floor's far edge is below single precision's resolution (the deep tier's seed 101
+        // stood a vertex at 5.999998 and the floor lookup rounded it into the cell beyond).
+        const HAIR: f32 = 1e-4;
+        let crossing = (line - before[axis]) / delta;
+        let fraction = ((line - delta.signum() * HAIR - before[axis]) / delta).max(0.0);
+        if (0.0..=1.0).contains(&crossing) && fraction < best.0 {
             let mut normal = [0.0f32; 3];
             normal[normal_axis] = if delta > 0.0 { -1.0 } else { 1.0 };
             best = (fraction, normal);
         }
     }
-    // A hair before the line, so the vertex stands against the riser and not inside the cell.
-    (best.0 * (1.0 - 1e-5), best.1)
+    best
 }
 
 /// Advances one body by one tick of physics against `ground` - the flagship's `stepBody`,
@@ -1297,8 +1302,10 @@ mod hull_tests {
             },
             terrace,
         );
+        // The hair before the line is a tenth of a millimetre in metres (an absolute, since the
+        // deep tier's seed 101: a share of the sweep is below single precision far from the origin).
         assert!(
-            (body.position[2] + 1.5).abs() < 1e-4,
+            (body.position[2] + 1.5).abs() < 2e-4,
             "stood against the riser, feet on the line: {:?}",
             body.position
         );
