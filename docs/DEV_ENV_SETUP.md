@@ -25,7 +25,7 @@ version.
 
 | Tool | Version | Where to get it |
 |------|---------|-----------------|
-| rustup | any recent; **Rust 1.95.0** is pinned by `rust-toolchain.toml` and installed by rustup on first use | <https://rustup.rs/> |
+| rustup | any recent; **Rust 1.98.0** is pinned by `rust-toolchain.toml` and installed by rustup on first use | <https://rustup.rs/> |
 | A linker for the wire | Windows: the Visual Studio "Desktop development with C++" workload or its Build Tools (rustup's default `msvc` target links with them); Linux: `build-essential` | <https://visualstudio.microsoft.com/downloads/> · `sudo apt install build-essential` |
 | Git | any recent | <https://git-scm.com/downloads> |
 | Node.js | 20 or newer, only for the markdown linter (`npm ci`) | <https://nodejs.org/> |
@@ -33,10 +33,10 @@ version.
 
 **There are no crates.** Master Control is `std` only, and so is the wire it builds. There is
 no `cargo install` step, no formatter to fetch (`rustfmt` and `clippy` come with the pinned
-toolchain), and no toolchain to choose: `rust-toolchain.toml` names `1.95.0` with `rustfmt` and
+toolchain), and no toolchain to choose: `rust-toolchain.toml` names `1.98.0` with `rustfmt` and
 `clippy`, rustup installs exactly that the first time cargo runs here, and CI refuses any
 workflow that installs a toolchain of its own. If `cargo --version` in this directory does not
-say `1.95.0`, something on your `PATH` is in front of rustup - fix that rather than the pin.
+say `1.98.0`, something on your `PATH` is in front of rustup - fix that rather than the pin.
 
 The wire is a submodule: `external/link` is built by `build.rs` with the same cargo, as a
 `cdylib`, and copied beside the executable - the only place this server ever looks for it.
@@ -60,7 +60,7 @@ cargo build --release --locked
 target\release\master-control.exe --version
 ```
 
-The first `cargo` run installs Rust 1.95.0 (a minute), then builds the wire and the server.
+The first `cargo` run installs Rust 1.98.0 (a minute), then builds the wire and the server.
 `--version` prints the server's version, its build stamp (a hash of its own sources - a log
 records it, and Clu names a log made by another build) and the Link protocol it speaks.
 
@@ -185,7 +185,7 @@ Markdown is linted by the pinned markdownlint-cli2 (`npm ci`, then `npm run lint
 
 `external/link` was not initialised. `git submodule update --init`, then build again.
 
-### `cargo` says a version other than 1.95.0
+### `cargo` says a version other than 1.98.0
 
 Another Rust is in front of rustup on your `PATH` (a distribution package, a Homebrew one, a
 stray `CARGO_HOME`). Put rustup's `~/.cargo/bin` first, or remove the other; never edit the pin
