@@ -459,6 +459,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The hair before a riser is a tenth of a millimetre, in metres.** It was a share of the sweep
+  (1e-5 of it), which near the floor's far edge is below single precision's resolution: the
+  movement-5 deep tier's seed 101 stood a vertex at x = 5.999998 against the line at 6 and the
+  floor lookup rounded it into the cell beyond, so the letter would have reported the vertex
+  0.83 m under a floor it stood beside. The motion was right - the wall rule keeps the vertex out
+  of the cell - and the report was wrong, which the new floor invariant refused. An absolute hair
+  holds at any coordinate the floor has; the exact-crossing test states it.
 - **The cache cleanup runs itself.** `cleanup_caches.yml` was manual-only and had never been
   dispatched here, and its script knew only the Vulkan, markdownlint and CodeQL key families, so
   every `cargo-*`, `npm-*-lock-*` and `qt-*` generation fell into the never-delete fail-safe: a
