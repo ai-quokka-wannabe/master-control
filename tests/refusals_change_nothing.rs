@@ -69,6 +69,8 @@ fn actions(tick: u64, forward: f32) -> Actions {
         previous_forward_speed: forward,
         previous_turn_rate: 0.1,
         previous_vocalisation: 0.0,
+        joint_targets: [0.0; 7],
+        previous_joint_targets: [0.0; 7],
         reserved0: [0; 4],
     }
 }

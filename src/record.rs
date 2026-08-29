@@ -82,12 +82,12 @@ impl InputLog {
         )?;
         writeln!(
             file,
-            "# applied <tick> <creature> <fresh|repeated|coasted> <forward_bits> <turn_bits> <voice_bits>"
+            "# applied <tick> <creature> <fresh|repeated|coasted> <forward_bits> <turn_bits> <voice_bits> <servo_bits x7>"
         )?;
         writeln!(file, "# hash <tick> <fnv1a_64_hex>")?;
         writeln!(
             file,
-            "# rez <tick> <creature> <max_forward_bits> <max_turn_bits> <max_voice_bits> <max_contacts> <vertex_count> <vertex_bits...> <segment_count> <spacing_bits>"
+            "# rez <tick> <creature> <max_forward_bits> <max_turn_bits> <max_voice_bits> <max_contacts> <vertex_count> <vertex_bits...> <segment_count> <spacing_bits> <max_angle_bits> <max_torque_bits>"
         )?;
         writeln!(file, "# derez <tick> <creature>")?;
         file.flush()?;
@@ -130,13 +130,19 @@ impl InputLog {
             Applied::Repeated(intent) => ("repeated", intent),
             Applied::Coasted => ("coasted", Intent::default()),
         };
-        let _ = writeln!(
-            self.file,
+        let mut line = format!(
             "applied {tick} {creature_id} {how} {} {} {}",
             bits(intent.forward_speed),
             bits(intent.turn_rate),
             bits(intent.vocalisation)
         );
+        // The servos, after the three the line always had: what a re-simulation drives the
+        // joints with.
+        for target in &intent.joint_targets {
+            line.push(' ');
+            line.push_str(&bits(*target));
+        }
+        let _ = writeln!(self.file, "{line}");
     }
 
     /// A body rezzed (or adopted with new bounds) at this tick: what the re-simulation needs
@@ -169,6 +175,13 @@ impl InputLog {
         // The chain, after the mesh: its length and spacing are what the trail is placed by,
         // and a re-simulation without them stands a different worm.
         line.push_str(&format!(" {segment_count} {}", bits(segment_spacing)));
+        // The servos, after the chain: their swing and their torque, what the joints are
+        // clamped to and held with.
+        line.push_str(&format!(
+            " {} {}",
+            bits(bounds.max_joint_angle),
+            bits(bounds.max_joint_torque)
+        ));
         let _ = writeln!(self.file, "{line}");
     }
 
@@ -229,6 +242,7 @@ mod tests {
                 forward_speed: 1.0,
                 turn_rate: -0.5,
                 vocalisation: 0.25,
+                joint_targets: [0.0; 7],
             },
             Verdict::Accepted {
                 creature_id: 7,
@@ -242,6 +256,7 @@ mod tests {
                 forward_speed: 1.0,
                 turn_rate: -0.5,
                 vocalisation: 0.25,
+                joint_targets: [0.0; 7],
             }),
         );
         log.applied(102, 7, Applied::Coasted);
@@ -256,8 +271,12 @@ mod tests {
             text.contains("judged 1 7 101 101 3F800000 BF000000 3E800000 accepted\n"),
             "floats are bit patterns, not roundings: {text}"
         );
-        assert!(text.contains("applied 101 7 fresh 3F800000 BF000000 3E800000\n"));
-        assert!(text.contains("applied 102 7 coasted 00000000 00000000 00000000\n"));
+        assert!(text.contains(
+            "applied 101 7 fresh 3F800000 BF000000 3E800000 00000000 00000000 00000000 00000000 00000000 00000000 00000000\n"
+        ));
+        assert!(text.contains(
+            "applied 102 7 coasted 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000\n"
+        ));
         assert!(text.contains("hash 128 00000000DEADBEEF\n"));
         let _ = std::fs::remove_file(&path);
     }

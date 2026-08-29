@@ -54,12 +54,26 @@ fn the_chain_life_replays_to_the_world_it_describes_and_ended_on_request() {
         .collect();
     assert_eq!(rez_lines.len(), 1, "one creature lived this life");
     let words: Vec<&str> = rez_lines[0].split(' ').collect();
+    // The line ends with the chain's count and spacing and then the servos' swing and torque;
+    // a chain of eight with servos declared, the velocity actuators at zero as a chain has.
     assert_eq!(
-        words[words.len() - 2],
+        words[words.len() - 4],
         "8",
-        "the rez declares a chain of eight, before the spacing's bits: {}",
+        "the rez declares a chain of eight, before the spacing's and the servos' bits: {}",
         &rez_lines[0][..60]
     );
+    assert_ne!(
+        words[words.len() - 2],
+        "00000000",
+        "the chain declares its servos' swing"
+    );
+    assert_ne!(
+        words[words.len() - 1],
+        "00000000",
+        "the chain declares its servos' torque"
+    );
+    assert_eq!(words[3], "00000000", "a chain declares no forward actuator");
+    assert_eq!(words[4], "00000000", "a chain declares no turn actuator");
     let hashes = CHAIN_LIFE
         .lines()
         .filter(|line| line.starts_with("hash "))

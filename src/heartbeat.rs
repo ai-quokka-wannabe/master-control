@@ -915,6 +915,7 @@ fn log_judged(
                 forward_speed: actions.previous_forward_speed,
                 turn_rate: actions.previous_turn_rate,
                 vocalisation: actions.previous_vocalisation,
+                joint_targets: actions.previous_joint_targets,
             },
             previous,
         );
@@ -929,6 +930,7 @@ fn log_judged(
                 forward_speed: actions.desired_forward_speed,
                 turn_rate: actions.desired_turn_rate,
                 vocalisation: actions.vocalisation_strength,
+                joint_targets: actions.joint_targets,
             },
             current,
         );

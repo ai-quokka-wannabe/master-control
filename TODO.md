@@ -323,11 +323,34 @@ moving body is dynamics, and the deep tier found four metres a second of it with
 held. The chain lies in the head's plane (a fix the first deep tier found and movement 1's
 merge missed, carried here). Golden re-recorded.
 
-**Movements to come.** 3: the wire and the ABI - servo
-targets from the Program (rc-worm's own wave generator, the panel's keys driving it), the
-servo's torque declared by the body, `desired_forward_speed`/`turn_rate` retired; link v9,
-client ABI 9. 4: proprioception of every joint's angle in `TglSenses`. 5: every segment
-meeting risers and the air for itself. Goldens re-recorded per movement.
+**Movement 3, done (2026-08-29): the gait is the creature's.** Link v9 carries it: `REZ`
+declares a body's servos by bound - `max_joint_angle`, `max_joint_torque` - and `ACTIONS`
+carries `joint_targets[7]`, the angle each servo is asked to hold, with the tick-1 resend the
+message always had. Nothing is retired: *a bound of zero is no such actuator*, the Program
+ABI's own rule, so a chain declares servos and no velocity actuator (`world_bounds` refuses a
+chain with one, by name) and a point proxy declares the reverse; a body that declares nothing
+sits where it is put. The world's part: `Intent` carries the targets, the validator clamps
+each to the body's swing, the chain is driven by them - `Chain::gait`, the bridge that turned
+a speed into a wave while the wire could not carry one, is gone with its phase, amplitude and
+bias - and every servo holds with no more than its declared torque: XPBD's lambda is
+accumulated per servo per substep and clamped to `max_joint_torque * h^2`, the published
+form (Macklin et al. 2016), so past its torque a servo stalls and a body squeezed against a
+wall will give at its joints rather than drive through it. A servo is stiff position control
+that saturates: `MOTOR_COMPLIANCE` is a hundred newton-metres per radian (the muscle-soft
+first draft lagged its target under the runners' load and barely moved). Measured: the
+worm's own wave - fifty degrees, four segments to the wavelength, a metre a second of phase
+speed - carries it 1.0 m in ten seconds on its runners, straight, symmetric in reverse. The
+log's `applied` line carries the seven targets, its `rez` line the two bounds, and Clu reads
+both (a log from before servos drove none). The random walk thrashes the servos, hostile
+values included, on chains that declare them. Bounds: a servo's swing at most a right angle,
+its torque at most a hundred newton-metres. Golden re-recorded with the Grid and rc-worm
+bringing the gait themselves.
+
+**Movements to come.** 4: proprioception of every joint's angle in `TglSenses`, so the
+creature feels its body and can close its gait loop on it (and, later, estimate rather than
+trust - the owner's note on Kalman filters belongs to the creature). 5: every segment meeting
+risers and the air for itself, the springy squeeze against a wall included. Goldens
+re-recorded per movement.
 
 ## Etape 7 — the scrape
 

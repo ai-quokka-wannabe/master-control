@@ -30,6 +30,10 @@ pub struct Intent {
     pub forward_speed: f32,
     pub turn_rate: f32,
     pub vocalisation: f32,
+    /// The angle each servo is asked to hold, radians, joint `k` between segments `k` and
+    /// `k + 1`, positive bending to the head's left: the muscle, the Program's own gait. Clamped
+    /// to the body's `max_joint_angle`; every one zero for a body with no servos.
+    pub joint_targets: [f32; crate::link_dll::TRAILING_SEGMENTS_MAX],
 }
 
 /// What happened to one candidate intent - the record the logs are owed.
@@ -175,6 +179,7 @@ impl ActionStager {
                     forward_speed: actions.previous_forward_speed,
                     turn_rate: actions.previous_turn_rate,
                     vocalisation: actions.previous_vocalisation,
+                    joint_targets: actions.previous_joint_targets,
                 },
                 true,
             );
@@ -185,6 +190,7 @@ impl ActionStager {
                 forward_speed: actions.desired_forward_speed,
                 turn_rate: actions.desired_turn_rate,
                 vocalisation: actions.vocalisation_strength,
+                joint_targets: actions.joint_targets,
             },
             false,
         );
@@ -262,6 +268,8 @@ mod tests {
             vocalisation_strength: 0.0,
             previous_forward_speed: previous,
             previous_turn_rate: 0.0,
+            joint_targets: [0.0; 7],
+            previous_joint_targets: [0.0; 7],
             previous_vocalisation: 0.0,
             reserved0: [0; 4],
         }
