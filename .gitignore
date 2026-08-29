@@ -20,3 +20,6 @@ generate_physics_goldens.exe
 
 # The pinned markdown linter, installed by `npm ci`; the lock file is tracked, the modules are not.
 /node_modules/
+
+# Side build directories the deep tier runs in while target/ is locked.
+target-*/
