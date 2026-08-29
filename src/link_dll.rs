@@ -37,7 +37,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -117,7 +117,13 @@ pub struct Proprioception {
     pub grounded: u8,
     pub reserved0: [u8; 3],
     pub specific_force: [f32; 3],
+    /// The angle each servo holds this tick, radians, joint `k` between segments `k` and
+    /// `k + 1` in the sign the targets ask in, within a turn; `segment_count - 1`
+    /// meaningful, the rest zero. What the joint did, not what it was asked.
+    pub joint_angles: [f32; TRAILING_SEGMENTS_MAX],
     pub contact_count: u32,
+    /// Always zero: the four bytes that round the letter to its alignment.
+    pub reserved1: [u8; 4],
 }
 
 /// `LnkWorldDefinition`: what the simulated world is made of, the fields both ends must agree
@@ -297,7 +303,7 @@ const _: () = assert!(size_of::<RezVertex>() == 12);
 const _: () = assert!(size_of::<RezTriangle>() == 16);
 const _: () = assert!(size_of::<RezMaterial>() == 32);
 const _: () = assert!(size_of::<Contact>() == 52);
-const _: () = assert!(size_of::<Proprioception>() == 32);
+const _: () = assert!(size_of::<Proprioception>() == 64);
 const _: () = assert!(size_of::<CreatureState>() == 156);
 const _: () = assert!(size_of::<TickStateHeader>() == 16);
 const _: () = assert!(size_of::<Actions>() == 96);

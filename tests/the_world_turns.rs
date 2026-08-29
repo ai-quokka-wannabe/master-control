@@ -796,6 +796,8 @@ fn the_owner_gets_a_letter_every_tick_and_nobody_else_does() {
                 assert_eq!(header.contact_count as usize, contacts.len());
                 assert!(!contacts.is_empty(), "a standing body feels the floor");
                 assert!(header.specific_force[1] > 0.0);
+                // A body of one segment: seven zeros, and the wire let them through.
+                assert_eq!(header.joint_angles, [0.0; 7]);
                 letters += 1;
             }
             Some(Message::Ping(ping)) => {
