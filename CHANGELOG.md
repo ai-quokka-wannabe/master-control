@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Etape 8 movement 4: the joints back as proprioception.** Link v10's letter carries
+  `joint_angles[7]`, and the world fills it from the chain: `Chain::joint_angle` is the
+  encoder's reading - the neighbours' yaw difference brought within a turn, the yaws being
+  unbounded - and `Chain::joint_angles` the row, the joints the chain has and zero beyond,
+  seven zeros for a body of one segment. What the joint did rather than what it was asked,
+  so a Program can close its gait on what it feels. The letter reports it rather than the
+  Grid subtracting yaws because the letter is the body's one channel of self-report and
+  movement 5's servo load cannot be derived from poses. The chain golden is re-recorded at
+  protocol 10 with the whole ecosystem, as movement 3's was.
 - **Etape 8, movement 3: the gait is the creature's - the servos on the wire.** Link v9:
   `REZ` declares a body's servos by bound (`max_joint_angle`, `max_joint_torque`; zero is no
   such actuator, so a chain declares servos and no velocity actuator and a point proxy the
