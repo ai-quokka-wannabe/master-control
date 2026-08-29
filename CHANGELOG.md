@@ -459,6 +459,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The world has the last word.** A sweep pushes every vertex out of the world one at a time,
+  and each later push turns the segment and can drive an earlier vertex back in; behind a head
+  hammered by a hostile hundred-newton-metre servo the last sweep's own vertices left 13.8 mm
+  inside a riser (the deep tier's seed 101, third finding). After each substep's joint sweeps
+  the vertices alone are swept eight more times - `Chain::touch_world`, the contact pass lifted
+  into a method both loops call - so nothing ends a substep inside a wall or under a floor; the
+  joints absorb what that moves within the millimetres the deep tier holds them to. Propulsion
+  and the squeeze measure the same as before; the chain golden is re-recorded.
 - **The deep tier's floor invariant knows a wall from a floor.** It measured a vertex 0.86 mm
   inside a riser's cell - a Gauss-Seidel residual of the wall solve, the class of the joint's
   5 mm tolerance - as 0.83 m under its floor, because the floor lookup there is the terrace
