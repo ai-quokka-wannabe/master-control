@@ -460,10 +460,31 @@ impl Chain {
         (dx * dx + dz * dz).sqrt()
     }
 
-    /// The angle joint `k` holds: the yaw of segment `k + 1` less that of segment `k`.
+    /// The angle joint `k` holds: the yaw of segment `k + 1` less that of segment `k`, within
+    /// a turn - the reading of the servo's own encoder, which the letter reports. The yaws
+    /// themselves are unbounded (a body may spin for an hour), so their difference is brought
+    /// back to (-pi, pi]; a servo swings at most a right angle either way, so nothing is lost.
     #[must_use]
     pub fn joint_angle(&self, joint: usize) -> f32 {
-        self.segments[joint + 1].yaw - self.segments[joint].yaw
+        let raw = self.segments[joint + 1].yaw - self.segments[joint].yaw;
+        let wrapped = raw.rem_euclid(std::f32::consts::TAU);
+        if wrapped > std::f32::consts::PI {
+            wrapped - std::f32::consts::TAU
+        } else {
+            wrapped
+        }
+    }
+
+    /// Every servo's reading in one row: `joint_angles(k)` for the joints the chain has,
+    /// zero beyond - the letter's field, filled here so the roster copies rather than counts.
+    #[must_use]
+    pub fn joint_angles(&self) -> [f32; TRAILING_SEGMENTS_MAX] {
+        let mut angles = [0.0f32; TRAILING_SEGMENTS_MAX];
+        let joints = (self.segment_count as usize).saturating_sub(1);
+        for (joint, angle) in angles.iter_mut().enumerate().take(joints) {
+            *angle = self.joint_angle(joint);
+        }
+        angles
     }
 
     fn tell_poses(&mut self) {
@@ -641,6 +662,30 @@ mod tests {
         for joint in 0..3 {
             assert!(chain.joint_gap(joint) < 1e-6);
         }
+    }
+
+    #[test]
+    fn a_joint_reports_within_a_turn_and_a_chain_reports_only_the_joints_it_has() {
+        // Yaws are unbounded; two neighbours either side of the seam at pi hold a small
+        // angle, and the encoder says so rather than nearly a whole turn.
+        let mut chain = Chain::new(3, 0.5, head_at(0.0, 0.0, 0.0));
+        chain.segments[0].yaw = std::f32::consts::PI - 0.1;
+        chain.segments[1].yaw = -std::f32::consts::PI + 0.1;
+        chain.segments[2].yaw = -std::f32::consts::PI - 0.2;
+        assert!(
+            (chain.joint_angle(0) - 0.2).abs() < 1e-5,
+            "{}",
+            chain.joint_angle(0)
+        );
+        assert!(
+            (chain.joint_angle(1) + 0.3).abs() < 1e-5,
+            "{}",
+            chain.joint_angle(1)
+        );
+        let row = chain.joint_angles();
+        assert!((row[0] - 0.2).abs() < 1e-5 && (row[1] + 0.3).abs() < 1e-5);
+        assert_eq!(row[2..], [0.0; 5], "a chain of three has two joints");
+        assert_eq!(Chain::single().joint_angles(), [0.0; TRAILING_SEGMENTS_MAX]);
     }
 
     #[test]
