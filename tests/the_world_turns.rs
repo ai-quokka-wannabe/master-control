@@ -127,6 +127,8 @@ fn steer(
         previous_forward_speed: previous,
         previous_turn_rate: 0.0,
         previous_vocalisation: 0.0,
+        joint_targets: [0.0; 7],
+        previous_joint_targets: [0.0; 7],
         reserved0: [0; 4],
     };
     assert_eq!(
@@ -438,6 +440,8 @@ fn a_body(creature_id: u32) -> (Rez, Vec<RezVertex>, Vec<RezTriangle>, Vec<RezMa
         material_count: 1,
         segment_count: 1,
         segment_spacing: 0.0,
+        max_joint_angle: 0.0,
+        max_joint_torque: 0.0,
     };
     let vertices = vec![
         RezVertex {
@@ -496,6 +500,11 @@ fn a_chain(creature_id: u32) -> (Rez, Vec<RezVertex>, Vec<RezTriangle>, Vec<RezM
     let (mut header, vertices, triangles, materials) = a_cube(creature_id);
     header.segment_count = 4;
     header.segment_spacing = 0.3;
+    // A chain moves by its servos and declares no velocity actuator.
+    header.max_joint_angle = 0.9;
+    header.max_joint_torque = 5.0;
+    header.max_forward_speed = 0.0;
+    header.max_turn_rate = 0.0;
     (header, vertices, triangles, materials)
 }
 
@@ -551,18 +560,32 @@ fn a_chain_is_told_with_its_segments_trailing_the_head() {
     );
     let start_last = row.segments[2].position;
 
-    // Steered forward and turning for a second and a half: the trail follows the arc the head
-    // walked - every chord still no longer than the spacing - and the tail is elsewhere.
-    for _ in 0..48 {
+    // Driven for a second and a half by what a Program sends: a travelling wave of servo
+    // targets with a turn's bias on it. The body bends and pushes, every chord still no
+    // longer than the spacing plus the joint's residual, and the tail is elsewhere.
+    let wave = |step: u32| {
+        let mut targets = [0.0f32; 7];
+        #[allow(clippy::cast_precision_loss)]
+        let phase = step as f32 * 0.15;
+        for (joint, target) in targets.iter_mut().enumerate().take(3) {
+            #[allow(clippy::cast_precision_loss)]
+            let lag = joint as f32 * std::f32::consts::FRAC_PI_2;
+            *target = 0.8 * (phase - lag).sin() + 0.3;
+        }
+        targets
+    };
+    for step in 0..48u32 {
         let actions = Actions {
             tick: tick + 1,
             creature_id: 600,
-            desired_forward_speed: 1.5,
-            desired_turn_rate: 0.8,
+            desired_forward_speed: 0.0,
+            desired_turn_rate: 0.0,
             vocalisation_strength: 0.0,
-            previous_forward_speed: 1.5,
-            previous_turn_rate: 0.8,
+            previous_forward_speed: 0.0,
+            previous_turn_rate: 0.0,
             previous_vocalisation: 0.0,
+            joint_targets: wave(step),
+            previous_joint_targets: wave(step.saturating_sub(1)),
             reserved0: [0; 4],
         };
         assert_eq!(
@@ -583,7 +606,7 @@ fn a_chain_is_told_with_its_segments_trailing_the_head() {
         let chord = ((pose.position[0] - previous[0]).powi(2)
             + (pose.position[2] - previous[2]).powi(2))
         .sqrt();
-        assert!(chord <= 0.3 + 1e-3, "chord {chord} over the spacing");
+        assert!(chord <= 0.3 + 5e-3, "chord {chord} over the spacing");
         assert!(chord > 0.05, "the segments did not pile up: chord {chord}");
         previous = pose.position;
     }
@@ -623,6 +646,8 @@ fn steer_creature(
         previous_forward_speed: 0.0,
         previous_turn_rate: 0.0,
         previous_vocalisation: 0.0,
+        joint_targets: [0.0; 7],
+        previous_joint_targets: [0.0; 7],
         reserved0: [0; 4],
     };
     assert_eq!(

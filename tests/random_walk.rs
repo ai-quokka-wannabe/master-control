@@ -95,10 +95,17 @@ fn intent(rng: &mut SplitMix64) -> Intent {
     let forward = (rng.unit() * 2.0 - 1.0) * WORLD_MAX_FORWARD_SPEED * 1.5;
     let turn = (rng.unit() * 2.0 - 1.0) * WORLD_MAX_TURN_RATE * 1.5;
     let voice = (rng.unit() * 2.0 - 0.5) * WORLD_MAX_VOCALISATION * 1.5;
+    // The servos thrashed too: every joint asked for anything, hostile values included.
+    let mut joint_targets = [0.0f32; 7];
+    for target in &mut joint_targets {
+        let sane = (rng.unit() * 2.0 - 1.0) * std::f32::consts::FRAC_PI_2 * 1.5;
+        *target = hostile(rng, sane);
+    }
     Intent {
         forward_speed: hostile(rng, forward),
         turn_rate: hostile(rng, turn),
         vocalisation: hostile(rng, voice),
+        joint_targets,
     }
 }
 
@@ -332,6 +339,11 @@ fn walk(seed: u64, steps: u64) -> Vec<u64> {
                         model.header.segment_count = 2 + rng.below(7) as u32;
                     }
                     model.header.segment_spacing = 2.0 * half + 0.05;
+                    // A chain moves by its servos and declares no velocity actuator.
+                    model.header.max_joint_angle = 0.9;
+                    model.header.max_joint_torque = 5.0;
+                    model.header.max_forward_speed = 0.0;
+                    model.header.max_turn_rate = 0.0;
                 }
                 let admission = roster.rez(host, model);
                 assert!(
