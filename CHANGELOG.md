@@ -459,6 +459,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The deep tier's pitch invariant is sanity, not a right angle.** Seed 102's tail, airborne
+  and falling off an edge, pitched to 98 degrees - a segment hanging on its ball joint swings
+  past the vertical as a dangling rod does, and nothing there was running away. The bound is
+  four turns, against a runaway; the design note says what a hanging segment does.
 - **The world has the last word.** A sweep pushes every vertex out of the world one at a time,
   and each later push turns the segment and can drive an earlier vertex back in; behind a head
   hammered by a hostile hundred-newton-metre servo the last sweep's own vertices left 13.8 mm

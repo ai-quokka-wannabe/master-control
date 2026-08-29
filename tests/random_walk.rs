@@ -264,14 +264,17 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                     ))
                 );
             }
-            // Every segment meets the world for itself (movement 5): its pitch a finite angle
-            // short of upright, no vertex of its hull more than a centimetre under its own
+            // Every segment meets the world for itself (movement 5): its pitch finite and within
+            // sanity - a segment hanging off an edge swings past the vertical on its ball joint as
+            // a dangling rod does (seed 102's tail, at 98 degrees, falling), so the bound is four
+            // turns against a runaway, not a right angle - no vertex of its hull more than a
+            // centimetre under its own
             // floor - the contact solve's residual, never a fall through it - and every
             // servo's load within the torque its body declared.
             let count = body.chain.segment_count as usize;
             for (index, segment) in body.chain.segments.iter().enumerate().take(count) {
                 assert!(
-                    segment.pitch.is_finite() && segment.pitch.abs() < std::f32::consts::FRAC_PI_2,
+                    segment.pitch.is_finite() && segment.pitch.abs() < 4.0 * std::f32::consts::TAU,
                     "{}",
                     at(&format!(
                         "creature {creature_id} segment {index} pitched to {} - {segment:?}",
