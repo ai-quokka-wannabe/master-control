@@ -280,6 +280,13 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                 );
                 if let Some(hull) = body.hull.as_ref() {
                     let frame = master_control::chain::Frame::of(segment.yaw, segment.pitch);
+                    // The body's own floor is the one under its origin, as the solver measures
+                    // it: a vertex whose cell is more than a climb above that stands against a
+                    // riser, and what is asserted of it is how far past the cell line it stands
+                    // - a Gauss-Seidel residual, held to the joint's 5 mm - not how far under
+                    // the terrace above, which is not its floor. Every other vertex is held
+                    // above its own floor to a centimetre.
+                    let own_floor = floor(segment.position[0], segment.position[2]);
                     for vertex in &hull.vertices {
                         let offset = frame.offset(*vertex);
                         let corner = [
@@ -287,14 +294,36 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                             segment.position[1] + offset[1],
                             segment.position[2] + offset[2],
                         ];
-                        let under = floor(corner[0], corner[2]) - corner[1];
-                        assert!(
-                            under < 1e-2,
-                            "{}",
-                            at(&format!(
-                                "creature {creature_id} segment {index} has a vertex {under} m under its floor at {corner:?}"
-                            ))
-                        );
+                        let rise = floor(corner[0], corner[2]) - own_floor;
+                        if rise > master_control::physics::CLIMB_LIMIT_METRES {
+                            let (fraction, normal) = master_control::physics::first_cell_crossing(
+                                segment.position,
+                                corner,
+                            );
+                            let allowed = [
+                                segment.position[0] + offset[0] * fraction,
+                                segment.position[1] + offset[1] * fraction,
+                                segment.position[2] + offset[2] * fraction,
+                            ];
+                            let past = -((corner[0] - allowed[0]) * normal[0]
+                                + (corner[2] - allowed[2]) * normal[2]);
+                            assert!(
+                                past < 5e-3,
+                                "{}",
+                                at(&format!(
+                                    "creature {creature_id} segment {index} has a vertex {past} m inside a riser at {corner:?}"
+                                ))
+                            );
+                        } else {
+                            let under = floor(corner[0], corner[2]) - corner[1];
+                            assert!(
+                                under < 1e-2,
+                                "{}",
+                                at(&format!(
+                                    "creature {creature_id} segment {index} has a vertex {under} m under its floor at {corner:?}"
+                                ))
+                            );
+                        }
                     }
                 }
             }

@@ -459,6 +459,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The deep tier's floor invariant knows a wall from a floor.** It measured a vertex 0.86 mm
+  inside a riser's cell - a Gauss-Seidel residual of the wall solve, the class of the joint's
+  5 mm tolerance - as 0.83 m under its floor, because the floor lookup there is the terrace
+  above, which is not that vertex's floor. A vertex whose cell is more than a climb above its
+  body's own floor is now held to 5 mm past the cell line; every other vertex to a centimetre
+  above its own floor. Seed 101 again, seven steps past the hair; the physics was right.
 - **The hair before a riser is a tenth of a millimetre, in metres.** It was a share of the sweep
   (1e-5 of it), which near the floor's far edge is below single precision's resolution: the
   movement-5 deep tier's seed 101 stood a vertex at x = 5.999998 against the line at 6 and the
