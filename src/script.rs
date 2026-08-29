@@ -50,6 +50,7 @@ fn orbiter(
         creature_id,
         position: [radius * cos, 0.05, radius * sin],
         yaw,
+        pitch: 0.0,
         velocity: [
             -radius * angular_speed * sin,
             0.0,

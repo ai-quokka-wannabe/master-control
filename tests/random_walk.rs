@@ -189,7 +189,9 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
         for (slot, pose) in chain.poses.iter().enumerate() {
             if slot + 1 < chain.segment_count as usize {
                 assert!(
-                    pose.position.iter().all(|axis| axis.is_finite()) && pose.yaw.is_finite(),
+                    pose.position.iter().all(|axis| axis.is_finite())
+                        && pose.yaw.is_finite()
+                        && pose.pitch.is_finite(),
                     "{}",
                     at(&format!(
                         "creature {creature_id} segment {} is not finite",
@@ -212,7 +214,7 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                 previous = pose.position;
             } else {
                 assert!(
-                    pose.position == [0.0; 3] && pose.yaw == 0.0,
+                    pose.position == [0.0; 3] && pose.yaw == 0.0 && pose.pitch == 0.0,
                     "{}",
                     at(&format!(
                         "creature {creature_id} slot {} beyond its chain is not zero",
@@ -259,6 +261,50 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                         &body.chain.targets[..joints],
                         body.chain.head(),
                         body.grounded
+                    ))
+                );
+            }
+            // Every segment meets the world for itself (movement 5): its pitch a finite angle
+            // short of upright, no vertex of its hull more than a centimetre under its own
+            // floor - the contact solve's residual, never a fall through it - and every
+            // servo's load within the torque its body declared.
+            let count = body.chain.segment_count as usize;
+            for (index, segment) in body.chain.segments.iter().enumerate().take(count) {
+                assert!(
+                    segment.pitch.is_finite() && segment.pitch.abs() < std::f32::consts::FRAC_PI_2,
+                    "{}",
+                    at(&format!(
+                        "creature {creature_id} segment {index} pitched to {} - {segment:?}",
+                        segment.pitch
+                    ))
+                );
+                if let Some(hull) = body.hull.as_ref() {
+                    let frame = master_control::chain::Frame::of(segment.yaw, segment.pitch);
+                    for vertex in &hull.vertices {
+                        let offset = frame.offset(*vertex);
+                        let corner = [
+                            segment.position[0] + offset[0],
+                            segment.position[1] + offset[1],
+                            segment.position[2] + offset[2],
+                        ];
+                        let under = floor(corner[0], corner[2]) - corner[1];
+                        assert!(
+                            under < 1e-2,
+                            "{}",
+                            at(&format!(
+                                "creature {creature_id} segment {index} has a vertex {under} m under its floor at {corner:?}"
+                            ))
+                        );
+                    }
+                }
+            }
+            for (joint, torque) in body.chain.torques.iter().enumerate().take(count - 1) {
+                assert!(
+                    torque.is_finite() && torque.abs() <= body.bounds.max_joint_torque + 1e-3,
+                    "{}",
+                    at(&format!(
+                        "creature {creature_id} servo {joint} holds with {torque} N.m against a limit of {}",
+                        body.bounds.max_joint_torque
                     ))
                 );
             }
