@@ -133,6 +133,11 @@ impl Frame {
 pub const SUBSTEPS: usize = 4;
 pub const ITERATIONS: usize = 32;
 
+/// Passes over every vertex alone after each substep's sweeps, the joints silent: the world's
+/// last word. The sweeps leave a hammered head's vertices inside a riser by what the later
+/// vertices' pushes turned it; these converge that to nothing the deep tier can see.
+pub const CONTACT_SWEEPS: usize = 8;
+
 /// A segment's moment of inertia about any axis through its origin: an icosahedron is nearly
 /// a sphere, and a solid sphere's is two fifths of its mass times its radius squared.
 pub const SEGMENT_INERTIA: f32 =
@@ -448,62 +453,37 @@ impl Chain {
                         inverse_inertia,
                     );
                 }
-                // The world last, so no segment ends a sweep under its floor or inside a wall:
-                // every vertex against its own floor, or against the riser it stands inside.
-                // The floor a vertex is measured against is the one under its segment's
-                // origin - the cell the body stands in - not the one under the vertex a
-                // substep ago: a vertex nudged over a line after the wall pushed it out would
-                // otherwise see no rise, be taken for standing on the higher floor, and be
-                // lifted a wall's height in one sweep. A cell more than a climb above the
-                // body's own is a wall, whichever way the vertex got in.
-                for index in 0..count {
-                    for (vertex_index, vertex) in vertices.iter().enumerate() {
-                        let segment = self.segments[index];
-                        let frame = Frame::of(segment.yaw, segment.pitch);
-                        let r = frame.offset(*vertex);
-                        let at = add(segment.position, r);
-                        let rise =
-                            ground(at[0], at[2]) - ground(segment.position[0], segment.position[2]);
-                        if rise > CLIMB_LIMIT_METRES {
-                            // A riser too tall to climb: the vertex stands against it, a hair
-                            // before the line between it and its body's origin.
-                            let (fraction, normal) = first_cell_crossing(segment.position, at);
-                            let allowed = add(segment.position, scale(r, fraction));
-                            let past = dot(sub(at, allowed), normal);
-                            if past < 0.0 {
-                                let pushed_by = push_vertex(
-                                    &mut self.segments[index],
-                                    r,
-                                    &frame,
-                                    normal,
-                                    -past,
-                                    inverse_mass,
-                                    inverse_inertia,
-                                );
-                                wall_this[index] = add(wall_this[index], scale(normal, pushed_by));
-                                self.wall_vertices[index] = vertex_index as u32;
-                                pushed[index] |= 1u128 << (vertex_index % 128);
-                            }
-                            continue;
-                        }
-                        let depth = ground(at[0], at[2]) - at[1];
-                        if depth > 0.0 {
-                            // The floor claims everything at or below it: the vertex is lifted
-                            // to its floor, and the lift turns the segment about the axis the
-                            // vertex's offset makes with it.
-                            pushed[index] |= 1u128 << (vertex_index % 128);
-                            lift_this[index] += push_vertex(
-                                &mut self.segments[index],
-                                r,
-                                &frame,
-                                [0.0, 1.0, 0.0],
-                                depth,
-                                inverse_mass,
-                                inverse_inertia,
-                            );
-                        }
-                    }
-                }
+                // The world last, so no segment ends a sweep under its floor or inside a wall.
+                self.touch_world(
+                    count,
+                    vertices,
+                    ground,
+                    &mut wall_this,
+                    &mut lift_this,
+                    &mut pushed,
+                    inverse_mass,
+                    inverse_inertia,
+                );
+            }
+
+            // The world has the last word. A sweep pushes every vertex out of the world one
+            // at a time, and each later push turns the segment and can drive an earlier
+            // vertex back in; behind a head hammered by a hostile servo the last sweep's own
+            // vertices left over a centimetre inside a riser (the deep tier's seed 101). So
+            // after the joints have had their say the vertices alone are swept again, until
+            // nothing ends the substep inside a wall or under a floor; what that moves, the
+            // joints absorb within the millimetres the deep tier holds them to.
+            for _ in 0..CONTACT_SWEEPS {
+                self.touch_world(
+                    count,
+                    vertices,
+                    ground,
+                    &mut wall_this,
+                    &mut lift_this,
+                    &mut pushed,
+                    inverse_mass,
+                    inverse_inertia,
+                );
             }
 
             // Velocities are what the positions did.
@@ -653,6 +633,83 @@ impl Chain {
             }
         }
         self.tell_poses();
+    }
+
+    /// Every vertex of every segment against the world, once, in a fixed order: against its
+    /// own floor, or against the riser it stands inside. The floor a vertex is measured
+    /// against is the one under its segment's origin - the cell the body stands in - not the
+    /// one under the vertex a substep ago: a vertex nudged over a line after the wall pushed
+    /// it out would otherwise see no rise, be taken for standing on the higher floor, and be
+    /// lifted a wall's height in one sweep. A cell more than a climb above the body's own is
+    /// a wall, whichever way the vertex got in. What the walls pushed with and what the
+    /// floor lifted are added up for the letter, and every vertex touched is marked for the
+    /// velocity pass.
+    #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
+    fn touch_world(
+        &mut self,
+        count: usize,
+        vertices: &[[f32; 3]],
+        ground: &dyn Fn(f32, f32) -> f32,
+        wall_this: &mut [[f32; 3]; SEGMENTS_MAX as usize],
+        lift_this: &mut [f32; SEGMENTS_MAX as usize],
+        pushed: &mut [u128; SEGMENTS_MAX as usize],
+        inverse_mass: f32,
+        inverse_inertia: f32,
+    ) {
+        // every vertex against its own floor, or against the riser it stands inside.
+        // The floor a vertex is measured against is the one under its segment's
+        // origin - the cell the body stands in - not the one under the vertex a
+        // substep ago: a vertex nudged over a line after the wall pushed it out would
+        // otherwise see no rise, be taken for standing on the higher floor, and be
+        // lifted a wall's height in one sweep. A cell more than a climb above the
+        // body's own is a wall, whichever way the vertex got in.
+        for index in 0..count {
+            for (vertex_index, vertex) in vertices.iter().enumerate() {
+                let segment = self.segments[index];
+                let frame = Frame::of(segment.yaw, segment.pitch);
+                let r = frame.offset(*vertex);
+                let at = add(segment.position, r);
+                let rise = ground(at[0], at[2]) - ground(segment.position[0], segment.position[2]);
+                if rise > CLIMB_LIMIT_METRES {
+                    // A riser too tall to climb: the vertex stands against it, a hair
+                    // before the line between it and its body's origin.
+                    let (fraction, normal) = first_cell_crossing(segment.position, at);
+                    let allowed = add(segment.position, scale(r, fraction));
+                    let past = dot(sub(at, allowed), normal);
+                    if past < 0.0 {
+                        let pushed_by = push_vertex(
+                            &mut self.segments[index],
+                            r,
+                            &frame,
+                            normal,
+                            -past,
+                            inverse_mass,
+                            inverse_inertia,
+                        );
+                        wall_this[index] = add(wall_this[index], scale(normal, pushed_by));
+                        self.wall_vertices[index] = vertex_index as u32;
+                        pushed[index] |= 1u128 << (vertex_index % 128);
+                    }
+                    continue;
+                }
+                let depth = ground(at[0], at[2]) - at[1];
+                if depth > 0.0 {
+                    // The floor claims everything at or below it: the vertex is lifted
+                    // to its floor, and the lift turns the segment about the axis the
+                    // vertex's offset makes with it.
+                    pushed[index] |= 1u128 << (vertex_index % 128);
+                    lift_this[index] += push_vertex(
+                        &mut self.segments[index],
+                        r,
+                        &frame,
+                        [0.0, 1.0, 0.0],
+                        depth,
+                        inverse_mass,
+                        inverse_inertia,
+                    );
+                }
+            }
+        }
     }
 
     /// Whether any vertex of segment `index` rests on its floor, and which: the letter's
