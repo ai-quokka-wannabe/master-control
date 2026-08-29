@@ -102,6 +102,10 @@ pub struct BodyBounds {
     pub max_turn_rate: f32,
     pub max_vocalisation_strength: f32,
     pub max_contact_count: usize,
+    /// The most a servo is asked to hold, radians; zero is a body with no servos.
+    pub max_joint_angle: f32,
+    /// The most a servo holds with, newton-metres; zero with a zero angle.
+    pub max_joint_torque: f32,
 }
 
 /// The first body: a metre a second and a right angle a second - legible in a log, exactly the
@@ -111,6 +115,8 @@ pub const FIRST_BODY: BodyBounds = BodyBounds {
     max_turn_rate: std::f32::consts::FRAC_PI_2,
     max_vocalisation_strength: 1.0,
     max_contact_count: 4,
+    max_joint_angle: 0.0,
+    max_joint_torque: 0.0,
 };
 
 /// A creature's seed, derived rather than drawn so the same roster produces the same seeds on
@@ -146,6 +152,10 @@ pub fn sanitise_and_clamp(intent: Intent, bounds: &BodyBounds) -> Intent {
     let finite_or_zero = |value: f32| if value.is_normal() { value } else { 0.0 };
 
     let vocalisation = finite_or_zero(intent.vocalisation);
+    let mut joint_targets = [0.0f32; crate::link_dll::TRAILING_SEGMENTS_MAX];
+    for (target, asked) in joint_targets.iter_mut().zip(intent.joint_targets.iter()) {
+        *target = clamp_magnitude(finite_or_zero(*asked), bounds.max_joint_angle);
+    }
     Intent {
         forward_speed: clamp_magnitude(
             finite_or_zero(intent.forward_speed),
@@ -158,6 +168,7 @@ pub fn sanitise_and_clamp(intent: Intent, bounds: &BodyBounds) -> Intent {
         } else {
             clamp_magnitude(vocalisation, bounds.max_vocalisation_strength)
         },
+        joint_targets,
     }
 }
 
@@ -325,28 +336,18 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
     // floor contacts' slip and the row's velocity are made of.
     let mut chain_velocity: Option<[f32; 3]> = None;
 
-    if body.grounded && body.chain.trails() {
-        // The articulated body (chain.rs, Etape 8): the intent is the gait - a travelling
-        // wave of joint targets, until the Program brings its own - and the head goes where
-        // the chain's push against the floor takes it. Nothing commands a velocity.
-        let forward_fraction = if body.bounds.max_forward_speed > 0.0 {
-            staged.forward_speed / body.bounds.max_forward_speed
-        } else {
-            0.0
+    if body.grounded && body.chain.trails() && body.bounds.max_joint_angle > 0.0 {
+        // The articulated body (chain.rs, Etape 8): the intent is the Program's own gait - the
+        // angle it asks each servo to hold - and the head goes where the chain's push against
+        // the floor takes it. Nothing commands a velocity; a body that declared servos has no
+        // velocity actuator to command.
+        let drive = crate::chain::Drive {
+            targets: staged.joint_targets,
         };
-        let turn_fraction = if body.bounds.max_turn_rate > 0.0 {
-            staged.turn_rate / body.bounds.max_turn_rate
-        } else {
-            0.0
-        };
-        let drive = body.chain.gait(
-            forward_fraction,
-            turn_fraction,
-            body.bounds.max_forward_speed,
-        );
         body.chain
             .set_head(position_before, yaw_before, velocity_before);
-        body.chain.step(&drive, position_before[1]);
+        body.chain
+            .step(&drive, position_before[1], body.bounds.max_joint_torque);
         let head = body.chain.head();
         x = head.position[0];
         z = head.position[2];
@@ -664,6 +665,8 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 
         hasher.float(body.bounds.max_forward_speed);
         hasher.float(body.bounds.max_turn_rate);
         hasher.float(body.bounds.max_vocalisation_strength);
+        hasher.float(body.bounds.max_joint_angle);
+        hasher.float(body.bounds.max_joint_torque);
         hasher.u32(
             body.bounds
                 .max_contact_count
@@ -692,9 +695,6 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 
         // told on the wire, derived but where a divergence must be caught at once.
         hasher.u32(body.chain.segment_count);
         hasher.float(body.chain.spacing);
-        hasher.float(body.chain.phase);
-        hasher.float(body.chain.amplitude);
-        hasher.float(body.chain.bias);
         hasher.floats(&body.chain.targets);
         hasher.u32(body.chain.keel_count);
         for keel in &body.chain.keels {
@@ -1186,6 +1186,7 @@ mod hull_tests {
                 forward_speed: 1.0,
                 turn_rate: 0.0,
                 vocalisation: 0.0,
+                joint_targets: [0.0; 7],
             },
             |_, _| 0.0,
         );
@@ -1208,6 +1209,7 @@ mod hull_tests {
                 forward_speed: 1.0,
                 turn_rate: 0.0,
                 vocalisation: 0.0,
+                joint_targets: [0.0; 7],
             },
             terrace,
         );
@@ -1248,6 +1250,7 @@ mod hull_tests {
                 forward_speed: 1.0,
                 turn_rate: 0.0,
                 vocalisation: 0.0,
+                joint_targets: [0.0; 7],
             },
             terrace,
         );
@@ -1335,6 +1338,7 @@ mod hull_tests {
                 forward_speed: 1.0,
                 turn_rate: 0.0,
                 vocalisation: 0.0,
+                joint_targets: [0.0; 7],
             },
             |_, _| 0.0,
         );
@@ -1471,6 +1475,7 @@ mod hull_tests {
                 forward_speed: 1.0,
                 turn_rate: 0.0,
                 vocalisation: 0.0,
+                joint_targets: [0.0; 7],
             },
             terrace,
         );
@@ -1560,6 +1565,7 @@ mod tests {
             forward_speed: f32::from_bits(1), // the smallest positive subnormal
             turn_rate: -1.0e-40,
             vocalisation: f32::MIN_POSITIVE / 2.0,
+            joint_targets: [1.0e-40; 7],
         };
         let clean = sanitise_and_clamp(tiny, &FIRST_BODY);
         assert_eq!(clean.forward_speed.to_bits(), 0.0f32.to_bits());
@@ -1574,6 +1580,7 @@ mod tests {
             forward_speed: f32::MIN_POSITIVE,
             turn_rate: -f32::MIN_POSITIVE,
             vocalisation: f32::MIN_POSITIVE,
+            joint_targets: [0.0; 7],
         };
         let kept = sanitise_and_clamp(normal, &FIRST_BODY);
         assert_eq!(kept.forward_speed, f32::MIN_POSITIVE);
@@ -1584,6 +1591,7 @@ mod tests {
                 forward_speed: -0.0,
                 turn_rate: -0.0,
                 vocalisation: -0.0,
+                joint_targets: [0.0; 7],
             },
             &FIRST_BODY,
         );
@@ -1595,6 +1603,7 @@ mod tests {
             forward_speed: f32::MAX,
             turn_rate: -f32::MAX,
             vocalisation: f32::MAX,
+            joint_targets: [0.0; 7],
         };
         let clamped = sanitise_and_clamp(huge, &FIRST_BODY);
         assert_eq!(clamped.forward_speed, FIRST_BODY.max_forward_speed);
@@ -1608,6 +1617,7 @@ mod tests {
             forward_speed: f32::NAN,
             turn_rate: f32::INFINITY,
             vocalisation: f32::NAN,
+            joint_targets: [0.0; 7],
         };
         let clean = sanitise_and_clamp(garbage, &FIRST_BODY);
         assert_eq!(
@@ -1629,6 +1639,7 @@ mod tests {
             forward_speed: -2.5,
             turn_rate: 9.0,
             vocalisation: -0.5,
+            joint_targets: [0.0; 7],
         };
         let clean = sanitise_and_clamp(intent, &FIRST_BODY);
         assert!(
@@ -1674,12 +1685,14 @@ mod tests {
                     forward_speed: 0.5,
                     turn_rate: 1.0,
                     vocalisation: 0.8,
+                    joint_targets: [0.0; 7],
                 }
             } else if tick == 160 {
                 Intent {
                     forward_speed: f32::NAN,
                     turn_rate: f32::INFINITY,
                     vocalisation: -3.0,
+                    joint_targets: [0.0; 7],
                 }
             } else if tick < 220 {
                 Intent {
@@ -1738,6 +1751,7 @@ mod tests {
                 forward_speed: 1.0,
                 turn_rate: 0.2,
                 vocalisation: 0.0,
+                joint_targets: [0.0; 7],
             },
             &FIRST_BODY,
         );
@@ -1838,12 +1852,8 @@ mod tests {
         let mut bent = chained.clone();
         let mut drive = crate::chain::Drive::default();
         drive.targets[0] = 0.4;
-        bent.chain.step(&drive, BODY_HALF_HEIGHT);
+        bent.chain.step(&drive, BODY_HALF_HEIGHT, 5.0);
         assert_ne!(with_chain, state_hash([(7u32, &bent)]));
-        // The gait's phase is state: the same chain a beat into its wave hashes apart.
-        let mut beating = chained.clone();
-        beating.chain.gait(1.0, 0.0, 1.0);
-        assert_ne!(with_chain, state_hash([(7u32, &beating)]));
         // Negative zero and zero are two bit patterns, and the hash says so: a world that
         // replays bit for bit agrees on the sign of nothing too.
         let mut minus = body.clone();
@@ -1865,6 +1875,7 @@ mod tests {
                         forward_speed: 0.75,
                         turn_rate: (tick % 7) as f32 * 0.1,
                         vocalisation: 0.0,
+                        joint_targets: [0.0; 7],
                     },
                     &FIRST_BODY,
                 );

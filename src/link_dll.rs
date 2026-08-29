@@ -37,7 +37,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -173,6 +173,8 @@ pub struct Rez {
     pub segment_count: u32,
     /// Metres between consecutive segments' origins along the head's path; 0 for one segment.
     pub segment_spacing: f32,
+    pub max_joint_angle: f32,
+    pub max_joint_torque: f32,
 }
 
 /// `LnkSegmentPose`: one trailing segment's pose, world space, the head's conventions.
@@ -239,6 +241,8 @@ pub struct Actions {
     pub previous_forward_speed: f32,
     pub previous_turn_rate: f32,
     pub previous_vocalisation: f32,
+    pub joint_targets: [f32; TRAILING_SEGMENTS_MAX],
+    pub previous_joint_targets: [f32; TRAILING_SEGMENTS_MAX],
     pub reserved0: [u8; 4],
 }
 
@@ -287,7 +291,7 @@ pub struct Pong {
 const _: () = assert!(size_of::<WorldDefinition>() == 40);
 const _: () = assert!(size_of::<Hello>() == 48);
 const _: () = assert!(size_of::<Welcome>() == 24);
-const _: () = assert!(size_of::<Rez>() == 40);
+const _: () = assert!(size_of::<Rez>() == 48);
 const _: () = assert!(size_of::<SegmentPose>() == 16);
 const _: () = assert!(size_of::<RezVertex>() == 12);
 const _: () = assert!(size_of::<RezTriangle>() == 16);
@@ -296,7 +300,7 @@ const _: () = assert!(size_of::<Contact>() == 52);
 const _: () = assert!(size_of::<Proprioception>() == 32);
 const _: () = assert!(size_of::<CreatureState>() == 156);
 const _: () = assert!(size_of::<TickStateHeader>() == 16);
-const _: () = assert!(size_of::<Actions>() == 40);
+const _: () = assert!(size_of::<Actions>() == 96);
 const _: () = assert!(size_of::<Event>() == 32);
 const _: () = assert!(size_of::<Derez>() == 16);
 const _: () = assert!(size_of::<Refused>() == 16);
@@ -306,7 +310,7 @@ const _: () = assert!(size_of::<Refused>() == 16);
 // ---------------------------------------------------------------------------------------------
 
 /// `LNK_CLIENT_ABI_VERSION` this binding was written against; the export refuses any other.
-pub const CLIENT_ABI_VERSION: u32 = 8;
+pub const CLIENT_ABI_VERSION: u32 = 9;
 
 pub type LnkStatus = i32;
 

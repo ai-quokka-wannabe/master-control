@@ -32,11 +32,10 @@
 //! promise holds: per build, any machine. Nothing here allocates.
 //!
 //! The gait - which joint bends when - is the creature's, not the world's: a Program's muscles.
-//! Until the wire carries joint targets (the etape's third movement), [`Chain::gait`] is the
-//! bridge: it turns the speed and turn the wire still carries into a travelling wave of joint
-//! targets, with the frequency bounded so the wave's phase speed is the body's declared top
-//! speed - the body can never outrun its own wave. A bridge, documented as one, retired when
-//! the Program brings the gait itself.
+//! The wire carries the angle each servo is asked to hold (link v9), the world clamps it to
+//! the body's declared swing and holds it with no more than the body's declared torque, and
+//! that is the whole of what the world knows about walking. The bridge that turned a speed
+//! into a wave while the wire could not carry one is gone with the third movement.
 use crate::hull::KEELS_MAX;
 use crate::link_dll::{SEGMENTS_MAX, SegmentPose, TRAILING_SEGMENTS_MAX};
 use crate::physics::{BODY_CIRCUMRADIUS_FOR_INERTIA, BODY_MASS_KG, GRAVITY, TICK_SECONDS};
@@ -79,12 +78,13 @@ pub const ITERATIONS: usize = 16;
 pub const SEGMENT_INERTIA: f32 =
     0.4 * BODY_MASS_KG * BODY_CIRCUMRADIUS_FOR_INERTIA * BODY_CIRCUMRADIUS_FOR_INERTIA;
 
-/// The motors' compliance, radians per newton-metre: a muscle's, five newton-metres per
-/// radian, which on a kilogram body is a joint that reaches a new target over a few ticks
-/// rather than snapping to it. A stiffer motor than the pivots also fights them sweep after
-/// sweep - each pass undoing the other's - and never settles; a muscle softer than the
-/// joint it works lets the pivots win every sweep, which is what a joint is.
-pub const MOTOR_COMPLIANCE: f32 = 0.2;
+/// The servos' compliance, radians per newton-metre: a hundred newton-metres per radian, a
+/// position-controlled servo's stiffness - it holds its angle within a degree under the load
+/// a worm's runners put on it - and what limits it is not give but torque: past its declared
+/// torque it stalls. (The first draft made this a five-newton-metre-per-radian muscle; under
+/// the runners' load such a joint lagged its target by most of the wave, and the body barely
+/// moved. A servo is stiff and saturates; that is the robot the owner asked for.)
+pub const MOTOR_COMPLIANCE: f32 = 0.01;
 
 /// Coulomb friction between a tube lying along the Grid floor and the floor, sliding along
 /// the tube's length: a runner glides. A sharp point on a hard floor rubs the same in every
@@ -107,29 +107,8 @@ pub const FRICTION_PLOUGH: f32 = 2.0;
 /// circumradius: a twist drags every runner across itself.
 pub const FRICTION_SPIN: f32 = FRICTION_PLOUGH;
 
-/// The gait bridge: the wave's amplitude at every joint at the body's top speed, radians -
-/// about fifty degrees, what a lateral undulator's joints swing; less and the push is weak,
-/// more and the body folds on itself and drifts.
-/// Nothing at rest - a resting undulator relaxes, it does not hold a frozen wave - and the
-/// amplitude follows the speed command a share of the way each tick, so a launch swells
-/// the wave over half a second rather than snapping the body into it.
-pub const GAIT_AMPLITUDE: f32 = 0.9;
-
-/// The gait bridge: the share of the way the amplitude moves towards the command's each
-/// tick. State, hashed - the motors' targets depend on it.
-pub const GAIT_RISE: f32 = 0.15;
-
-/// The gait bridge: the wave's length along the body, in segments - four, so an eight-segment
-/// worm carries two waves, the proportion of a lateral undulator.
-pub const GAIT_WAVELENGTH_SEGMENTS: f32 = 4.0;
-
-/// The gait bridge: the most a turn command bends every joint the same way, radians. Eased
-/// like the amplitude - a turn is a muscle too, and a joint asked to jump would be asked
-/// for a snap no muscle makes.
-pub const GAIT_BIAS: f32 = 0.4;
-
-/// A creature's chain: its segments as rigid bodies, the joints between them, and the gait's
-/// phase while the world still generates the gait.
+/// A creature's chain: its segments as rigid bodies, the servos at the joints between them,
+/// and the runners it lies on.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Chain {
     /// Segments in the chain, the head counted: 1 for a single body.
@@ -139,16 +118,8 @@ pub struct Chain {
     pub spacing: f32,
     /// Every segment, the head at zero; the slots beyond `segment_count` stay default.
     pub segments: [Segment; SEGMENTS_MAX as usize],
-    /// The gait bridge's phase, radians in [0, tau): state, hashed - the wave is a function
-    /// of it.
-    pub phase: f32,
-    /// The gait bridge's amplitude as it stands, radians: state, hashed - it follows the
-    /// speed command a share of the way each tick rather than jumping to it.
-    pub amplitude: f32,
-    /// The gait bridge's bias as it stands, radians: state, hashed, eased the same way.
-    pub bias: f32,
-    /// The joint targets last driven, `segment_count - 1` meaningful: state, hashed - the
-    /// motors hold them between one drive and the next.
+    /// The angles the servos were last asked to hold, `segment_count - 1` meaningful: state,
+    /// hashed - the servos hold them between one drive and the next.
     pub targets: [f32; TRAILING_SEGMENTS_MAX],
     /// The keels every segment rests on, body frame, unit (x, z), `keel_count` meaningful:
     /// read from the hull at rez, fixed for the life, hashed - a body with other runners
@@ -172,9 +143,6 @@ impl Chain {
             segment_count: 1,
             spacing: 0.0,
             segments: [Segment::default(); SEGMENTS_MAX as usize],
-            phase: 0.0,
-            amplitude: 0.0,
-            bias: 0.0,
             targets: [0.0; TRAILING_SEGMENTS_MAX],
             keels: [[0.0; 2]; KEELS_MAX],
             keel_count: 0,
@@ -212,9 +180,6 @@ impl Chain {
             segment_count: count as u32,
             spacing,
             segments,
-            phase: 0.0,
-            amplitude: 0.0,
-            bias: 0.0,
             targets: [0.0; TRAILING_SEGMENTS_MAX],
             keels: [[0.0; 2]; KEELS_MAX],
             keel_count: 0,
@@ -322,44 +287,12 @@ impl Chain {
         self.tell_poses();
     }
 
-    /// The gait bridge: the speed and turn the wire carries, as fractions of the body's bounds
-    /// in [-1, 1], become a travelling wave of joint targets. The wave's frequency is the speed
-    /// command over the wave's length, so its phase speed is at most the declared top speed and
-    /// a body pushing against it can never outrun its own bound; a negative speed runs the wave
-    /// the other way, and the worm backs up. The turn bends every joint the same way, a bias on
-    /// the wave. The phase is state.
-    pub fn gait(&mut self, forward_fraction: f32, turn_fraction: f32, top_speed: f32) -> Drive {
-        let mut drive = Drive::default();
-        if !self.trails() {
-            return drive;
-        }
-        let wavelength = GAIT_WAVELENGTH_SEGMENTS * self.spacing;
-        let frequency = if wavelength > 0.0 {
-            forward_fraction.clamp(-1.0, 1.0) * top_speed / wavelength
-        } else {
-            0.0
-        };
-        self.phase = (self.phase + std::f32::consts::TAU * frequency * TICK_SECONDS)
-            .rem_euclid(std::f32::consts::TAU);
-        let wanted = GAIT_AMPLITUDE * forward_fraction.clamp(-1.0, 1.0).abs();
-        self.amplitude += (wanted - self.amplitude) * GAIT_RISE;
-        let wanted_bias = turn_fraction.clamp(-1.0, 1.0) * GAIT_BIAS;
-        self.bias += (wanted_bias - self.bias) * GAIT_RISE;
-        let bias = self.bias;
-        let joints = (self.segment_count - 1) as usize;
-        for (joint, target) in drive.targets.iter_mut().enumerate().take(joints) {
-            #[allow(clippy::cast_precision_loss)]
-            let lag = joint as f32 * std::f32::consts::TAU / GAIT_WAVELENGTH_SEGMENTS;
-            *target = self.amplitude * trig::sin(self.phase - lag) + bias;
-        }
-        drive
-    }
-
-    /// One tick of the articulated body: the motors driven to `drive`, the pivots held, every
-    /// segment's spikes rubbing on the floor, the chain lying at `height` - the head's. The
+    /// One tick of the articulated body: the servos driven to `drive` with no more than
+    /// `max_torque` newton-metres each, the pivots held, every segment's runners rubbing on the
+    /// floor, the chain lying at `height` - the head's. The
     /// head's result is read by `physics.rs`, which meets the risers and the air with it and
     /// writes back what it settled.
-    pub fn step(&mut self, drive: &Drive, height: f32) {
+    pub fn step(&mut self, drive: &Drive, height: f32, max_torque: f32) {
         if !self.trails() {
             return;
         }
@@ -374,10 +307,16 @@ impl Chain {
         #[allow(clippy::cast_precision_loss)]
         let h = TICK_SECONDS / SUBSTEPS as f32;
         let compliance = MOTOR_COMPLIANCE / (h * h);
+        // XPBD's lambda is an impulse-like quantity; the torque it stands for is lambda over
+        // the substep squared, so the servo's torque limit bounds lambda by that much.
+        let lambda_limit = max_torque * h * h;
         let cap_spin = FRICTION_SPIN * GRAVITY * h / BODY_CIRCUMRADIUS_FOR_INERTIA;
 
         for _ in 0..SUBSTEPS {
             let previous = self.segments;
+            // XPBD accumulates each constraint's lambda over a substep's sweeps: the servo's
+            // torque limit bounds the total, not one sweep's share of it.
+            let mut lambdas = [0.0f32; TRAILING_SEGMENTS_MAX];
 
             // Predict: every segment carries on as it was moving.
             for segment in self.segments.iter_mut().take(count) {
@@ -390,13 +329,15 @@ impl Chain {
             for _ in 0..ITERATIONS {
                 // The motors first, then the pivots: a motor turns a segment and moves its tips,
                 // so the pivots must have the last word in every sweep.
-                for joint in 0..joints {
+                for (joint, lambda) in lambdas.iter_mut().enumerate().take(joints) {
                     drive_motor(
                         &mut self.segments,
                         joint,
                         self.targets[joint],
                         inverse_inertia,
                         compliance,
+                        lambda_limit,
+                        lambda,
                     );
                 }
                 for joint in 0..joints {
@@ -579,19 +520,29 @@ fn hold_pivot(
     b.yaw -= lambda * kb * inverse_inertia;
 }
 
-/// The motor at joint `k`: the angle between the two segments driven to its target, a
-/// compliant angular constraint - the muscle.
+/// The servo at joint `k`: the angle between the two segments driven to its target, a
+/// compliant angular constraint with a torque limit - the muscle.
 fn drive_motor(
     segments: &mut [Segment],
     joint: usize,
     target: f32,
     inverse_inertia: f32,
     compliance: f32,
+    lambda_limit: f32,
+    lambda: &mut f32,
 ) {
     let angle = segments[joint + 1].yaw - segments[joint].yaw;
     let error = angle - target;
     let w = inverse_inertia + inverse_inertia + compliance;
-    let lambda = -error / w;
+    // XPBD: the correction this sweep is what the constraint and the compliance still owe,
+    // given what the substep's earlier sweeps already applied. A servo holds with what torque
+    // it has: the total is clamped to its limit, so past it the servo stalls, and a body
+    // squeezed against a wall gives at its joints rather than driving through it.
+    let wanted = *lambda + (-error - compliance * *lambda) / w;
+    let clamped = wanted.clamp(-lambda_limit, lambda_limit);
+    let delta = clamped - *lambda;
+    *lambda = clamped;
+    let lambda = delta;
     segments[joint].yaw -= lambda * inverse_inertia;
     segments[joint + 1].yaw += lambda * inverse_inertia;
 }
@@ -629,6 +580,21 @@ fn right_for(yaw: f32) -> [f32; 3] {
 #[allow(clippy::disallowed_methods)] // Expected values may use the platform's: compared within a tolerance.
 mod tests {
     use super::*;
+
+    /// The tests' own gait: a travelling wave of servo targets, what a Program sends. The
+    /// wave's crest runs tailward as the phase advances, so the body goes forward.
+    pub(crate) fn wave(phase: f32, amplitude: f32, bias: f32) -> Drive {
+        let mut drive = Drive::default();
+        for (joint, target) in drive.targets.iter_mut().enumerate() {
+            #[allow(clippy::cast_precision_loss)]
+            let lag = joint as f32 * std::f32::consts::TAU / 4.0;
+            *target = amplitude * (phase - lag).sin() + bias;
+        }
+        drive
+    }
+
+    /// A worm's own torque, as its rez would declare it: five newton-metres.
+    const TORQUE: f32 = 5.0;
 
     fn head_at(x: f32, z: f32, yaw: f32) -> PathSample {
         PathSample {
@@ -683,7 +649,7 @@ mod tests {
         let start = chain.segments;
         for _ in 0..64 {
             let drive = Drive::default();
-            chain.step(&drive, 0.25);
+            chain.step(&drive, 0.25, TORQUE);
         }
         for (index, (now, was)) in chain.segments.iter().zip(start.iter()).enumerate().take(8) {
             let moved = ((now.position[0] - was.position[0]).powi(2)
@@ -714,7 +680,7 @@ mod tests {
             *target = 0.5 * sign;
         }
         for _ in 0..96 {
-            chain.step(&drive, 0.25);
+            chain.step(&drive, 0.25, TORQUE);
             for joint in 0..7 {
                 let gap = chain.joint_gap(joint);
                 assert!(gap < 2e-3, "joint {joint} gap {gap} m while bending");
@@ -728,49 +694,6 @@ mod tests {
                 drive.targets[joint]
             );
         }
-    }
-
-    #[test]
-    fn the_gait_is_a_travelling_wave_bounded_by_the_top_speed() {
-        let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
-        // Full speed ahead: the frequency is the top speed over the wavelength.
-        let wavelength = GAIT_WAVELENGTH_SEGMENTS * 0.56;
-        let expected_advance = std::f32::consts::TAU * (1.0 / wavelength) * TICK_SECONDS;
-        let first = chain.gait(1.0, 0.0, 1.0);
-        assert!((chain.phase - expected_advance).abs() < 1e-6);
-        let second = chain.gait(1.0, 0.0, 1.0);
-        // The amplitude swells from rest a share at a time rather than snapping to full.
-        assert!(
-            (chain.amplitude - GAIT_AMPLITUDE * (1.0 - (1.0 - GAIT_RISE) * (1.0 - GAIT_RISE)))
-                .abs()
-                < 1e-6
-        );
-        assert!(first.targets[0].abs() <= GAIT_AMPLITUDE + 1e-6);
-        assert_ne!(first.targets, second.targets);
-        // At rest the wave relaxes: a chain never asked to move holds every joint straight.
-        let mut resting = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
-        let relaxed = resting.gait(0.0, 0.0, 1.0);
-        assert_eq!(relaxed.targets, [0.0; TRAILING_SEGMENTS_MAX]);
-        // A turn biases every joint the same way; the bias is bounded.
-        let mut turning = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
-        let straight = turning.gait(0.0, 0.0, 1.0);
-        let mut turning_left = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
-        let left = turning_left.gait(0.0, 1.0, 1.0);
-        // Eased: one tick in, the bias is a share of the way to the command's.
-        for joint in 0..7 {
-            assert!(
-                (left.targets[joint] - straight.targets[joint] - GAIT_BIAS * GAIT_RISE).abs()
-                    < 1e-6
-            );
-        }
-        // Reverse runs the wave the other way.
-        let mut reversing = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
-        reversing.gait(-1.0, 0.0, 1.0);
-        assert!(
-            reversing.phase > std::f32::consts::PI,
-            "phase {} did not run backwards",
-            reversing.phase
-        );
     }
 
     /// The worm's runners, as the hull test finds them: two, thirty degrees either side of
@@ -790,9 +713,17 @@ mod tests {
             let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
             chain.set_keels(&worm_keels());
             let start = centre_of_mass(&chain);
-            for _ in 0..(32 * 10) {
-                let drive = chain.gait(command, 0.0, 1.0);
-                chain.step(&drive, 0.25);
+            for tick in 0..(32 * 10) {
+                // What the worm's own gait generator sends at full command: a fifty-degree wave,
+                // a wavelength of four segments, its phase speed a metre a second.
+                #[allow(clippy::cast_precision_loss)]
+                let phase = command
+                    * std::f32::consts::TAU
+                    * (1.0 / (4.0 * 0.56))
+                    * TICK_SECONDS
+                    * tick as f32;
+                let drive = wave(phase, 0.9, 0.0);
+                chain.step(&drive, 0.25, TORQUE);
             }
             let end = centre_of_mass(&chain);
             let advance = (end[1] - start[1]) * sign;
@@ -819,9 +750,11 @@ mod tests {
         // and the test above is this one's mirror.
         let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
         let start = centre_of_mass(&chain);
-        for _ in 0..(32 * 10) {
-            let drive = chain.gait(1.0, 0.0, 1.0);
-            chain.step(&drive, 0.25);
+        for tick in 0..(32 * 10) {
+            #[allow(clippy::cast_precision_loss)]
+            let phase = std::f32::consts::TAU * (1.0 / (4.0 * 0.56)) * TICK_SECONDS * tick as f32;
+            let drive = wave(phase, 0.9, 0.0);
+            chain.step(&drive, 0.25, TORQUE);
             for joint in 0..7 {
                 assert!(
                     chain.joint_gap(joint) < 2e-3,
@@ -835,6 +768,40 @@ mod tests {
         assert!(
             travelled < 0.3,
             "an isotropic wriggle travelled {travelled} m in ten seconds"
+        );
+    }
+
+    #[test]
+    fn a_servo_holds_with_no_more_torque_than_its_body_declared() {
+        // The same bend asked of two chains, one with a worm's torque and one with a tenth of
+        // it: the weak servos reach the target later, and a servo with no torque at all
+        // holds nothing - the joints stay straight however hard they are asked.
+        let mut drive = Drive::default();
+        drive.targets[0] = 0.5;
+        let mut strong = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        let mut weak = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        let mut none = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
+        for _ in 0..16 {
+            strong.step(&drive, 0.25, TORQUE);
+            weak.step(&drive, 0.25, TORQUE * 0.1);
+            none.step(&drive, 0.25, 0.0);
+        }
+        let reached = |chain: &Chain| chain.joint_angle(0) / 0.5;
+        assert!(
+            reached(&strong) > reached(&weak) + 0.05,
+            "strong {} weak {}",
+            reached(&strong),
+            reached(&weak)
+        );
+        assert!(
+            reached(&weak) > 0.05,
+            "the weak servo still bends: {}",
+            reached(&weak)
+        );
+        assert!(
+            reached(&none).abs() < 1e-6,
+            "no torque, no bend: {}",
+            reached(&none)
         );
     }
 
@@ -872,8 +839,9 @@ mod tests {
             for tick in 0..200u32 {
                 #[allow(clippy::cast_precision_loss)]
                 let turn = ((tick % 40) as f32 / 40.0) - 0.5;
-                let drive = chain.gait(0.8, turn, 1.0);
-                chain.step(&drive, 0.25);
+                #[allow(clippy::cast_precision_loss)]
+                let drive = wave(0.8 * tick as f32 * 0.1, 0.7, 0.4 * turn);
+                chain.step(&drive, 0.25, TORQUE);
             }
             chain
         };

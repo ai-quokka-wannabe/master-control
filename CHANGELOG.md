@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Etape 8, movement 3: the gait is the creature's - the servos on the wire.** Link v9:
+  `REZ` declares a body's servos by bound (`max_joint_angle`, `max_joint_torque`; zero is no
+  such actuator, so a chain declares servos and no velocity actuator and a point proxy the
+  reverse - refused by name otherwise) and `ACTIONS` carries `joint_targets[7]`, the angle
+  each servo is asked to hold. The world clamps each to the body's swing, drives the chain by
+  them, and holds every servo with no more than its declared torque - XPBD's lambda
+  accumulated per servo per substep and clamped, the published form - so a servo stalls past
+  its torque and a body squeezed against a wall gives at its joints. The gait bridge is gone.
+  A servo is stiff position control that saturates (a hundred newton-metres per radian; the
+  muscle-soft draft lagged and barely moved). Measured: the worm's own wave carries it 1.0 m
+  in ten seconds, straight, symmetric in reverse. The log's `applied` and `rez` lines carry the
+  servos and Clu reads them; the random walk thrashes them. Golden re-recorded.
 - **Etape 8, movement 2: the keels - the worm moves.** The owner's mandate: as realistically
   as possible. A sharp spike on a hard floor rubs the same every way and propels nothing; what
   a spiky body rests on is its tubes, and a tube along the floor is a runner that glides along
