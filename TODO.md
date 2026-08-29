@@ -378,8 +378,10 @@ weak-servoed robot would; reported, not tuned. The runners' wave still carries t
 1.008 m in ten seconds. The letter (link v11) carries `joint_torques[7]` - the servo's
 multiplier over the substep squared at the tick's end - and every segment's contacts in the
 head's frame, the floor's support shared among a segment's resting vertices and a wall's
-push at the vertex that met it. The deep tier holds every pitch finite and short of
-upright, no vertex a centimetre under its floor, every torque within its bound.
+push at the vertex that met it. The deep tier holds every pitch finite and within sanity (a
+segment hanging off an edge swings past the vertical on its ball joint, as a dangling rod does -
+seed 102's tail at 98 degrees), no vertex a centimetre under its floor or 5 mm into a riser, every
+torque within its bound.
 
 **After the etape.** The creature's side: close the gait on what it feels, and estimate
 rather than trust (the owner's note on Kalman filters belongs to the creature). Segment
