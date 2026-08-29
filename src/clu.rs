@@ -90,6 +90,29 @@ enum Record {
     },
 }
 
+/// The servo bounds of a rez line: after the vertices, the count and the spacing, `which` is
+/// 0 for the swing and 1 for the torque; zero when the line is from before servos.
+fn servo_bound(words: &[&str], which: usize) -> Result<f32, String> {
+    let count: usize = if words.len() > 7 {
+        words[7]
+            .parse()
+            .map_err(|_| "malformed rez: vertex count".to_string())?
+    } else {
+        0
+    };
+    let at = 10 + count * 3 + which;
+    if words.len() > at {
+        hex_f32(words[at])
+    } else {
+        Ok(0.0)
+    }
+}
+
+/// The trailing-segment count as a const, for an array in a record.
+const fn master_control_trailing() -> usize {
+    crate::link_dll::TRAILING_SEGMENTS_MAX
+}
+
 fn hex_f32(word: &str) -> Result<f32, String> {
     u32::from_str_radix(word, 16)
         .map(f32::from_bits)
@@ -152,6 +175,9 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                 )?,
                 #[allow(clippy::cast_possible_truncation)]
                 max_contact_count: number(6)? as usize,
+                // The servos, after the chain's spacing; a log from before servos declares none.
+                max_joint_angle: servo_bound(&words, 0)?,
+                max_joint_torque: servo_bound(&words, 1)?,
             },
             vertices: {
                 // Older logs end at the contact count: a body without a mesh, as they were.
@@ -223,6 +249,16 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                         .get(6)
                         .ok_or_else(|| format!("malformed applied: {line}"))?,
                 )?,
+                // The servos, after the three; a log from before servos drove none.
+                joint_targets: {
+                    let mut targets = [0.0f32; master_control_trailing()];
+                    for (slot, target) in targets.iter_mut().enumerate() {
+                        if let Some(word) = words.get(7 + slot) {
+                            *target = hex_f32(word)?;
+                        }
+                    }
+                    targets
+                },
             },
         })),
         "hash" => Ok(Some(Record::Hash {

@@ -65,6 +65,11 @@ pub const SET_DRESSING_ROWS: u32 = 3;
 /// and a silent clamp is a creature whose host believes a lie.
 pub const WORLD_MAX_FORWARD_SPEED: f32 = 10.0;
 pub const WORLD_MAX_TURN_RATE: f32 = std::f32::consts::TAU;
+/// The most swing a servo may declare: a right angle - more and two segments would fold
+/// through one another.
+pub const WORLD_MAX_JOINT_ANGLE: f32 = std::f32::consts::FRAC_PI_2;
+/// The most torque a servo may declare, newton-metres: a hundred is a machine, not a worm.
+pub const WORLD_MAX_JOINT_TORQUE: f32 = 100.0;
 pub const WORLD_MAX_VOCALISATION: f32 = 1.0;
 /// No more than the owner's letter can carry - the wire's cap is the world's.
 pub const WORLD_MAX_CONTACTS: u32 = CONTACTS_MAX;
@@ -103,6 +108,8 @@ impl Model {
             material_count: 0,
             segment_count: 1,
             segment_spacing: 0.0,
+            max_joint_angle: bounds.max_joint_angle,
+            max_joint_torque: bounds.max_joint_torque,
         };
         Model {
             header,
@@ -685,14 +692,27 @@ fn spawned(bounds: BodyBounds) -> Body {
 }
 
 /// The declared bounds, admitted only inside the world's own: finite (the wire guarantees),
-/// positive (a body that cannot move is a bug in its host, not a creature), and no larger than
-/// the world allows.
+/// non-negative - a bound of zero is no such actuator, the Program ABI's own rule, so a worm
+/// declares servos and no velocity actuator and a point proxy the reverse - and no larger
+/// than the world allows. A body that declares no actuator at all sits where it is put.
 fn world_bounds(header: &Rez) -> Result<BodyBounds, &'static str> {
-    if !(header.max_forward_speed > 0.0 && header.max_forward_speed <= WORLD_MAX_FORWARD_SPEED) {
-        return Err("max_forward_speed must lie in (0, 10] m/s");
+    if !(header.max_forward_speed >= 0.0 && header.max_forward_speed <= WORLD_MAX_FORWARD_SPEED) {
+        return Err("max_forward_speed must lie in [0, 10] m/s");
     }
-    if !(header.max_turn_rate > 0.0 && header.max_turn_rate <= WORLD_MAX_TURN_RATE) {
-        return Err("max_turn_rate must lie in (0, 2*pi] rad/s");
+    if !(header.max_turn_rate >= 0.0 && header.max_turn_rate <= WORLD_MAX_TURN_RATE) {
+        return Err("max_turn_rate must lie in [0, 2*pi] rad/s");
+    }
+    if !(header.max_joint_angle >= 0.0 && header.max_joint_angle <= WORLD_MAX_JOINT_ANGLE) {
+        return Err("max_joint_angle must lie in [0, pi/2] rad");
+    }
+    if !(header.max_joint_torque >= 0.0 && header.max_joint_torque <= WORLD_MAX_JOINT_TORQUE) {
+        return Err("max_joint_torque must lie in [0, 100] N*m");
+    }
+    if (header.max_joint_angle == 0.0) != (header.max_joint_torque == 0.0) {
+        return Err("a servo declares its angle and its torque together, or neither");
+    }
+    if header.segment_count > 1 && (header.max_forward_speed > 0.0 || header.max_turn_rate > 0.0) {
+        return Err("a chain moves by its servos and declares no velocity actuator");
     }
     if !(header.max_vocalisation_strength > 0.0
         && header.max_vocalisation_strength <= WORLD_MAX_VOCALISATION)
@@ -707,6 +727,8 @@ fn world_bounds(header: &Rez) -> Result<BodyBounds, &'static str> {
         max_turn_rate: header.max_turn_rate,
         max_vocalisation_strength: header.max_vocalisation_strength,
         max_contact_count: header.max_contact_count as usize,
+        max_joint_angle: header.max_joint_angle,
+        max_joint_torque: header.max_joint_torque,
     })
 }
 
@@ -1002,9 +1024,31 @@ mod tests {
         let mut fast = model(7);
         fast.header.max_forward_speed = WORLD_MAX_FORWARD_SPEED + 0.001;
         assert!(matches!(roster.rez(1, fast), Admission::RefusedBounds(_)));
-        let mut still = model(7);
-        still.header.max_turn_rate = 0.0;
-        assert!(matches!(roster.rez(1, still), Admission::RefusedBounds(_)));
+        // A bound of zero is no such actuator, and admissible; a negative one is refused.
+        let mut backwards = model(7);
+        backwards.header.max_turn_rate = -0.1;
+        assert!(matches!(
+            roster.rez(1, backwards),
+            Admission::RefusedBounds(_)
+        ));
+        // A servo declares its swing and its torque together, or neither.
+        let mut half_servo = model(7);
+        half_servo.header.max_joint_angle = 0.5;
+        assert!(matches!(
+            roster.rez(1, half_servo),
+            Admission::RefusedBounds(_)
+        ));
+        let mut wide = model(7);
+        wide.header.max_joint_angle = WORLD_MAX_JOINT_ANGLE + 0.01;
+        wide.header.max_joint_torque = 1.0;
+        assert!(matches!(roster.rez(1, wide), Admission::RefusedBounds(_)));
+        // A chain moves by its servos: a velocity actuator on one is refused.
+        let mut pushed = model(7);
+        pushed.header.segment_count = 3;
+        pushed.header.segment_spacing = 0.5;
+        pushed.header.max_joint_angle = 0.5;
+        pushed.header.max_joint_torque = 1.0;
+        assert!(matches!(roster.rez(1, pushed), Admission::RefusedBounds(_)));
         let mut loud = model(7);
         loud.header.max_vocalisation_strength = 1.5;
         assert!(matches!(roster.rez(1, loud), Admission::RefusedBounds(_)));
@@ -1151,6 +1195,11 @@ mod tests {
         let mut model = shaped(7);
         model.header.segment_count = 4;
         model.header.segment_spacing = 0.6;
+        // A chain moves by its servos and declares no velocity actuator.
+        model.header.max_joint_angle = 0.9;
+        model.header.max_joint_torque = 5.0;
+        model.header.max_forward_speed = 0.0;
+        model.header.max_turn_rate = 0.0;
         assert_eq!(roster.rez(1, model), Admission::Embodied);
         let standing = roster.step(1, |_| Intent::default());
         assert!(
@@ -1160,12 +1209,23 @@ mod tests {
         );
         // Walk: the head scratches as any body does, and every trailing segment, dragged
         // along behind it, scrapes - four scratches from one worm.
-        let walk = |id: u32| {
+        // The Program's gait, as rc-worm sends it: a travelling wave of servo targets, a
+        // fifty-degree swing, a wavelength of four segments, a metre a second of phase speed.
+        let mut phase = 0.0f32;
+        let mut walk = |id: u32| {
             if id == 7 {
+                phase += std::f32::consts::TAU * (1.0 / (4.0 * 0.6)) * crate::physics::TICK_SECONDS;
+                let mut joint_targets = [0.0f32; 7];
+                for (joint, target) in joint_targets.iter_mut().enumerate().take(3) {
+                    #[allow(clippy::cast_precision_loss)]
+                    let lag = joint as f32 * std::f32::consts::TAU / 4.0;
+                    *target = 0.9 * crate::trig::sin(phase - lag);
+                }
                 Intent {
-                    forward_speed: 1.0,
+                    forward_speed: 0.0,
                     turn_rate: 0.0,
                     vocalisation: 0.0,
+                    joint_targets,
                 }
             } else {
                 Intent::default()
@@ -1177,12 +1237,12 @@ mod tests {
         // each sounded from the floor under the segment, at the segment's own place.
         let mut tick = 2u64;
         for _ in 0..32 {
-            roster.step(tick, walk);
+            roster.step(tick, &mut walk);
             tick += 1;
         }
         let mut heard = [false; 4];
         for _ in 0..32 {
-            let walking = roster.step(tick, walk);
+            let walking = roster.step(tick, &mut walk);
             tick += 1;
             let body = &roster.resident(7).expect("7").body;
             for scrape in walking
@@ -1246,6 +1306,7 @@ mod tests {
                     forward_speed: 1.0,
                     turn_rate: 0.0,
                     vocalisation: 0.0,
+                    joint_targets: [0.0; 7],
                 }
             } else {
                 Intent::default()
@@ -1304,6 +1365,7 @@ mod tests {
             forward_speed: 1.0,
             turn_rate: 0.0,
             vocalisation: 0.5,
+            joint_targets: [0.0; 7],
         });
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].creature_id, 7, "roster order is id order");
@@ -1351,6 +1413,7 @@ mod tests {
             forward_speed: 0.0,
             turn_rate: 0.0,
             vocalisation: 0.5,
+            joint_targets: [0.0; 7],
         });
         assert!(
             later.events.iter().all(|e| e.kind != EVENT_VOCALISATION),
