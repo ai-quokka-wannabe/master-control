@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Rust 1.98.0.** The pin in `rust-toolchain.toml` moves from 1.95.0 (the Tool Updates watcher's
+  #42); rustfmt, clippy, every suite and rustdoc are clean under it without a change to the code.
+  The guides say 1.98.0 where they said 1.95.0.
+
 ### Added
 
 - **Etape 8, movement 3: the gait is the creature's - the servos on the wire.** Link v9:
