@@ -346,11 +346,19 @@ values included, on chains that declare them. Bounds: a servo's swing at most a 
 its torque at most a hundred newton-metres. Golden re-recorded with the Grid and rc-worm
 bringing the gait themselves.
 
-**Movements to come.** 4: proprioception of every joint's angle in `TglSenses`, so the
-creature feels its body and can close its gait loop on it (and, later, estimate rather than
-trust - the owner's note on Kalman filters belongs to the creature). 5: every segment meeting
-risers and the air for itself, the springy squeeze against a wall included. Goldens
-re-recorded per movement.
+**Movement 4, done (2026-08-29): the joints back as proprioception.** Link v10's letter
+carries `joint_angles[7]`, and the world fills it from the chain: `Chain::joint_angle` is
+now the encoder's reading, the neighbours' yaw difference brought within a turn (the yaws
+are unbounded), `Chain::joint_angles` the row - the joints the chain has, zero beyond, seven
+zeros for a body of one segment. What the joint did, not what it was asked; the Grid copies
+it into `TglSenses` (Program ABI 9) and rc-worm shows it. Reported by the letter rather than
+subtracted on the Grid because the letter is the body's one channel of self-report and
+movement 5's servo load cannot be derived from poses. Golden re-recorded at protocol 10.
+
+**Movement to come.** 5: every segment meeting risers and the air for itself, the springy
+squeeze against a wall included, and the servo's load - stall, torque - in the letter beside
+its angle. Then the creature's side: estimate rather than trust (the owner's note on Kalman
+filters belongs to the creature). Goldens re-recorded per movement.
 
 ## Etape 7 — the scrape
 

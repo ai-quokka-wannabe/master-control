@@ -564,7 +564,10 @@ impl Roster {
                     grounded: u8::from(body.grounded),
                     reserved0: [0; 3],
                     specific_force: body.specific_force,
+                    // The servos' own readings - a body of one segment reports seven zeros.
+                    joint_angles: body.chain.joint_angles(),
                     contact_count: contacts.len() as u32,
+                    reserved1: [0; 4],
                 };
                 letters.push(Letter {
                     owner,
@@ -1277,6 +1280,38 @@ mod tests {
             heard, [true; 4],
             "the head and three segments each scraped: {heard:?}"
         );
+        // The letter's servo readings: one more walked tick, and what each of the three joints
+        // holds is the chain's truth to the bit, the wave visibly in them, zero beyond the
+        // joints the chain has, and the tail reserve untouched.
+        let bent = roster.step(tick, &mut walk);
+        tick += 1;
+        let letter = bent
+            .letters
+            .iter()
+            .find(|l| l.header.creature_id == 7)
+            .expect("letter");
+        let chain = &roster.resident(7).expect("7").body.chain;
+        for joint in 0..3 {
+            assert!(
+                (letter.header.joint_angles[joint] - chain.joint_angle(joint)).abs() < 1e-6,
+                "joint {joint}: {} vs {}",
+                letter.header.joint_angles[joint],
+                chain.joint_angle(joint)
+            );
+        }
+        assert!(
+            letter.header.joint_angles[..3]
+                .iter()
+                .any(|a| a.abs() > 0.05),
+            "the wave bends the body: {:?}",
+            letter.header.joint_angles
+        );
+        assert_eq!(
+            letter.header.joint_angles[3..],
+            [0.0; 4],
+            "a chain of four has three joints"
+        );
+        assert_eq!(letter.header.reserved1, [0; 4]);
         // Stop: the wave relaxes, momentum is friction's within a few ticks, and within a
         // second and a half nothing scrapes.
         let mut resting = roster.step(tick, |_| Intent::default());
@@ -1408,6 +1443,10 @@ mod tests {
         assert!(
             letters[0].header.specific_force[1] > 0.0,
             "an otolith at rest reads upward"
+        );
+        assert_eq!(
+            letters[0].header.joint_angles, [0.0; 7],
+            "a body of one segment has no servo to report"
         );
         let later = roster.step(2, |_| Intent {
             forward_speed: 0.0,
