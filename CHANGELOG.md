@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Etape 8 movement 5: every segment meets the world for itself.** The chain is solved in
+  three dimensions: every segment has a height and a pitch under gravity, the pivots are
+  points in space - ball joints, as two spike tips touching are; the servo drives the yaw,
+  nothing drives the pitch, roll is locked and written down - and every vertex of every
+  segment's hull is held above its own floor and stopped at a riser too tall to climb, the
+  head's rules since Etape 5 now every segment's. A segment over a terrace edge droops from
+  its pivot, a chain descending a step pitches by the step over the spacing, a chain that
+  walks off a cliff falls, and a body driven into a wall bends at its joints and springs
+  back when it relaxes - the squeeze the owner asked for, nothing added for it (3.1 rad in
+  all against the wall, 0.35 left when relaxed: a weak-servoed robot's few degrees, reported
+  not tuned). The head is segment zero of the same solver. Link v11: every pose carries its
+  pitch, and the letter every servo's torque beside its angle and every segment's contacts
+  in the head's frame. The deep tier holds pitch, floor and torque invariants; the chain
+  golden is re-recorded at protocol 11 with the whole ecosystem.
 - **Etape 8 movement 4: the joints back as proprioception.** Link v10's letter carries
   `joint_angles[7]`, and the world fills it from the chain: `Chain::joint_angle` is the
   encoder's reading - the neighbours' yaw difference brought within a turn, the yaws being

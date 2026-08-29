@@ -481,6 +481,7 @@ impl Roster {
                 creature_id: *id,
                 position: body.position,
                 yaw: body.yaw,
+                pitch: body.pitch,
                 velocity: body.velocity,
                 yaw_rate: body.turn_rate,
                 vocalisation: body.vocalisation,
@@ -566,8 +567,10 @@ impl Roster {
                     specific_force: body.specific_force,
                     // The servos' own readings - a body of one segment reports seven zeros.
                     joint_angles: body.chain.joint_angles(),
+                    // And the load each holds with - what the letter alone can carry.
+                    joint_torques: body.chain.torques,
                     contact_count: contacts.len() as u32,
-                    reserved1: [0; 4],
+                    reserved1: [0; 8],
                 };
                 letters.push(Letter {
                     owner,
@@ -1311,7 +1314,15 @@ mod tests {
             [0.0; 4],
             "a chain of four has three joints"
         );
-        assert_eq!(letter.header.reserved1, [0; 4]);
+        assert_eq!(letter.header.reserved1, [0; 8]);
+        assert!(
+            letter.header.joint_torques[..3]
+                .iter()
+                .any(|t| t.abs() > 0.01),
+            "the wave loads the servos: {:?}",
+            letter.header.joint_torques
+        );
+        assert_eq!(letter.header.joint_torques[3..], [0.0; 4]);
         // Stop: the wave relaxes, momentum is friction's within a few ticks, and within a
         // second and a half nothing scrapes.
         let mut resting = roster.step(tick, |_| Intent::default());

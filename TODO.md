@@ -355,10 +355,36 @@ it into `TglSenses` (Program ABI 9) and rc-worm shows it. Reported by the letter
 subtracted on the Grid because the letter is the body's one channel of self-report and
 movement 5's servo load cannot be derived from poses. Golden re-recorded at protocol 10.
 
-**Movement to come.** 5: every segment meeting risers and the air for itself, the springy
-squeeze against a wall included, and the servo's load - stall, torque - in the letter beside
-its angle. Then the creature's side: estimate rather than trust (the owner's note on Kalman
-filters belongs to the creature). Goldens re-recorded per movement.
+**Movement 5, done (2026-08-29): every segment meets the world for itself.** `src/chain.rs`
+is rewritten in three dimensions. A segment has a position in space, a yaw and a pitch, their
+rates, and gravity; the pivot is a point in space - the tail spike of one segment and the nose
+spike of the next are one point - which is a ball joint, as two spike tips touching are: the
+servo drives the yaw between neighbours and nothing drives the pitch (no actuator declared,
+and a bound of zero is no such actuator), so a segment carried over a terrace edge droops
+from its pivot until its own vertices meet the lower floor, a chain descending a step pitches
+by the step over the spacing, and a chain that walks off a cliff falls. Roll is locked, a
+simplification written down. Every segment's shape is the body's own hull at its pose - what
+the Grid draws - and every vertex of it is held above its own floor and stopped at a riser too
+tall to climb, measured against the floor under the segment's origin (a vertex nudged over a
+line after a wall pushed it out must not be taken for standing on the higher floor: the
+probe that found that saw a segment lifted a wall's height in one sweep). The head is segment
+zero of the same solver; `physics.rs` reads it out and keeps its single-body clauses for a
+single body. XPBD's velocity pass on every vertex the world touched, resting at the end or
+lifted clear - a position moved out of the floor is a velocity, and left alone a lifted
+corner launches the segment. The squeeze the owner asked for is inherent: driven into a wall
+the joints give 3.1 rad in all and relax to 0.35 - a servo's five newton-metres over a
+quarter-metre lever against a plough of twice a segment's weight leaves a few degrees, as a
+weak-servoed robot would; reported, not tuned. The runners' wave still carries the worm
+1.008 m in ten seconds. The letter (link v11) carries `joint_torques[7]` - the servo's
+multiplier over the substep squared at the tick's end - and every segment's contacts in the
+head's frame, the floor's support shared among a segment's resting vertices and a wall's
+push at the vertex that met it. The deep tier holds every pitch finite and short of
+upright, no vertex a centimetre under its floor, every torque within its bound.
+
+**After the etape.** The creature's side: close the gait on what it feels, and estimate
+rather than trust (the owner's note on Kalman filters belongs to the creature). Segment
+against segment and against other bodies' hulls is not yet a contact. Goldens re-recorded
+per movement.
 
 ## Etape 7 — the scrape
 

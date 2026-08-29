@@ -37,7 +37,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -121,9 +121,12 @@ pub struct Proprioception {
     /// `k + 1` in the sign the targets ask in, within a turn; `segment_count - 1`
     /// meaningful, the rest zero. What the joint did, not what it was asked.
     pub joint_angles: [f32; TRAILING_SEGMENTS_MAX],
+    /// The torque each servo holds its angle with at the tick's end, newton-metres, signed
+    /// in the angle's sense; at most the declared maximum, exactly that when it stalls.
+    pub joint_torques: [f32; TRAILING_SEGMENTS_MAX],
     pub contact_count: u32,
-    /// Always zero: the four bytes that round the letter to its alignment.
-    pub reserved1: [u8; 4],
+    /// Always zero: the eight bytes that round the letter to its alignment.
+    pub reserved1: [u8; 8],
 }
 
 /// `LnkWorldDefinition`: what the simulated world is made of, the fields both ends must agree
@@ -189,6 +192,8 @@ pub struct Rez {
 pub struct SegmentPose {
     pub position: [f32; 3],
     pub yaw: f32,
+    /// Radians about the segment's right hand, positive nose up.
+    pub pitch: f32,
 }
 
 #[repr(C)]
@@ -219,6 +224,8 @@ pub struct CreatureState {
     pub creature_id: u32,
     pub position: [f32; 3],
     pub yaw: f32,
+    /// Radians about the head's right hand, positive nose up; zero for a single body.
+    pub pitch: f32,
     pub velocity: [f32; 3],
     pub yaw_rate: f32,
     pub vocalisation: f32,
@@ -298,13 +305,13 @@ const _: () = assert!(size_of::<WorldDefinition>() == 40);
 const _: () = assert!(size_of::<Hello>() == 48);
 const _: () = assert!(size_of::<Welcome>() == 24);
 const _: () = assert!(size_of::<Rez>() == 48);
-const _: () = assert!(size_of::<SegmentPose>() == 16);
+const _: () = assert!(size_of::<SegmentPose>() == 20);
 const _: () = assert!(size_of::<RezVertex>() == 12);
 const _: () = assert!(size_of::<RezTriangle>() == 16);
 const _: () = assert!(size_of::<RezMaterial>() == 32);
 const _: () = assert!(size_of::<Contact>() == 52);
-const _: () = assert!(size_of::<Proprioception>() == 64);
-const _: () = assert!(size_of::<CreatureState>() == 156);
+const _: () = assert!(size_of::<Proprioception>() == 96);
+const _: () = assert!(size_of::<CreatureState>() == 188);
 const _: () = assert!(size_of::<TickStateHeader>() == 16);
 const _: () = assert!(size_of::<Actions>() == 96);
 const _: () = assert!(size_of::<Event>() == 32);
