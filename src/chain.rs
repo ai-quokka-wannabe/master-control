@@ -712,6 +712,58 @@ impl Chain {
         }
     }
 
+    /// The world's last word after the roster moved a body. A head stood apart from a
+    /// neighbour is moved with no eye on the terrain, and the chain is carried after it, so
+    /// a corner can end the tick inside a riser - the deep tier's seed 100 found one 7.7 mm
+    /// in, shoved there by a crowd of eight against the wall. The same passes the solver
+    /// ends every substep with run here on the tick's final pose - positions only, the
+    /// velocities are the separation's own business - so the row and the letter never
+    /// describe a body standing inside a wall.
+    pub fn settle_against(&mut self, hull: Option<&Hull>, ground: &dyn Fn(f32, f32) -> f32) {
+        if !self.trails() {
+            return;
+        }
+        let count = self.segment_count as usize;
+        let point = [[0.0, -BODY_HALF_HEIGHT, 0.0]];
+        let vertices: &[[f32; 3]] = hull.map_or(&point, |hull| hull.vertices.as_slice());
+        let inverse_mass = 1.0 / BODY_MASS_KG;
+        let inverse_inertia = 1.0 / SEGMENT_INERTIA;
+        let half = 0.5 * self.spacing;
+        let joints = count - 1;
+        let mut wall_this = [[0.0f32; 3]; SEGMENTS_MAX as usize];
+        let mut lift_this = [0.0f32; SEGMENTS_MAX as usize];
+        let mut pushed = [0u128; SEGMENTS_MAX as usize];
+        // The solver minus the motors: pushing the head out of a wall opens the joint behind it
+        // by the push, so the pivots are held in the same passes and both residuals close
+        // together - the servos' torque budget stays the solver's own. A separation's shove can
+        // be centimetres where the solver's substeps move millimetres, and this runs once per
+        // tick, so it takes the solver's full sweep count rather than the cheap contact count:
+        // eight passes left a five-centimetre shove's joint at twenty millimetres, thirty-two
+        // close it under the tier's five.
+        for _ in 0..ITERATIONS {
+            for joint in 0..joints {
+                hold_pivot(
+                    &mut self.segments,
+                    joint,
+                    half,
+                    inverse_mass,
+                    inverse_inertia,
+                );
+            }
+            self.touch_world(
+                count,
+                vertices,
+                ground,
+                &mut wall_this,
+                &mut lift_this,
+                &mut pushed,
+                inverse_mass,
+                inverse_inertia,
+            );
+        }
+        self.tell_poses();
+    }
+
     /// Whether any vertex of segment `index` rests on its floor, and which: the letter's
     /// contacts. `hull` and `ground` as [`Chain::step`] had them.
     #[must_use]
@@ -1514,6 +1566,43 @@ mod tests {
             residual < 0.5 * bent,
             "relaxed to {residual} rad in all from a squeeze of {bent}"
         );
+    }
+
+    #[test]
+    fn a_head_shoved_into_a_wall_is_settled_out_with_its_joints_holding() {
+        // What separation does: the head moved sideways with no eye on the terrain, the
+        // chain carried after it - and a corner of the box ends inside the riser at z = 0.
+        // The world's last word puts it out; the pivots hold through it.
+        let ground = stepped(0.5);
+        let hull = box_hull();
+        let mut chain = Chain::new(4, 0.56, head_at(0.0, -0.6, std::f32::consts::PI));
+        let head = chain.head();
+        // Shoved 0.4 m toward the wall: the front face (a quarter metre ahead of the
+        // origin) ends 0.05 m past the line.
+        chain.set_head(
+            [head.position[0], head.position[1], -0.2],
+            head.yaw,
+            [0.0; 3],
+        );
+        chain.settle_against(Some(&hull), &ground);
+        for (index, segment) in chain.segments.iter().enumerate().take(4) {
+            let frame = Frame::of(segment.yaw, segment.pitch);
+            for vertex in &hull.vertices {
+                let at = add(segment.position, frame.offset(*vertex));
+                assert!(
+                    at[2] < 5e-3,
+                    "segment {index} vertex at z {} stands inside the wall",
+                    at[2]
+                );
+            }
+        }
+        for joint in 0..3 {
+            assert!(
+                chain.joint_gap(joint) < 5e-3,
+                "joint {joint} gap {} after the settle",
+                chain.joint_gap(joint)
+            );
+        }
     }
 
     #[test]
