@@ -459,6 +459,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The world's last word follows separation too.** Standing two bodies apart knows nothing
+  of the terrain: a chain's head shoved sideways by a neighbour - the deep tier's seed 100
+  found eight bodies crowded against the riser at x = 6 - ended the tick with a corner
+  7.7 mm inside the wall, after its own solver step had ended clean. The roster now gives
+  the world the last word after the pairs are stood apart and the chains carried: the same
+  contact passes the solver ends every substep with, on the tick's final pose, so the row
+  and the letter never describe a body standing inside a wall. (Sixteen contact sweeps were
+  measured first and changed nothing - the penetration never came from the solver.) The
+  chain golden is re-recorded.
 - **The deep tier's pitch invariant is sanity, not a right angle.** Seed 102's tail, airborne
   and falling off an edge, pitched to 98 degrees - a segment hanging on its ball joint swings
   past the vertical as a dangling rod does, and nothing there was running away. The bound is
