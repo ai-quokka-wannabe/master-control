@@ -972,6 +972,17 @@ fn drive_motor(
     let angle = segments[joint + 1].yaw - segments[joint].yaw;
     let error = angle - target;
     let w = inverse_inertia + inverse_inertia + compliance;
+    // The servo's axis is the joint's own up, and what it drives is the yaw about the world's
+    // up: the two agree on the flat and part as the joint pitches, until at the vertical the
+    // yaw between neighbours means nothing at all - and a servo driving it there pumped energy
+    // into a chain hanging off a terrace drop until it whipped (the deep tier's seed 102). So
+    // the torque the servo can bring to the yaw is its torque projected on the vertical, the
+    // cosine of the joint's pitch, and none past the vertical. A simplification, written down:
+    // the servo as a hinge about the joint's own axis, on a rotation the wire can carry whole,
+    // is the movement after this one.
+    let joint_pitch = 0.5 * (segments[joint].pitch + segments[joint + 1].pitch);
+    let on_the_vertical = trig::sin_cos(joint_pitch).1.max(0.0);
+    let lambda_limit = lambda_limit * on_the_vertical;
     // XPBD: the correction this sweep is what the constraint and the compliance still owe,
     // given what the substep's earlier sweeps already applied. A servo holds with what torque
     // it has: the total is clamped to its limit, so past it the servo stalls, and a body
