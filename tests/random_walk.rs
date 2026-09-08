@@ -243,8 +243,13 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                 body.forward_speed.abs() <= CHAIN_SPEED_SANITY,
                 "{}",
                 at(&format!(
-                    "creature {creature_id} outran its wave: {} m/s against a top speed of {}",
-                    body.forward_speed, body.bounds.max_forward_speed
+                    "creature {creature_id} outran its wave: {} m/s against a top speed of {} - head {:?} grounded {} torques {:?} segments {:?}",
+                    body.forward_speed,
+                    body.bounds.max_forward_speed,
+                    body.chain.head(),
+                    body.grounded,
+                    &body.chain.torques[..(body.chain.segment_count - 1) as usize],
+                    &body.chain.segments[..body.chain.segment_count as usize]
                 ))
             );
             for joint in 0..(body.chain.segment_count - 1) as usize {
@@ -478,7 +483,19 @@ fn a_random_walk_keeps_every_invariant_and_replays_bit_for_bit() {
 #[test]
 #[ignore = "the deep tier: twenty-four seeds, two thousand steps each - run with --include-ignored"]
 fn a_long_random_walk_keeps_every_invariant_and_replays_bit_for_bit() {
-    for seed in 100u64..124 {
+    // The whole span by default; `RANDOM_WALK_SEEDS=120` or `RANDOM_WALK_SEEDS=118-121` narrows
+    // it to the seed a finding names, so a failure seventy minutes in reproduces in two.
+    let span = std::env::var("RANDOM_WALK_SEEDS")
+        .ok()
+        .map_or(100u64..124, |chosen| {
+            let (first, last) = chosen
+                .split_once('-')
+                .map_or((chosen.as_str(), chosen.as_str()), |(a, b)| (a, b));
+            let first: u64 = first.trim().parse().expect("RANDOM_WALK_SEEDS: a seed");
+            let last: u64 = last.trim().parse().expect("RANDOM_WALK_SEEDS: a seed");
+            first..last + 1
+        });
+    for seed in span {
         assert_eq!(walk(seed, 2_000), walk(seed, 2_000), "seed {seed}");
     }
 }
