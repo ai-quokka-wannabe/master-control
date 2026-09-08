@@ -137,7 +137,7 @@ pub const ITERATIONS: usize = 32;
 /// hammered head's vertices inside a riser by what the later vertices' pushes turned it, and
 /// pushing them out alone opens the joints, so both are held together until they agree.
 /// Most substeps end in one or two passes; a bound keeps the order fixed.
-pub const CONTACT_SWEEPS: usize = 32;
+pub const CONTACT_SWEEPS: usize = 64;
 
 /// The most passes the settle after a separation takes, and the joint gap it settles to: a
 /// bound rather than a count, because a shove's size is the crowd's to decide.

@@ -260,6 +260,19 @@ impl Roster {
     /// A host's `REZ`: judged against the world's bounds and the roster's state, then either
     /// embodied on the spawn pad, adopted where it stands, or refused in a word.
     pub fn rez(&mut self, sender: u64, model: Model) -> Admission {
+        /// A chain just laid behind its head, settled against the world before its first
+        /// tick, the head's pose following whatever the settle moved.
+        fn settle_new_chain(body: &mut Body) {
+            if !body.chain.trails() {
+                return;
+            }
+            body.chain
+                .settle_against(body.hull.as_ref(), &crate::physics::floor);
+            let head = body.chain.head();
+            body.position = head.position;
+            body.yaw = head.yaw;
+            body.pitch = head.pitch;
+        }
         let bounds = match world_bounds(&model.header) {
             Ok(bounds) => bounds,
             Err(reason) => return Admission::RefusedBounds(reason),
@@ -292,6 +305,11 @@ impl Roster {
                     if let Some(hull) = resident.body.hull.as_ref() {
                         resident.body.chain.set_keels(&hull.keels());
                     }
+                    // Laid straight with no eye on the terrain, and the world has the last
+                    // word before the first tick: a chain laid across a riser is otherwise
+                    // pushed out of it in one tick, centimetres in a tick being metres per
+                    // second (the deep tier's seed 120, a whole chain thrown at 14 m/s).
+                    settle_new_chain(&mut resident.body);
                     resident.model = model;
                     Admission::Adopted
                 }
@@ -328,6 +346,8 @@ impl Roster {
                             if let Some(hull) = body.hull.as_ref() {
                                 body.chain.set_keels(&hull.keels());
                             }
+                            // The pad is flat, the ground six metres behind it is anything.
+                            settle_new_chain(&mut body);
                             body
                         },
                         model,
