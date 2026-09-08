@@ -133,15 +133,20 @@ impl Frame {
 pub const SUBSTEPS: usize = 4;
 pub const ITERATIONS: usize = 32;
 
-/// Passes over every vertex alone after each substep's sweeps, the joints silent: the world's
-/// last word. The sweeps leave a hammered head's vertices inside a riser by what the later
-/// vertices' pushes turned it; these converge that to nothing the deep tier can see.
-pub const CONTACT_SWEEPS: usize = 8;
+/// The most passes of pivots-and-world after each substep's servo sweeps: the sweeps leave a
+/// hammered head's vertices inside a riser by what the later vertices' pushes turned it, and
+/// pushing them out alone opens the joints, so both are held together until they agree.
+/// Most substeps end in one or two passes; a bound keeps the order fixed.
+pub const CONTACT_SWEEPS: usize = 32;
 
 /// The most passes the settle after a separation takes, and the joint gap it settles to: a
 /// bound rather than a count, because a shove's size is the crowd's to decide.
 pub const SETTLE_PASSES_MAX: usize = 256;
 pub const SETTLE_GAP: f32 = 1e-4;
+
+/// The world's largest push in a pass below which it is at rest: a resting vertex is lifted a
+/// few hundred nanometres every pass by the gravity of a substep, and that is not a push.
+pub const SETTLE_PUSH: f32 = 1e-5;
 
 /// A segment's moment of inertia about any axis through its origin: an icosahedron is nearly
 /// a sphere, and a solid sphere's is two fifths of its mass times its radius squared.
@@ -459,7 +464,7 @@ impl Chain {
                     );
                 }
                 // The world last, so no segment ends a sweep under its floor or inside a wall.
-                self.touch_world(
+                let _ = self.touch_world(
                     count,
                     vertices,
                     ground,
@@ -471,25 +476,22 @@ impl Chain {
                 );
             }
 
-            // The world has the last word. A sweep pushes every vertex out of the world one
-            // at a time, and each later push turns the segment and can drive an earlier
-            // vertex back in; behind a head hammered by a hostile servo the last sweep's own
-            // vertices left over a centimetre inside a riser (the deep tier's seed 101). So
-            // after the joints have had their say the vertices alone are swept again, until
-            // nothing ends the substep inside a wall or under a floor; what that moves, the
-            // joints absorb within the millimetres the deep tier holds them to.
-            for _ in 0..CONTACT_SWEEPS {
-                self.touch_world(
-                    count,
-                    vertices,
-                    ground,
-                    &mut wall_this,
-                    &mut lift_this,
-                    &mut pushed,
-                    inverse_mass,
-                    inverse_inertia,
-                );
-            }
+            // Then the pivots and the world together, the servos silent. A sweep pushes every
+            // vertex out of the world one at a time and each later push turns the segment and
+            // can drive an earlier vertex back in (seed 101: 13.8 mm inside a riser); the world
+            // alone as the last word opened joints by what it moved (seed 102: 11 mm). Held and
+            // pushed alternately they close together, to nothing the deep tier can see.
+            self.converge_world(
+                count,
+                vertices,
+                ground,
+                &mut wall_this,
+                &mut lift_this,
+                &mut pushed,
+                inverse_mass,
+                inverse_inertia,
+                CONTACT_SWEEPS,
+            );
 
             // Velocities are what the positions did.
             for (segment, was) in self.segments.iter_mut().zip(previous.iter()).take(count) {
@@ -660,7 +662,8 @@ impl Chain {
         pushed: &mut [u128; SEGMENTS_MAX as usize],
         inverse_mass: f32,
         inverse_inertia: f32,
-    ) {
+    ) -> f32 {
+        let mut largest = 0.0f32;
         // every vertex against its own floor, or against the riser it stands inside.
         // The floor a vertex is measured against is the one under its segment's
         // origin - the cell the body stands in - not the one under the vertex a
@@ -691,6 +694,7 @@ impl Chain {
                             inverse_mass,
                             inverse_inertia,
                         );
+                        largest = largest.max(pushed_by);
                         wall_this[index] = add(wall_this[index], scale(normal, pushed_by));
                         self.wall_vertices[index] = vertex_index as u32;
                         pushed[index] |= 1u128 << (vertex_index % 128);
@@ -703,7 +707,7 @@ impl Chain {
                     // to its floor, and the lift turns the segment about the axis the
                     // vertex's offset makes with it.
                     pushed[index] |= 1u128 << (vertex_index % 128);
-                    lift_this[index] += push_vertex(
+                    let lifted = push_vertex(
                         &mut self.segments[index],
                         r,
                         &frame,
@@ -712,7 +716,59 @@ impl Chain {
                         inverse_mass,
                         inverse_inertia,
                     );
+                    largest = largest.max(lifted);
+                    lift_this[index] += lifted;
                 }
+            }
+        }
+        largest
+    }
+
+    /// The pivots and the world brought to agreement, the servos silent: pass after pass each
+    /// joint is held and every vertex is pushed out of the world, until every joint is closed to
+    /// `SETTLE_GAP` and the world's largest push fell under `SETTLE_PUSH` - or `passes` have
+    /// gone. A bounded loop in a fixed order, so the replay promise holds. This is how a
+    /// substep ends and how a body a separation moved is settled: the world alone as the last
+    /// word opened joints by what it moved (the deep tier's seed 102, 11 mm), the joints alone
+    /// left vertices in walls; together they close to nothing the tier can see.
+    #[allow(clippy::too_many_arguments)]
+    fn converge_world(
+        &mut self,
+        count: usize,
+        vertices: &[[f32; 3]],
+        ground: &dyn Fn(f32, f32) -> f32,
+        wall_this: &mut [[f32; 3]; SEGMENTS_MAX as usize],
+        lift_this: &mut [f32; SEGMENTS_MAX as usize],
+        pushed: &mut [u128; SEGMENTS_MAX as usize],
+        inverse_mass: f32,
+        inverse_inertia: f32,
+        passes: usize,
+    ) {
+        let half = 0.5 * self.spacing;
+        let joints = count - 1;
+        for _ in 0..passes {
+            for joint in 0..joints {
+                hold_pivot(
+                    &mut self.segments,
+                    joint,
+                    half,
+                    inverse_mass,
+                    inverse_inertia,
+                );
+            }
+            let largest = self.touch_world(
+                count,
+                vertices,
+                ground,
+                wall_this,
+                lift_this,
+                pushed,
+                inverse_mass,
+                inverse_inertia,
+            );
+            let closed = (0..joints).all(|joint| self.joint_gap(joint) < SETTLE_GAP);
+            if closed && largest < SETTLE_PUSH {
+                break;
             }
         }
     }
@@ -733,49 +789,23 @@ impl Chain {
         let vertices: &[[f32; 3]] = hull.map_or(&point, |hull| hull.vertices.as_slice());
         let inverse_mass = 1.0 / BODY_MASS_KG;
         let inverse_inertia = 1.0 / SEGMENT_INERTIA;
-        let half = 0.5 * self.spacing;
-        let joints = count - 1;
         let mut wall_this = [[0.0f32; 3]; SEGMENTS_MAX as usize];
         let mut lift_this = [0.0f32; SEGMENTS_MAX as usize];
         let mut pushed = [0u128; SEGMENTS_MAX as usize];
         // The solver minus the motors: pushing the head out of a wall opens the joint behind it
-        // by the push, so the pivots are held in the same passes and both residuals close
-        // together - the servos' torque budget stays the solver's own. A separation's shove can
-        // be centimetres where the solver's substeps move millimetres, so this does not count
-        // passes: it goes until every joint is closed to a tenth of a millimetre and the world
-        // pushed nothing in the last pass, or SETTLE_PASSES_MAX passes have gone - a fixed bound,
-        // a fixed order, so the replay promise holds. (Thirty-two passes left a joint 7.7 mm
-        // open after a crowd's shove in the deep tier's seed 102; a five-centimetre shove takes
-        // about forty to close.)
-        for _ in 0..SETTLE_PASSES_MAX {
-            for joint in 0..joints {
-                hold_pivot(
-                    &mut self.segments,
-                    joint,
-                    half,
-                    inverse_mass,
-                    inverse_inertia,
-                );
-            }
-            let mut pushed_now = [0u128; SEGMENTS_MAX as usize];
-            self.touch_world(
-                count,
-                vertices,
-                ground,
-                &mut wall_this,
-                &mut lift_this,
-                &mut pushed_now,
-                inverse_mass,
-                inverse_inertia,
-            );
-            for (all, now) in pushed.iter_mut().zip(pushed_now.iter()) {
-                *all |= *now;
-            }
-            let closed = (0..joints).all(|joint| self.joint_gap(joint) < SETTLE_GAP);
-            if closed && pushed_now.iter().all(|bits| *bits == 0) {
-                break;
-            }
-        }
+        // by the push, so pivots and world converge together. A separation's shove can be
+        // centimetres where the solver's substeps move millimetres, so the bound is generous.
+        self.converge_world(
+            count,
+            vertices,
+            ground,
+            &mut wall_this,
+            &mut lift_this,
+            &mut pushed,
+            inverse_mass,
+            inverse_inertia,
+            SETTLE_PASSES_MAX,
+        );
         self.tell_poses();
     }
 
