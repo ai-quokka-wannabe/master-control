@@ -138,6 +138,11 @@ pub const ITERATIONS: usize = 32;
 /// vertices' pushes turned it; these converge that to nothing the deep tier can see.
 pub const CONTACT_SWEEPS: usize = 8;
 
+/// The most passes the settle after a separation takes, and the joint gap it settles to: a
+/// bound rather than a count, because a shove's size is the crowd's to decide.
+pub const SETTLE_PASSES_MAX: usize = 256;
+pub const SETTLE_GAP: f32 = 1e-4;
+
 /// A segment's moment of inertia about any axis through its origin: an icosahedron is nearly
 /// a sphere, and a solid sphere's is two fifths of its mass times its radius squared.
 pub const SEGMENT_INERTIA: f32 =
@@ -736,11 +741,13 @@ impl Chain {
         // The solver minus the motors: pushing the head out of a wall opens the joint behind it
         // by the push, so the pivots are held in the same passes and both residuals close
         // together - the servos' torque budget stays the solver's own. A separation's shove can
-        // be centimetres where the solver's substeps move millimetres, and this runs once per
-        // tick, so it takes the solver's full sweep count rather than the cheap contact count:
-        // eight passes left a five-centimetre shove's joint at twenty millimetres, thirty-two
-        // close it under the tier's five.
-        for _ in 0..ITERATIONS {
+        // be centimetres where the solver's substeps move millimetres, so this does not count
+        // passes: it goes until every joint is closed to a tenth of a millimetre and the world
+        // pushed nothing in the last pass, or SETTLE_PASSES_MAX passes have gone - a fixed bound,
+        // a fixed order, so the replay promise holds. (Thirty-two passes left a joint 7.7 mm
+        // open after a crowd's shove in the deep tier's seed 102; a five-centimetre shove takes
+        // about forty to close.)
+        for _ in 0..SETTLE_PASSES_MAX {
             for joint in 0..joints {
                 hold_pivot(
                     &mut self.segments,
@@ -750,16 +757,24 @@ impl Chain {
                     inverse_inertia,
                 );
             }
+            let mut pushed_now = [0u128; SEGMENTS_MAX as usize];
             self.touch_world(
                 count,
                 vertices,
                 ground,
                 &mut wall_this,
                 &mut lift_this,
-                &mut pushed,
+                &mut pushed_now,
                 inverse_mass,
                 inverse_inertia,
             );
+            for (all, now) in pushed.iter_mut().zip(pushed_now.iter()) {
+                *all |= *now;
+            }
+            let closed = (0..joints).all(|joint| self.joint_gap(joint) < SETTLE_GAP);
+            if closed && pushed_now.iter().all(|bits| *bits == 0) {
+                break;
+            }
         }
         self.tell_poses();
     }
