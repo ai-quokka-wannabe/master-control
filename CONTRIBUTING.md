@@ -222,6 +222,7 @@ chore: update pinned actions
 | `CONTRIBUTING.md` | This file — contributor guidelines |
 | `SECURITY.md` | Security policy and vulnerability reporting |
 | `CHANGELOG.md` | User-facing change history |
+| `docs/VISION.md` | The organisation's shared vision, and Master Control's part in it |
 | `TODO.md` | Roadmap and open etapes |
 
 ### Updating Documentation
