@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The long arc, in public: `docs/VISION.md`.** The owner's decision (2026-10-10): the
+  organisation's whole vision is written into every repository and onto its landing page, told
+  in full and as the multi-year arc it is - one persistent Grid where AI creatures live and
+  human Users enter with avatars to meet them, every creature and every User on a client of
+  their own, Master Control holding the world state and keeping every client in sync, a level
+  editor, and minds as high as an animal goes - feeling beings, true animal AGI - and never
+  human-level. The server-authoritative half stands today, on one machine; there are no
+  avatars, no level editor, no AI minds and no persistence yet, and all of it is taken in baby
+  steps. The shared section is mirrored verbatim in all five places; around it, this server's
+  part in the arc and what stands here today. The README says creature hosts and spectators
+  are today's clients rather than the only ones and points at the vision beside the four
+  repositories, and the contributing guide's documentation table lists it.
 - **Etape 8 movement 5: every segment meets the world for itself.** The chain is solved in
   three dimensions: every segment has a height and a pitch under gravity, the pivots are
   points in space - ball joints, as two spike tips touching are; the servo drives the yaw,
@@ -468,6 +480,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the letter never describe a body standing inside a wall. (Sixteen contact sweeps were
   measured first and changed nothing - the penetration never came from the solver.) The
   chain golden is re-recorded.
+- **The README and `TODO.md` tell today's world.** Found while the vision was written: the
+  README's chain was still Etape 6's kinematic trail at protocol 7 - the head the one rigid
+  body, the segments placed along its path, an authored wave laid over it - and now tells Etape
+  8's articulated chain: every segment a rigid body in three dimensions, ball-joint pivots, a
+  servo driving each yaw within its declared torque, pitch free and roll locked, the runners'
+  friction the propulsion, the letter's angles, torques and contacts, and segments that do not
+  yet touch one another. `TODO.md` says protocol 11 where it said 6 today, and a note after its
+  Etape 5 list, which stays as written, says that the solver it kept deferred met its trigger
+  in Etape 8 and that the scratches it owed the ears are played - the spectator's by the
+  flagship's #106, the creatures' by its #119, which Etape 7 still called next.
 - **The deep tier's pitch invariant is sanity, not a right angle.** Seed 102's tail, airborne
   and falling off an edge, pitched to 98 degrees - a segment hanging on its ball joint swings
   past the vertical as a dangling rod does, and nothing there was running away. The bound is
