@@ -1,7 +1,7 @@
 # TODO
 
 The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` and the
-`grid` library) and the wire carries a tick (link protocol v3 then; v6 today). The blueprint is the flagship's
+`grid` library) and the wire carries a tick (link protocol v3 then; v11 today). The blueprint is the flagship's
 [docs/TOPOLOGY.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/TOPOLOGY.md)
 — its § Master Control's mechanics and § One tick, across the wire sections carry every
 mechanism below with its citation; this file only stages the server-side etapes so they are not
@@ -138,7 +138,7 @@ for a number nobody draws is the versioning-before-need the owner warned against
 The owner's observation (2026-08-22), ruled in `TOPOLOGY.md` § Master Control's mechanics: the
 Grid and every creature are triangles and squares only, so contacts are closed-form and the
 capsule-against-height-function body in `src/physics.rs` is a placeholder that `REZ` retires.
-Gated on the `REZ` payload (Link protocol v4, now v6) and on Etape 2's roster of record.
+Gated on the `REZ` payload (Link protocol v4, now v11) and on Etape 2's roster of record.
 
 - **World collision geometry** = planar faces with adjacency, derived from the same
   world-definition source as the mesh and the reflectors — never from a triangle soup. **A
@@ -197,6 +197,11 @@ Gated on the `REZ` payload (Link protocol v4, now v6) and on Etape 2's roster of
 - **Held by goldens**: a contact-golden life (slide across a welded diagonal without a hop;
   corner, edge and face landings; two hulls meeting) joins `tests/data/`, with breakage rounds
   that unweld the diagonal and that reorder the hull.
+
+**Paid since, by the flagship and by Etape 8.** The ears this etape owed its scratches play
+them: the spectator's since the flagship's #106 (2026-08-22), the creatures' since its #119
+(2026-08-27; see Etape 7). The rigid-body solver the response kept deferred met its trigger in
+Etape 8, for an articulated body: a chain is solved with XPBD - see there.
 
 ## Etape 6 — the chain
 
@@ -428,3 +433,8 @@ do not. The scratch events - the head's and every segment's, own and guests' - b
 for the creature's ears too, from the event's position with the scraping body's instance
 range as the caller's, so the worm hears its own spikes on the Grid. Then rc-worm's panel
 shows them in its ear view as it shows a call.
+
+**Done since, by the flagship (2026-08-27, its #119).** The creature host delivers every scratch
+to every hosted ear, the scraping body's own included, as energy in the ear's bins with no
+arrival to range; rc-worm's panel shows a dragging worm's own spikes lighting both ears'
+earliest bins.

@@ -4,21 +4,28 @@ The Master Control Program: the world server of the Grid.
 
 One authoritative, deviceless process that owns what is true — the tick, the roster-of-record,
 the validation of every Program's staged actions, the broadcast every client perceives through,
-and the logs that let the world replay. TronGrid Lite instances connect to it as creature hosts
-and spectators; Programs never see it at all. The film's tyrant, redeemed by good engineering.
+and the logs that let the world replay. TronGrid Lite instances connect to it today as creature
+hosts and spectators, and on [the long arc](docs/VISION.md) every User's own client joins them;
+Programs never see it at all. The film's tyrant, redeemed by good engineering.
 
 ## The Four Repositories
 
 master-control is one of four repositories in the
 [ai-quokka-wannabe](https://github.com/ai-quokka-wannabe) organisation.
 [tron-grid-lite](https://github.com/ai-quokka-wannabe/tron-grid-lite) is the Grid — the
-renderer, the senses and both client roles, and the flagship where this server's flesh is grown
-before it moves here; [the link repository](https://github.com/ai-quokka-wannabe/link) is the
-wire — the protocol library this server and every client load as the same shared binary;
-[rc-worm](https://github.com/ai-quokka-wannabe/rc-worm) is the first Program. Who owns what,
-and why every delegation is the way it is, lives in the flagship's
+renderer, the senses and today's two client roles, and the flagship where this server's flesh
+is grown before it moves here; [the link repository](https://github.com/ai-quokka-wannabe/link)
+is the wire — the protocol library this server and every client today load as the same shared
+binary; [rc-worm](https://github.com/ai-quokka-wannabe/rc-worm) is the first Program. Who owns
+what, and why every delegation is the way it is, lives in the flagship's
 [docs/TOPOLOGY.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/TOPOLOGY.md)
 — one table, kept in one place, pointed at from everywhere.
+
+Where the four are headed together — over years, in baby steps — is one persistent Grid
+where AI creatures live and human Users enter with avatars to meet them, its world state held
+by this server and every client kept in sync. [docs/VISION.md](docs/VISION.md) tells that long
+arc and this server's part in it; the organisation's
+[landing page](https://github.com/ai-quokka-wannabe) carries the same arc.
 
 ## What Lives Here Today
 
@@ -35,12 +42,16 @@ sacred 32 Hz:
   is answered with a `REFUSED` letter naming why.
 - **The validator, the only path in** — bounds refused by name, subnormals flushed or refused,
   a body's extent capped, every malformed frame hung up on at the wire.
-- **The chain** — a creature may be a chain of up to eight segments (protocol v7): the head is
-  the rigid body physics steps, the trailing segments are placed along the path the head
-  walked, a ring of past poses per creature that the state hash covers whole. Kinematic trail,
-  not articulation; the segments touch nothing - but the chain undulates as it moves (an
-  authored lateral wave, fixed to the path, swelling with speed) and every dragged segment
-  scrapes the floor, a scratch event of its own, so a worm can hear its own body.
+- **The chain** — a creature may be a chain of up to eight segments, articulated: every
+  segment, the head included, is a rigid body in three dimensions under gravity, joined to its
+  neighbours at ball-joint pivots and solved with XPBD. A servo at every joint drives the yaw
+  towards the Program's own joint target with no more than its declared torque; nothing drives
+  the pitch, and roll is locked, a simplification written down. Every vertex of every segment's
+  hull meets the floor and the risers for itself, the runners' friction - gliding along,
+  ploughing across - turns the wave into propulsion, and every segment that slides scrapes, a
+  scratch event of its own, so a worm can hear its own body. The `PROPRIOCEPTION` letter carries
+  the joint angles, their torques and every segment's contacts. Only the head meets another
+  body, hull against hull; the trailing segments do not yet touch one another or other bodies.
 - **The world's own arithmetic** — every transcendental that reaches state (`src/trig.rs`:
   `sin`, `cos`, `atan2`) is the world's own, built from IEEE basic arithmetic, so a life
   recorded on one machine replays bit for bit on any other running the same build; the
