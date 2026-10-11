@@ -18,7 +18,7 @@
     no libm anywhere), the step vectors with a tolerance (yaw goes through sin and cos, and no
     two libms agree in the last bit).
 
-    Copyright (C) 2026 Matej Gomboc <https://github.com/ai-quokka-wannabe/master-control>
+    Copyright (C) 2026 The AiQuokkaWannabe Authors <https://github.com/ai-quokka-wannabe/master-control>
     GPL-3.0-or-later, as everything here.
 */
 
