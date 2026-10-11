@@ -104,6 +104,20 @@ only place this server ever looks for it. `cargo test` runs the unit suite and t
 suite that stands whole worlds up on loopback; `cargo fmt --check` and `cargo clippy
 --all-targets -- -D warnings` are what CI gates on, both platforms.
 
+## Contributors
+
+Everyone who helps is credited here, for any kind of contribution: code, documentation, bug reports,
+reviews, ideas, answers in Discussions. The list follows the
+[All Contributors](https://allcontributors.org/en/reference/specification/) specification and is kept by hand;
+[CONTRIBUTING.md](CONTRIBUTING.md#credit-and-copyright) says how to add yourself. Contributors keep the
+copyright of what they write.
+
+| Contributor | Contributions |
+|-------------|---------------|
+| [Matej Gomboc](https://github.com/MatejGomboc) | 💻 📖 🎨 🤔 🔬 🚇 🚧 ⚠️ |
+
+The emoji follow the [All Contributors emoji key](https://allcontributors.org/en/reference/emoji-key/).
+
 ## Licence
 
 Copyright © 2026 Matej Gomboc <https://github.com/ai-quokka-wannabe/master-control>.
