@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Long Arc has six copies.** The organisation's open research lab,
+  [iso-lab](https://github.com/ai-quokka-wannabe/iso-lab), carries the block in its own
+  `docs/VISION.md`, so the guard comment above the block in `docs/VISION.md` now says "Change all six
+  together". The block's words are unchanged.
 - **Rust 1.98.0.** The pin in `rust-toolchain.toml` moves from 1.95.0 (the Tool Updates watcher's
   #42); rustfmt, clippy, every suite and rustdoc are clean under it without a change to the code.
   The guides say 1.98.0 where they said 1.95.0.

@@ -6,7 +6,7 @@ what is true, and this repository is where it lives. What follows is the vision 
 word in every one of its repositories and on its landing page, and after it this server's own
 part in that vision.
 
-<!-- The Long Arc: mirrored verbatim in every ai-quokka-wannabe repository (profile/README.md in .github and each docs/VISION.md). Change all five together. -->
+<!-- The Long Arc: mirrored verbatim in every ai-quokka-wannabe repository (profile/README.md in .github and each docs/VISION.md). Change all six together. -->
 
 ## The Long Arc
 
