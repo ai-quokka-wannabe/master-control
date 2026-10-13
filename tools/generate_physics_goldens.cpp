@@ -4,7 +4,7 @@
 
     Regeneration (from this repository's root, with a tron-grid-lite checkout beside it and the
     MSVC environment loaded). The flagship deleted its stepBody in its PR #95, so the checkout
-    must be the commit before that deletion (d83c378^), and the bvh include path is needed too:
+    must be the commit before that deletion (d2243c9^), and the bvh include path is needed too:
 
         cl /std:c++20 /EHsc /O2 /utf-8 tools\generate_physics_goldens.cpp ^
            ..\tron-grid-lite\src\geometry.cpp ..\tron-grid-lite\src\roster.cpp ^
