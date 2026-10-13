@@ -30,7 +30,7 @@ use std::process::Command;
 /// honestly as a checkout. `--version` prints it and the input log records it, so a replay that
 /// disagrees can say "a different binary" before anyone says "a simulation bug".
 ///
-/// Adopted from the owner's `project_nimrod`: std only, `DefaultHasher` with its fixed keys, a
+/// Adopted from another of the owner's projects: std only, `DefaultHasher` with its fixed keys, a
 /// fixed walk order, and the file count mixed in so a file lost is a change too.
 fn stamp_build(manifest_dir: &Path, out_dir: &Path) {
     let mut files: Vec<PathBuf> = Vec::new();

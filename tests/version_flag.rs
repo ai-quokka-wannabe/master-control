@@ -15,7 +15,7 @@
 
 //! The real binary, asked who it is: `--version` names the version, the build stamp over its
 //! sources, and the wire's protocol, and exits well - so a log's `build` line can always be
-//! matched to a binary by hand. Adopted from the owner's `project_nimrod`.
+//! matched to a binary by hand. Adopted from another of the owner's projects.
 
 use std::process::Command;
 

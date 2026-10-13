@@ -224,7 +224,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can no longer redden an unrelated pull request. Every job carries a `timeout-minutes`, so
   nothing can hang for the six-hour default.
 - **Determinism hardening, the second half: the random walk and the build stamp.** Adopted from
-  the owner's `queen-of-towers-game` and `project_nimrod`. `tests/random_walk.rs` walks the
+  the owner's `queen-of-towers-game` and another of the owner's projects. `tests/random_walk.rs` walks the
   world at random from a seeded generator of its own (SplitMix64, std only) - hosts rezzing
   boxed bodies, derezzing, claiming the guest, orphaning, and intents that are mostly sane and
   sometimes NaN, infinite, subnormal or the largest float - and holds every invariant after
@@ -239,7 +239,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "a different binary" is said before "a simulation bug". The real binary is asked `--version`
   by a test.
 - **Determinism hardening, the first half: the hash, the lint, the profile, the diagnostic.**
-  Adopted from the owner's `queen-of-towers-game` and `project_nimrod`. The state hash is
+  Adopted from the owner's `queen-of-towers-game` and another of the owner's projects. The state hash is
   rebuilt by the rules a replay hash needs: a domain tag, the body count and every creature's
   identity (two worlds with the same bodies under swapped names hashed alike), every sequence
   length-prefixed and every choice tagged, and the hidden state covered at last - `grounded`,
