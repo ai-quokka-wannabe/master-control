@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`external/link` at link's month-end tidy (5a1c6b0).** The pointer moves from the protocol-v11
+  commit; the wire is unchanged - protocol 11, client ABI 9, the headers differing only by their
+  notices and one comment - and every suite, the golden life included, passes against it.
 - **Rust 1.99.1.** The pin in `rust-toolchain.toml` moves from 1.98.0 (the Tool Updates watcher's
   #53); rustfmt, clippy, every suite and rustdoc are clean under it without a change to the code.
   The guides say 1.99.1 where they said 1.98.0; the README and `.claude/CLAUDE.md` name the exact
