@@ -9,11 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Long Arc has six copies.** The organisation's open research lab,
+  [iso-lab](https://github.com/ai-quokka-wannabe/iso-lab), carries the block in its own
+  `docs/VISION.md`, so the guard comment above the block in `docs/VISION.md` now says "Change all six
+  together". The block's words are unchanged.
 - **Rust 1.98.0.** The pin in `rust-toolchain.toml` moves from 1.95.0 (the Tool Updates watcher's
   #42); rustfmt, clippy, every suite and rustdoc are clean under it without a change to the code.
   The guides say 1.98.0 where they said 1.95.0.
 
 ### Added
+
+- **Every contributor credited, and their copyright kept.** README.md gains a Contributors section that
+  lists everyone who helps, for any kind of contribution - code, documentation, bug reports, reviews,
+  ideas, answers in Discussions - following the All Contributors specification and its emoji key, kept by
+  hand. CONTRIBUTING.md gains Credit and Copyright: how to add yourself to the table, and that contributors
+  keep the copyright of what they write - no contributor licence agreement, no assignment, contributions
+  licensed under GPL-3.0-or-later like everything else. The copyright notices follow: every source
+  file's header and the README's licence line name The AiQuokkaWannabe Authors, not one person.
 
 - **The long arc, in public: `docs/VISION.md`.** The owner's decision (2026-10-10): the
   organisation's whole vision is written into every repository and onto its landing page, told
