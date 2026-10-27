@@ -490,6 +490,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A riser is solid only up to its top, and a vertex leaves it by the nearer face.** The deep
+  tier's seed 120 threw a chain backwards off a terrace edge at step 975. `touch_world` measured
+  a riser from the cell under the segment's origin and never compared the vertex with the higher
+  cell's top, so every riser was infinitely tall: a segment whose origin overhung a drop had the
+  vertices resting on the terrace shoved sideways by a wall that was not there, and a chain laid
+  across an edge was asked for poses no pivot allows - its REZ settle ran out its 256 passes
+  with joints 24 mm open. A vertex above the terrace it overhangs is now in open air, and one
+  inside the terrace block leaves by the nearer face, up onto the top or back out through the
+  riser: the least-penetration rule body pairs already obey. The top alone was not enough - a
+  vertex just under it still took the full horizontal shove, and seed 102 outran its wave. The
+  random walk's riser invariant follows the geometry. Two tests hold it, each red under the old
+  rule: a segment above a terrace edge is not moved sideways, and a vertex five millimetres
+  inside one is lifted onto the top rather than shoved fifteen centimetres back.
 - **Every code file carries its notice.** `src/chain.rs` lost its GPL header when Etape 8
   movement 1 rewrote it, so the notices pass missed it; it has it back, and the two CI scripts
   (`check-toolchain-pin.sh`, `cleanup-caches.js`) carry it too, in their own comment syntax. A

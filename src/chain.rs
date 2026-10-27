@@ -1607,6 +1607,78 @@ mod tests {
         }
     }
 
+    /// A chain of three laid level at `height` across a terrace 0.3 m high whose edge is z = 0:
+    /// the head over the terrace, the second segment's origin 0.1 m short of the edge with its
+    /// front half over the terrace - the pose seed 120's REZ settle could not close.
+    fn laid_across_an_edge(height: f32) -> (Chain, [[f32; 3]; 3]) {
+        let chain = Chain::new(
+            3,
+            0.56,
+            PathSample {
+                position: [0.0, height, 0.46],
+                yaw: std::f32::consts::PI,
+            },
+        );
+        let before = [
+            chain.segments[0].position,
+            chain.segments[1].position,
+            chain.segments[2].position,
+        ];
+        (chain, before)
+    }
+
+    #[test]
+    fn a_segment_over_a_terrace_edge_above_its_top_is_in_open_air_not_against_a_wall() {
+        // Every vertex stands above its own floor and above the terrace it overhangs, so the
+        // settle has nothing to do: nothing moves sideways and every joint stays closed. With
+        // a riser of no top, the second segment's front vertices were inside a wall and it was
+        // shoved back off the edge, against its pivot, by the whole overhang.
+        let ground = stepped(0.3);
+        let hull = box_hull();
+        let (mut chain, before) = laid_across_an_edge(0.4);
+        chain.settle_against(Some(&hull), &ground);
+        for (index, was) in before.iter().enumerate() {
+            let now = chain.segments[index].position;
+            let moved = ((now[0] - was[0]).powi(2) + (now[2] - was[2]).powi(2)).sqrt();
+            assert!(
+                moved < 1e-4,
+                "segment {index} moved {moved} m sideways in open air"
+            );
+        }
+        for joint in 0..2 {
+            assert!(
+                chain.joint_gap(joint) < SETTLE_GAP,
+                "joint {joint} gap {}",
+                chain.joint_gap(joint)
+            );
+        }
+    }
+
+    #[test]
+    fn a_vertex_just_inside_a_terrace_leaves_by_the_nearer_face_onto_its_top() {
+        // Five millimetres under the terrace top and fifteen centimetres past its edge: the
+        // nearer way out is up. The settle lifts the overhang onto the top, the segment moves
+        // sideways by no more than its turn about the lift, and the joints close - where out
+        // through the riser alone it was shoved the whole fifteen centimetres.
+        let ground = stepped(0.3);
+        let hull = box_hull();
+        let (mut chain, before) = laid_across_an_edge(0.345);
+        chain.settle_against(Some(&hull), &ground);
+        let now = chain.segments[1].position;
+        let moved = ((now[0] - before[1][0]).powi(2) + (now[2] - before[1][2]).powi(2)).sqrt();
+        assert!(
+            moved < 1e-2,
+            "the second segment moved {moved} m sideways rather than up"
+        );
+        for joint in 0..2 {
+            assert!(
+                chain.joint_gap(joint) < 5e-3,
+                "joint {joint} gap {}",
+                chain.joint_gap(joint)
+            );
+        }
+    }
+
     #[test]
     fn a_wall_stops_the_chain_which_bends_at_its_joints_and_springs_back_when_it_relaxes() {
         // The floor rises half a metre at z = 0: a wall. A chain facing +Z drives into it with
