@@ -98,7 +98,8 @@ without a word. A second Ctrl+C ends the process at once, the old way.
 > [RUNNING_THE_GRID.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/RUNNING_THE_GRID.md)
 > stands the whole ecosystem up around it.
 
-Stable Rust, no dependencies. `git submodule update --init` brings the wire
+Rust 1.99.1, pinned by `rust-toolchain.toml` and installed by [rustup](https://rustup.rs/) on
+first use; no dependencies. `git submodule update --init` brings the wire
 (`external/link`); `build.rs` builds its cdylib and puts it beside the executable, which is the
 only place this server ever looks for it. `cargo test` runs the unit suite and the integration
 suite that stands whole worlds up on loopback; `cargo fmt --check` and `cargo clippy

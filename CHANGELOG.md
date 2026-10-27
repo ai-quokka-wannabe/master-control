@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Rust 1.99.1.** The pin in `rust-toolchain.toml` moves from 1.98.0 (the Tool Updates watcher's
+  #53); rustfmt, clippy, every suite and rustdoc are clean under it without a change to the code.
+  The guides say 1.99.1 where they said 1.98.0; the README and `.claude/CLAUDE.md` name the exact
+  pin where they said "stable".
 - **The Long Arc has six copies.** The organisation's open research lab,
   [iso-lab](https://github.com/ai-quokka-wannabe/iso-lab), carries the block in its own
   `docs/VISION.md`, so the guard comment above the block in `docs/VISION.md` now says "Change all six
@@ -483,6 +487,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every code file carries its notice.** `src/chain.rs` lost its GPL header when Etape 8
+  movement 1 rewrote it, so the notices pass missed it; it has it back, and the two CI scripts
+  (`check-toolchain-pin.sh`, `cleanup-caches.js`) carry it too, in their own comment syntax. A
+  comment in `src/roster.rs` that still waited on Etape 5 for a spawn rule names the lattice that
+  rule became.
 - **The README and `TODO.md` tell today's world.** Found while the vision was written: the
   README's chain was still Etape 6's kinematic trail at protocol 7 - the head the one rigid
   body, the segments placed along its path, an authored wave laid over it - and now tells Etape

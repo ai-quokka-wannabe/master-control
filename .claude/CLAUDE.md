@@ -28,7 +28,7 @@ engineering.
   `master-control`, lowercase and hyphenated, names only this repository. Never *MCP* in prose.
   Tron vocabulary per the flagship's STYLE.md § Tron Naming.
 - **Language: Rust** (the owner's ruling, 2026-08-21), with the link repository's discipline
-  mirrored: stable toolchain, edition 2024, `cargo fmt` and `cargo clippy` clean, `std` only —
+  mirrored: one stable release pinned exactly by `rust-toolchain.toml`, edition 2024, `cargo fmt` and `cargo clippy` clean, `std` only —
   no third-party crates. The authoritative process gets the memory-safe language for the same
   reason the parser did: it is the component hostile bytes eventually reach. Deviceless: no
   Vulkan, no window, no swapchain — if a change needs a device, it belongs in tron-grid-lite.
