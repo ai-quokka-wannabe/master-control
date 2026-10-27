@@ -648,7 +648,8 @@ impl Chain {
     /// one under the vertex a substep ago: a vertex nudged over a line after the wall pushed
     /// it out would otherwise see no rise, be taken for standing on the higher floor, and be
     /// lifted a wall's height in one sweep. A cell more than a climb above the body's own is
-    /// a wall, whichever way the vertex got in. What the walls pushed with and what the
+    /// a wall up to its top, whichever way the vertex got in, and a vertex inside it leaves by
+    /// the nearer face. What the walls pushed with and what the
     /// floor lifted are added up for the letter, and every vertex touched is marked for the
     /// velocity pass.
     #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
@@ -670,21 +671,45 @@ impl Chain {
         // substep ago: a vertex nudged over a line after the wall pushed it out would
         // otherwise see no rise, be taken for standing on the higher floor, and be
         // lifted a wall's height in one sweep. A cell more than a climb above the
-        // body's own is a wall, whichever way the vertex got in.
+        // body's own is a wall up to its top, whichever way the vertex got in.
         for index in 0..count {
             for (vertex_index, vertex) in vertices.iter().enumerate() {
                 let segment = self.segments[index];
                 let frame = Frame::of(segment.yaw, segment.pitch);
                 let r = frame.offset(*vertex);
                 let at = add(segment.position, r);
-                let rise = ground(at[0], at[2]) - ground(segment.position[0], segment.position[2]);
+                let top = ground(at[0], at[2]);
+                let rise = top - ground(segment.position[0], segment.position[2]);
                 if rise > CLIMB_LIMIT_METRES {
-                    // A riser too tall to climb: the vertex stands against it, a hair
-                    // before the line between it and its body's origin.
+                    // A riser too tall to climb is solid only up to its top: a vertex above
+                    // the terrace it overhangs is in open air, as a box held over an edge is.
+                    if at[1] >= top {
+                        continue;
+                    }
+                    // Inside the terrace block, the vertex leaves by the nearer face - up
+                    // onto the top, or back out through the riser a hair before the line
+                    // between it and its body's origin - the least-penetration rule body
+                    // pairs already obey. Out through the riser alone, a vertex just under a
+                    // top took the full horizontal shove (seed 102 outran its wave), and a
+                    // chain laid across an edge was asked for poses no pivot allows (seed 120).
                     let (fraction, normal) = first_cell_crossing(segment.position, at);
                     let allowed = add(segment.position, scale(r, fraction));
                     let past = dot(sub(at, allowed), normal);
-                    if past < 0.0 {
+                    let under = top - at[1];
+                    if past < 0.0 && under < -past {
+                        pushed[index] |= 1u128 << (vertex_index % 128);
+                        let lifted = push_vertex(
+                            &mut self.segments[index],
+                            r,
+                            &frame,
+                            [0.0, 1.0, 0.0],
+                            under,
+                            inverse_mass,
+                            inverse_inertia,
+                        );
+                        largest = largest.max(lifted);
+                        lift_this[index] += lifted;
+                    } else if past < 0.0 {
                         let pushed_by = push_vertex(
                             &mut self.segments[index],
                             r,

@@ -290,10 +290,10 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                     let frame = master_control::chain::Frame::of(segment.yaw, segment.pitch);
                     // The body's own floor is the one under its origin, as the solver measures
                     // it: a vertex whose cell is more than a climb above that stands against a
-                    // riser, and what is asserted of it is how far past the cell line it stands
-                    // - a Gauss-Seidel residual, held to the joint's 5 mm - not how far under
-                    // the terrace above, which is not its floor. Every other vertex is held
-                    // above its own floor to a centimetre.
+                    // riser, and what is asserted of it is how far inside the terrace block it
+                    // stands by the nearer face - past the cell line or under the top - a
+                    // Gauss-Seidel residual, held to the joint's 5 mm. Every other vertex is
+                    // held above its own floor to a centimetre.
                     let own_floor = floor(segment.position[0], segment.position[2]);
                     for vertex in &hull.vertices {
                         let offset = frame.offset(*vertex);
@@ -302,8 +302,12 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                             segment.position[1] + offset[1],
                             segment.position[2] + offset[2],
                         ];
-                        let rise = floor(corner[0], corner[2]) - own_floor;
-                        if rise > master_control::physics::CLIMB_LIMIT_METRES {
+                        let top = floor(corner[0], corner[2]);
+                        let rise = top - own_floor;
+                        // A riser is solid only up to its top: a vertex above the terrace it
+                        // overhangs is in open air and falls to the floor rule below, which it
+                        // passes; one inside the block is held by the nearer face it may leave by.
+                        if rise > master_control::physics::CLIMB_LIMIT_METRES && corner[1] < top {
                             let (fraction, normal) = master_control::physics::first_cell_crossing(
                                 segment.position,
                                 corner,
@@ -315,6 +319,7 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                             ];
                             let past = -((corner[0] - allowed[0]) * normal[0]
                                 + (corner[2] - allowed[2]) * normal[2]);
+                            let past = past.min(top - corner[1]);
                             assert!(
                                 past < 5e-3,
                                 "{}",
