@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`external/link` at link's month-end tidy (5a1c6b0).** The pointer moves from the protocol-v11
+  commit; the wire is unchanged - protocol 11, client ABI 9, the headers differing only by their
+  notices and one comment - and every suite, the golden life included, passes against it.
+- **Rust 1.99.1.** The pin in `rust-toolchain.toml` moves from 1.98.0 (the Tool Updates watcher's
+  #53); rustfmt, clippy, every suite and rustdoc are clean under it without a change to the code.
+  The guides say 1.99.1 where they said 1.98.0; the README and `.claude/CLAUDE.md` name the exact
+  pin where they said "stable".
 - **The Long Arc has six copies.** The organisation's open research lab,
   [iso-lab](https://github.com/ai-quokka-wannabe/iso-lab), carries the block in its own
   `docs/VISION.md`, so the guard comment above the block in `docs/VISION.md` now says "Change all six
@@ -483,6 +490,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every code file carries its notice.** `src/chain.rs` lost its GPL header when Etape 8
+  movement 1 rewrote it, so the notices pass missed it; it has it back, and the two CI scripts
+  (`check-toolchain-pin.sh`, `cleanup-caches.js`) carry it too, in their own comment syntax. A
+  comment in `src/roster.rs` that still waited on Etape 5 for a spawn rule names the lattice that
+  rule became.
 - **The world's last word follows separation too.** Standing two bodies apart knows nothing
   of the terrain: a chain's head shoved sideways by a neighbour - the deep tier's seed 100
   found eight bodies crowded against the riser at x = 6 - ended the tick with a corner

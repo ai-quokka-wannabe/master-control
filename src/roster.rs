@@ -40,9 +40,8 @@ use std::collections::BTreeMap;
 pub const GUEST_CREATURE_ID: u32 = 100;
 
 /// Where a body stands when it is rezzed: a cell centre the tests prove flat for a metre of
-/// opening walk. Every body spawns here for now - bodies do not yet feel each other, so the
-/// pad is shared without consequence; the exact-contacts etape (TODO § Etape 5) is the
-/// trigger for a spawn rule that keeps them apart.
+/// opening walk, and the centre of the spawn lattice below, which keeps every body on a spot of
+/// its own.
 pub const SPAWN_PAD_X: f32 = 1.0;
 pub const SPAWN_PAD_Z: f32 = 5.0;
 /// The spawn lattice: spots half a metre apart in a square spiral out from the pad, the first
