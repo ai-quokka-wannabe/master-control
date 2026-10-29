@@ -120,11 +120,48 @@ pub const FIRST_BODY: BodyBounds = BodyBounds {
 };
 
 /// A creature's seed, derived rather than drawn so the same roster produces the same seeds on
-/// every run. The run's master seed mixes in here and nowhere else - the RNG-of-record rule,
-/// with per-creature substreams so admitting a newcomer perturbs nobody else's draws.
+/// every run. The run's master seed mixes in here and in [`food_seed`] and nowhere else - the
+/// RNG-of-record rule, with per-creature substreams so admitting a newcomer perturbs nobody
+/// else's draws.
 #[must_use]
 pub fn creature_seed(master_seed: u64, creature_id: u64) -> u64 {
     master_seed ^ 0x9E37_79B9_7F4A_7C15 ^ creature_id.wrapping_mul(0x100_0193)
+}
+
+/// The food's own substream: its tag sits in the top nibble, above anything a creature's id can
+/// reach (a `u32` times `0x100_0193` stays under two to the fifty-seven), so the food's draws and
+/// every creature's are different streams of one master seed.
+const FOOD_STREAM: u64 = 0xF00D_0000_0000_0000;
+
+/// The food's seed: where the orbs lie and what each smells of are drawn from it (food.rs), so
+/// two lives of one world meet the same food, and no creature's draws move a single orb.
+#[must_use]
+pub fn food_seed(master_seed: u64) -> u64 {
+    master_seed ^ 0x9E37_79B9_7F4A_7C15 ^ FOOD_STREAM
+}
+
+/// The RNG of record: SplitMix64, std only, every draw a pure function of the seed and how many
+/// draws came before. Seeded only from [`creature_seed`] and [`food_seed`] (or from a seed mixed
+/// out of one of them), never from a clock, so whatever the world draws replays.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SplitMix64(pub u64);
+
+impl SplitMix64 {
+    /// The next 64 bits.
+    pub fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    /// A uniform draw in [0, 1): the top 53 bits as an f64's whole mantissa, exactly.
+    pub fn next_unit(&mut self) -> f64 {
+        #[allow(clippy::cast_precision_loss)]
+        let mantissa = (self.next_u64() >> 11) as f64;
+        mantissa * (1.0 / 9_007_199_254_740_992.0)
+    }
 }
 
 /// Zero if not a real number, then clamped by comparison to the body's bounds.

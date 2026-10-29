@@ -438,3 +438,35 @@ shows them in its ear view as it shows a call.
 to every hosted ear, the scraping body's own included, as energy in the ear's bins with no
 arrival to range; rc-worm's panel shows a dragging worm's own spikes lighting both ears'
 earliest bins.
+
+## Food and smell
+
+**The owner's ask (2026-10-29)**, designed in the flagship's
+[docs/CHEMORECEPTION.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/CHEMORECEPTION.md):
+food as bright white orbs the world owns, the body's intake as a sense, and smell computed where
+the world is, so Clu replays it.
+
+**Done (2026-10-29), the world's half, no wire.** `trig::exp` and `trig::erfc` (fdlibm);
+`src/food.rs` (placement on open floor from the food substream of the master seed, the mouth,
+the pump every ninth tick, a bite of a 256th, `FoodGone`); `src/odour.rs` (the closed-form field
+with its floor image and the gone orb's negative source, proven against a quadrature of the
+instantaneous source; patterns over eight receptor types; two amphids, bound fractions,
+Berg-Purcell counting noise); `--food-density`, `--config <file>`, the log's `food` header line
+read back by Clu. Nothing in the roster's tick calls them, and no golden moved.
+
+**Still owed:**
+
+- **The wire (after link v12)**: the roster places the food at world start from the Config's
+  settings, feeds every mouth in roster order on the tick, sends the food rows in `TICK_STATE`,
+  the food-gone `EVENT` with its pew, and `intake` and `odour[2][8]` in the letter; Clu places
+  the same food from the log's header line and feeds as the world did; the goldens re-recorded.
+  The food then joins the state hash (quantities and gone ticks are state).
+- **A master seed worth the name.** Every world is master seed zero (`MASTER_SEED` in
+  `main.rs`), so every world meets the same food. When lives want different food, a `--seed`
+  flag (and config key) sets it, and the log's header carries it beside the food line.
+- **Three constants unverified in place**, as the code marks them (the design marks the first): air's diffusivity
+  (1e-5 m^2/s), the amphid's opening (a micrometre) and the half-saturating concentration (a
+  nanomolar). Each is to be read out of a source before it is fixed; the last two set only the
+  readings' scale and noise, the first the field's reach in time.
+- **Odour blocked by the terraces**: the field treats the Grid as a flat half-space (each orb's
+  image is below its own floor). The trigger and the fix are the design's.
