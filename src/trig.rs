@@ -13,6 +13,23 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
+/*
+    The arithmetic below is ported from fdlibm, and fdlibm's licence asks that its notices be kept:
+
+    Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+
+    Developed at SunSoft, a Sun Microsystems, Inc. business.
+    Permission to use, copy, modify, and distribute this
+    software is freely granted, provided that this notice
+    is preserved.
+
+    Copyright (C) 2004 by Sun Microsystems, Inc. All rights reserved.
+
+    Permission to use, copy, modify, and distribute this
+    software is freely granted, provided that this notice
+    is preserved.
+*/
+
 //! The world owns its transcendentals. The owner's ruling (2026-08-27), after the chain golden
 //! life found the edge: `f32::sin` and its kin are the platform's libm, and glibc rounds some
 //! arguments a last ulp differently from MSVC's UCRT, so a life recorded on one machine

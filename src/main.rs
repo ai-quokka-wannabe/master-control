@@ -22,7 +22,8 @@
 //!
 //! `--config <file>` is Master Control's first config file: `key = value` lines naming the long
 //! flags without their dashes (`food-density = 0.2`, `log = world.log`, `verbose = true`), `#`
-//! comments; every setting may be written there, and a flag on the command line wins.
+//! comments; every long flag but `--version` and `--config` may be written there (the port stays the one positional
+//! argument), and a flag on the command line wins.
 
 use master_control::food::{DEFAULT_DENSITY, FoodSettings};
 use master_control::heartbeat::{Config, Heartbeat};
@@ -208,6 +209,9 @@ fn from_command_line(arguments: impl IntoIterator<Item = String>) -> Result<Sett
 /// would be; a key unknown, said twice or left without a value is refused, with its line.
 fn from_config(text: &str) -> Result<Settings, String> {
     let mut settings = Settings::default();
+    // An editor that saves UTF-8 with a byte-order mark (Windows PowerShell 5.1's `Set-Content` does) would
+    // otherwise hide an invisible character in front of the first key.
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     for (index, raw) in text.lines().enumerate() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -426,6 +430,16 @@ mod tests {
             "the file fills the rest"
         );
         assert_eq!(merged.disk_roll_mib, Some(16));
+    }
+
+    #[test]
+    fn a_config_saved_with_a_byte_order_mark_reads_as_one_without() {
+        // Windows PowerShell 5.1 writes UTF-8 with a mark; the first key must not inherit it.
+        let file = from_config("\u{FEFF}food-density = 0.2\nverbose = true\n").expect("parses");
+        assert_eq!(file.food_density, Some(0.2));
+        assert_eq!(file.verbose, Some(true));
+        let comment_first = from_config("\u{FEFF}# a comment\nlog = world.log\n").expect("parses");
+        assert_eq!(comment_first.log, Some(PathBuf::from("world.log")));
     }
 
     #[test]

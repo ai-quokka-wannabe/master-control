@@ -464,7 +464,7 @@ read back by Clu. Nothing in the roster's tick calls them, and no golden moved.
 - **A master seed worth the name.** Every world is master seed zero (`MASTER_SEED` in
   `main.rs`), so every world meets the same food. When lives want different food, a `--seed`
   flag (and config key) sets it, and the log's header carries it beside the food line.
-- **Three constants unverified in place**, as the design marks them: air's diffusivity
+- **Three constants unverified in place**, as the code marks them (the design marks the first): air's diffusivity
   (1e-5 m^2/s), the amphid's opening (a micrometre) and the half-saturating concentration (a
   nanomolar). Each is to be read out of a source before it is fixed; the last two set only the
   readings' scale and noise, the first the field's reach in time.

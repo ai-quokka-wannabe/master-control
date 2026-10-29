@@ -38,7 +38,7 @@ use crate::physics::{BODY_HALF_LENGTH, Body, CLIMB_LIMIT_METRES, SplitMix64, flo
 pub const ORB_RADIUS: f32 = 0.25;
 
 /// How far an orb's centre keeps from any riser, metres: an orb's diameter, so the whole ball
-/// rests on its own flat cell with a radius to spare and no step runs beneath it.
+/// rests on its own flat cell with a radius to spare and no riser runs beneath it (a step low enough to climb may).
 pub const RISER_CLEARANCE: f32 = 2.0 * ORB_RADIUS;
 
 /// The most orbs a world holds: `LNK_TICK_STATE_MAX_FOOD`, what one TICK_STATE carries (link
@@ -50,7 +50,7 @@ pub const FOOD_MAX: usize = 64;
 pub const PUMP_EVERY_TICKS: u64 = 9;
 
 /// What one pump swallows, in the world's food unit (a whole orb is one): a 256th, so an orb
-/// lasts 256 pumps - 72 seconds of steady feeding, about a minute as the design asks - and,
+/// lasts 256 pumps - 72 seconds of steady feeding, about a minute - and,
 /// being a power of two, every quantity an orb passes through is exact and the last bite
 /// leaves exactly zero.
 pub const BITE: f32 = 1.0 / 256.0;
