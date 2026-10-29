@@ -502,7 +502,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   vertex just under it still took the full horizontal shove, and seed 102 outran its wave. The
   random walk's riser invariant follows the geometry. Two tests hold it, each red under the old
   rule: a segment above a terrace edge is not moved sideways, and a vertex five millimetres
-  inside one is lifted onto the top rather than shoved fifteen centimetres back.
+  inside one is lifted onto the top rather than shoved fifteen centimetres back. The deep tier
+  (seeds 100-123) is green with it. The chain golden is re-recorded: a scripted life on the desk,
+  1,786 ticks, 55 hashes, Clu agreeing.
 - **The linter's math renderer is the patched one.** markdownlint reaches KaTeX through
   `micromark-extension-math`, whose `^0.16` range cannot reach the prototype-pollution fix in 0.18.2
   (Dependabot #7), so `package.json` overrides it to 0.18.2. The linter loads it and passes as before.
