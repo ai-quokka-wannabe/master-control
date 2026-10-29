@@ -239,12 +239,19 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
         // its bounds bound the gait - the wave's phase speed is the top speed - while the head
         // itself, yanked by the chain, is held only to sanity, and its wag is the wave's.
         if body.chain.trails() {
+            // The message dumps the head, the torques and every segment: the seed-120 diagnosis
+            // needed exactly that to see a chain thrown, so it stays for the next one.
             assert!(
                 body.forward_speed.abs() <= CHAIN_SPEED_SANITY,
                 "{}",
                 at(&format!(
-                    "creature {creature_id} outran its wave: {} m/s against a top speed of {}",
-                    body.forward_speed, body.bounds.max_forward_speed
+                    "creature {creature_id} outran its wave: {} m/s against a top speed of {} - head {:?} grounded {} torques {:?} segments {:?}",
+                    body.forward_speed,
+                    body.bounds.max_forward_speed,
+                    body.chain.head(),
+                    body.grounded,
+                    &body.chain.torques[..(body.chain.segment_count - 1) as usize],
+                    &body.chain.segments[..body.chain.segment_count as usize]
                 ))
             );
             for joint in 0..(body.chain.segment_count - 1) as usize {
@@ -285,10 +292,10 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                     let frame = master_control::chain::Frame::of(segment.yaw, segment.pitch);
                     // The body's own floor is the one under its origin, as the solver measures
                     // it: a vertex whose cell is more than a climb above that stands against a
-                    // riser, and what is asserted of it is how far past the cell line it stands
-                    // - a Gauss-Seidel residual, held to the joint's 5 mm - not how far under
-                    // the terrace above, which is not its floor. Every other vertex is held
-                    // above its own floor to a centimetre.
+                    // riser, and what is asserted of it is how far inside the terrace block it
+                    // stands by the nearer face - past the cell line or under the top - a
+                    // Gauss-Seidel residual, held to the joint's 5 mm. Every other vertex is
+                    // held above its own floor to a centimetre.
                     let own_floor = floor(segment.position[0], segment.position[2]);
                     for vertex in &hull.vertices {
                         let offset = frame.offset(*vertex);
@@ -297,8 +304,12 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                             segment.position[1] + offset[1],
                             segment.position[2] + offset[2],
                         ];
-                        let rise = floor(corner[0], corner[2]) - own_floor;
-                        if rise > master_control::physics::CLIMB_LIMIT_METRES {
+                        let top = floor(corner[0], corner[2]);
+                        let rise = top - own_floor;
+                        // A riser is solid only up to its top: a vertex above the terrace it
+                        // overhangs is in open air and falls to the floor rule below, which it
+                        // passes; one inside the block is held by the nearer face it may leave by.
+                        if rise > master_control::physics::CLIMB_LIMIT_METRES && corner[1] < top {
                             let (fraction, normal) = master_control::physics::first_cell_crossing(
                                 segment.position,
                                 corner,
@@ -310,6 +321,7 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
                             ];
                             let past = -((corner[0] - allowed[0]) * normal[0]
                                 + (corner[2] - allowed[2]) * normal[2]);
+                            let past = past.min(top - corner[1]);
                             assert!(
                                 past < 5e-3,
                                 "{}",
@@ -478,7 +490,19 @@ fn a_random_walk_keeps_every_invariant_and_replays_bit_for_bit() {
 #[test]
 #[ignore = "the deep tier: twenty-four seeds, two thousand steps each - run with --include-ignored"]
 fn a_long_random_walk_keeps_every_invariant_and_replays_bit_for_bit() {
-    for seed in 100u64..124 {
+    // The whole span by default; `RANDOM_WALK_SEEDS=120` or `RANDOM_WALK_SEEDS=118-121` narrows
+    // it to the seed a finding names, so a failure seventy minutes in reproduces in two.
+    let span = std::env::var("RANDOM_WALK_SEEDS")
+        .ok()
+        .map_or(100u64..124, |chosen| {
+            let (first, last) = chosen
+                .split_once('-')
+                .map_or((chosen.as_str(), chosen.as_str()), |(a, b)| (a, b));
+            let first: u64 = first.trim().parse().expect("RANDOM_WALK_SEEDS: a seed");
+            let last: u64 = last.trim().parse().expect("RANDOM_WALK_SEEDS: a seed");
+            first..last + 1
+        });
+    for seed in span {
         assert_eq!(walk(seed, 2_000), walk(seed, 2_000), "seed {seed}");
     }
 }

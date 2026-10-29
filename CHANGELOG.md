@@ -520,6 +520,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A substep ends with the pivots and the world agreeing, a servo pushes only as far as it stands, and a chain is
+  laid settled.** Three changes the seed hunt made on the way to the riser below. The world's eight extra sweeps
+  after each substep (the entry "The world has the last word", further down) opened joints by what they moved - 11 mm
+  on seed 102 - so a substep now ends in `converge_world`: pivots and world together, until every joint is closed to
+  a tenth of a millimetre and the world pushes nothing, or 64 passes have gone. A servo's torque is projected on the
+  vertical, by the cosine of its joint's mean pitch and none past upright - a simplification, written down beside the
+  code. And a chain rezzed - embodied or adopted - is settled against the world before its first tick, the same
+  settle a separation gets: seed 120's chain had been laid with its tail inside a terrace and thrown at 14 m/s.
+- **A riser is solid only up to its top, and a vertex leaves it by the nearer face.** The deep
+  tier's seed 120 threw a chain backwards off a terrace edge at step 975. `touch_world` measured
+  a riser from the cell under the segment's origin and never compared the vertex with the higher
+  cell's top, so every riser was infinitely tall: a segment whose origin overhung a drop had the
+  vertices resting on the terrace shoved sideways by a wall that was not there, and a chain laid
+  across an edge was asked for poses no pivot allows - its REZ settle ran out its 256 passes
+  with joints 24 mm open. A vertex above the terrace it overhangs is now in open air, and one
+  inside the terrace block leaves by the nearer face, up onto the top or back out through the
+  riser: the least-penetration rule body pairs already obey. The top alone was not enough - a
+  vertex just under it still took the full horizontal shove, and seed 102 outran its wave. The
+  random walk's riser invariant follows the geometry. Two tests hold it, each red under the old
+  rule: a segment above a terrace edge is not moved sideways, and a vertex five millimetres
+  inside one is lifted onto the top rather than shoved back further than its whole overhang. The deep tier
+  (seeds 100-123) is green with it. The chain golden is re-recorded: a scripted life on the desk,
+  1,786 ticks, 55 hashes, Clu agreeing.
 - **The linter's math renderer is the patched one.** markdownlint reaches KaTeX through
   `micromark-extension-math`, whose `^0.16` range cannot reach the prototype-pollution fix in 0.18.2
   (Dependabot #7), so `package.json` overrides it to 0.18.2. The linter loads it and passes as before.
@@ -528,6 +551,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`check-toolchain-pin.sh`, `cleanup-caches.js`) carry it too, in their own comment syntax. A
   comment in `src/roster.rs` that still waited on Etape 5 for a spawn rule names the lattice that
   rule became.
+- **The world's last word follows separation too.** Standing two bodies apart knows nothing
+  of the terrain: a chain's head shoved sideways by a neighbour - the deep tier's seed 100
+  found eight bodies crowded against the riser at x = 6 - ended the tick with a corner
+  7.7 mm inside the wall, after its own solver step had ended clean. The roster now gives
+  the world the last word after the pairs are stood apart and the chains carried: the same
+  contact passes the solver ends every substep with, on the tick's final pose, so the row
+  and the letter never describe a body standing inside a wall. (Sixteen contact sweeps were
+  measured first and changed nothing - the penetration never came from the solver.) The
+  chain golden is re-recorded.
 - **The README and `TODO.md` tell today's world.** Found while the vision was written: the
   README's chain was still Etape 6's kinematic trail at protocol 7 - the head the one rigid
   body, the segments placed along its path, an authored wave laid over it - and now tells Etape

@@ -148,10 +148,21 @@ impl Frame {
 pub const SUBSTEPS: usize = 4;
 pub const ITERATIONS: usize = 32;
 
-/// Passes over every vertex alone after each substep's sweeps, the joints silent: the world's
-/// last word. The sweeps leave a hammered head's vertices inside a riser by what the later
-/// vertices' pushes turned it; these converge that to nothing the deep tier can see.
-pub const CONTACT_SWEEPS: usize = 8;
+/// The most passes of pivots-and-world after each substep's servo sweeps: the sweeps leave a
+/// hammered head's vertices inside a riser by what the later vertices' pushes turned it, and
+/// pushing them out alone opens the joints, so both are held together until they agree.
+/// Most substeps end in one or two passes; a bound keeps the order fixed.
+pub const CONTACT_SWEEPS: usize = 64;
+
+/// The most passes a settle takes - after a separation, or for a chain just laid at REZ - and
+/// the joint gap it settles to: a bound rather than a count, because a shove's size is the
+/// crowd's to decide.
+pub const SETTLE_PASSES_MAX: usize = 256;
+pub const SETTLE_GAP: f32 = 1e-4;
+
+/// The world's largest push in a pass below which it is at rest: a resting vertex is lifted a
+/// few hundred nanometres after each substep's gravity, and that is not a push.
+pub const SETTLE_PUSH: f32 = 1e-5;
 
 /// A segment's moment of inertia about any axis through its origin: an icosahedron is nearly
 /// a sphere, and a solid sphere's is two fifths of its mass times its radius squared.
@@ -469,7 +480,7 @@ impl Chain {
                     );
                 }
                 // The world last, so no segment ends a sweep under its floor or inside a wall.
-                self.touch_world(
+                let _ = self.touch_world(
                     count,
                     vertices,
                     ground,
@@ -481,25 +492,22 @@ impl Chain {
                 );
             }
 
-            // The world has the last word. A sweep pushes every vertex out of the world one
-            // at a time, and each later push turns the segment and can drive an earlier
-            // vertex back in; behind a head hammered by a hostile servo the last sweep's own
-            // vertices left over a centimetre inside a riser (the deep tier's seed 101). So
-            // after the joints have had their say the vertices alone are swept again, until
-            // nothing ends the substep inside a wall or under a floor; what that moves, the
-            // joints absorb within the millimetres the deep tier holds them to.
-            for _ in 0..CONTACT_SWEEPS {
-                self.touch_world(
-                    count,
-                    vertices,
-                    ground,
-                    &mut wall_this,
-                    &mut lift_this,
-                    &mut pushed,
-                    inverse_mass,
-                    inverse_inertia,
-                );
-            }
+            // Then the pivots and the world together, the servos silent. A sweep pushes every
+            // vertex out of the world one at a time and each later push turns the segment and
+            // can drive an earlier vertex back in (seed 101: 13.8 mm inside a riser); the world
+            // alone as the last word opened joints by what it moved (seed 102: 11 mm). Held and
+            // pushed alternately they close together, to nothing the deep tier can see.
+            self.converge_world(
+                count,
+                vertices,
+                ground,
+                &mut wall_this,
+                &mut lift_this,
+                &mut pushed,
+                inverse_mass,
+                inverse_inertia,
+                CONTACT_SWEEPS,
+            );
 
             // Velocities are what the positions did.
             for (segment, was) in self.segments.iter_mut().zip(previous.iter()).take(count) {
@@ -656,9 +664,9 @@ impl Chain {
     /// one under the vertex a substep ago: a vertex nudged over a line after the wall pushed
     /// it out would otherwise see no rise, be taken for standing on the higher floor, and be
     /// lifted a wall's height in one sweep. A cell more than a climb above the body's own is
-    /// a wall, whichever way the vertex got in. What the walls pushed with and what the
-    /// floor lifted are added up for the letter, and every vertex touched is marked for the
-    /// velocity pass.
+    /// a wall up to its top, whichever way the vertex got in, and a vertex inside it leaves by
+    /// the nearer face. What the walls pushed with and what the floor lifted are added up for
+    /// the letter, and every vertex touched is marked for the velocity pass.
     #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
     fn touch_world(
         &mut self,
@@ -670,28 +678,53 @@ impl Chain {
         pushed: &mut [u128; SEGMENTS_MAX as usize],
         inverse_mass: f32,
         inverse_inertia: f32,
-    ) {
+    ) -> f32 {
+        let mut largest = 0.0f32;
         // every vertex against its own floor, or against the riser it stands inside.
         // The floor a vertex is measured against is the one under its segment's
         // origin - the cell the body stands in - not the one under the vertex a
         // substep ago: a vertex nudged over a line after the wall pushed it out would
         // otherwise see no rise, be taken for standing on the higher floor, and be
         // lifted a wall's height in one sweep. A cell more than a climb above the
-        // body's own is a wall, whichever way the vertex got in.
+        // body's own is a wall up to its top, whichever way the vertex got in.
         for index in 0..count {
             for (vertex_index, vertex) in vertices.iter().enumerate() {
                 let segment = self.segments[index];
                 let frame = Frame::of(segment.yaw, segment.pitch);
                 let r = frame.offset(*vertex);
                 let at = add(segment.position, r);
-                let rise = ground(at[0], at[2]) - ground(segment.position[0], segment.position[2]);
+                let top = ground(at[0], at[2]);
+                let rise = top - ground(segment.position[0], segment.position[2]);
                 if rise > CLIMB_LIMIT_METRES {
-                    // A riser too tall to climb: the vertex stands against it, a hair
-                    // before the line between it and its body's origin.
+                    // A riser too tall to climb is solid only up to its top: a vertex above
+                    // the terrace it overhangs is in open air, as a box held over an edge is.
+                    if at[1] >= top {
+                        continue;
+                    }
+                    // Inside the terrace block, the vertex leaves by the nearer face - up
+                    // onto the top, or back out through the riser a hair before the line
+                    // between it and its body's origin - the least-penetration rule body
+                    // pairs already obey. Out through the riser alone, a vertex just under a
+                    // top took the full horizontal shove (seed 102 outran its wave), and a
+                    // chain laid across an edge was asked for poses no pivot allows (seed 120).
                     let (fraction, normal) = first_cell_crossing(segment.position, at);
                     let allowed = add(segment.position, scale(r, fraction));
                     let past = dot(sub(at, allowed), normal);
-                    if past < 0.0 {
+                    let under = top - at[1];
+                    if past < 0.0 && under < -past {
+                        pushed[index] |= 1u128 << (vertex_index % 128);
+                        let lifted = push_vertex(
+                            &mut self.segments[index],
+                            r,
+                            &frame,
+                            [0.0, 1.0, 0.0],
+                            under,
+                            inverse_mass,
+                            inverse_inertia,
+                        );
+                        largest = largest.max(lifted);
+                        lift_this[index] += lifted;
+                    } else if past < 0.0 {
                         let pushed_by = push_vertex(
                             &mut self.segments[index],
                             r,
@@ -701,6 +734,7 @@ impl Chain {
                             inverse_mass,
                             inverse_inertia,
                         );
+                        largest = largest.max(pushed_by);
                         wall_this[index] = add(wall_this[index], scale(normal, pushed_by));
                         self.wall_vertices[index] = vertex_index as u32;
                         pushed[index] |= 1u128 << (vertex_index % 128);
@@ -713,7 +747,7 @@ impl Chain {
                     // to its floor, and the lift turns the segment about the axis the
                     // vertex's offset makes with it.
                     pushed[index] |= 1u128 << (vertex_index % 128);
-                    lift_this[index] += push_vertex(
+                    let lifted = push_vertex(
                         &mut self.segments[index],
                         r,
                         &frame,
@@ -722,9 +756,97 @@ impl Chain {
                         inverse_mass,
                         inverse_inertia,
                     );
+                    largest = largest.max(lifted);
+                    lift_this[index] += lifted;
                 }
             }
         }
+        largest
+    }
+
+    /// The pivots and the world brought to agreement, the servos silent: pass after pass each
+    /// joint is held and every vertex is pushed out of the world, until every joint is closed to
+    /// `SETTLE_GAP` and the world's largest push fell under `SETTLE_PUSH` - or `passes` have
+    /// gone. A bounded loop in a fixed order, so the replay promise holds. This is how a
+    /// substep ends and how a body a separation moved is settled: the world alone as the last
+    /// word opened joints by what it moved (the deep tier's seed 102, 11 mm), the joints alone
+    /// left vertices in walls; together they close to nothing the tier can see.
+    #[allow(clippy::too_many_arguments)]
+    fn converge_world(
+        &mut self,
+        count: usize,
+        vertices: &[[f32; 3]],
+        ground: &dyn Fn(f32, f32) -> f32,
+        wall_this: &mut [[f32; 3]; SEGMENTS_MAX as usize],
+        lift_this: &mut [f32; SEGMENTS_MAX as usize],
+        pushed: &mut [u128; SEGMENTS_MAX as usize],
+        inverse_mass: f32,
+        inverse_inertia: f32,
+        passes: usize,
+    ) {
+        let half = 0.5 * self.spacing;
+        let joints = count - 1;
+        for _ in 0..passes {
+            for joint in 0..joints {
+                hold_pivot(
+                    &mut self.segments,
+                    joint,
+                    half,
+                    inverse_mass,
+                    inverse_inertia,
+                );
+            }
+            let largest = self.touch_world(
+                count,
+                vertices,
+                ground,
+                wall_this,
+                lift_this,
+                pushed,
+                inverse_mass,
+                inverse_inertia,
+            );
+            let closed = (0..joints).all(|joint| self.joint_gap(joint) < SETTLE_GAP);
+            if closed && largest < SETTLE_PUSH {
+                break;
+            }
+        }
+    }
+
+    /// The world's last word after the roster moved a body, or laid a chain at REZ. A head stood apart from a
+    /// neighbour is moved with no eye on the terrain, and the chain is carried after it, so
+    /// a corner can end the tick inside a riser - the deep tier's seed 100 found one 7.7 mm
+    /// in, shoved there by a crowd of eight against the wall. The same passes the solver
+    /// ends every substep with run here on the tick's final pose - positions only, the
+    /// velocities are the separation's own business - so the row and the letter never
+    /// describe a body standing inside a wall.
+    pub fn settle_against(&mut self, hull: Option<&Hull>, ground: &dyn Fn(f32, f32) -> f32) {
+        if !self.trails() {
+            return;
+        }
+        let count = self.segment_count as usize;
+        let point = [[0.0, -BODY_HALF_HEIGHT, 0.0]];
+        let vertices: &[[f32; 3]] = hull.map_or(&point, |hull| hull.vertices.as_slice());
+        let inverse_mass = 1.0 / BODY_MASS_KG;
+        let inverse_inertia = 1.0 / SEGMENT_INERTIA;
+        let mut wall_this = [[0.0f32; 3]; SEGMENTS_MAX as usize];
+        let mut lift_this = [0.0f32; SEGMENTS_MAX as usize];
+        let mut pushed = [0u128; SEGMENTS_MAX as usize];
+        // The solver minus the motors: pushing the head out of a wall opens the joint behind it
+        // by the push, so pivots and world converge together. A separation's shove can be
+        // centimetres where the solver's substeps move millimetres, so the bound is generous.
+        self.converge_world(
+            count,
+            vertices,
+            ground,
+            &mut wall_this,
+            &mut lift_this,
+            &mut pushed,
+            inverse_mass,
+            inverse_inertia,
+            SETTLE_PASSES_MAX,
+        );
+        self.tell_poses();
     }
 
     /// Whether any vertex of segment `index` rests on its floor, and which: the letter's
@@ -890,6 +1012,17 @@ fn drive_motor(
     let angle = segments[joint + 1].yaw - segments[joint].yaw;
     let error = angle - target;
     let w = inverse_inertia + inverse_inertia + compliance;
+    // The servo's axis is the joint's own up, and what it drives is the yaw about the world's
+    // up: the two agree on the flat and part as the joint pitches, until at the vertical the
+    // yaw between neighbours means nothing at all - and a servo driving it there pumped energy
+    // into a chain hanging off a terrace drop until it whipped (the deep tier's seed 102). So
+    // the torque the servo can bring to the yaw is its torque projected on the vertical, the
+    // cosine of the joint's pitch, and none past the vertical. A simplification, written down:
+    // the servo as a hinge about the joint's own axis, on a rotation the wire can carry whole,
+    // is the movement after this one.
+    let joint_pitch = 0.5 * (segments[joint].pitch + segments[joint + 1].pitch);
+    let on_the_vertical = trig::sin_cos(joint_pitch).1.max(0.0);
+    let lambda_limit = lambda_limit * on_the_vertical;
     // XPBD: the correction this sweep is what the constraint and the compliance still owe,
     // given what the substep's earlier sweeps already applied. A servo holds with what torque
     // it has: the total is clamped to its limit, so past it the servo stalls, and a body
@@ -1474,6 +1607,79 @@ mod tests {
         }
     }
 
+    /// A chain of three laid level at `height` across a terrace 0.3 m high whose edge is z = 0:
+    /// the head over the terrace, the second segment's origin 0.1 m short of the edge with its
+    /// front half over the terrace - the pose seed 120's REZ settle could not close.
+    fn laid_across_an_edge(height: f32) -> (Chain, [[f32; 3]; 3]) {
+        let chain = Chain::new(
+            3,
+            0.56,
+            PathSample {
+                position: [0.0, height, 0.46],
+                yaw: std::f32::consts::PI,
+            },
+        );
+        let before = [
+            chain.segments[0].position,
+            chain.segments[1].position,
+            chain.segments[2].position,
+        ];
+        (chain, before)
+    }
+
+    #[test]
+    fn a_segment_over_a_terrace_edge_above_its_top_is_in_open_air_not_against_a_wall() {
+        // Every vertex stands above its own floor and above the terrace it overhangs, so the
+        // settle has nothing to do: nothing moves sideways and every joint stays closed. With
+        // a riser of no top, the second segment's front vertices were inside a wall and it was
+        // shoved back off the edge, against its pivot, by the whole overhang.
+        let ground = stepped(0.3);
+        let hull = box_hull();
+        let (mut chain, before) = laid_across_an_edge(0.4);
+        chain.settle_against(Some(&hull), &ground);
+        for (index, was) in before.iter().enumerate() {
+            let now = chain.segments[index].position;
+            let moved = ((now[0] - was[0]).powi(2) + (now[2] - was[2]).powi(2)).sqrt();
+            assert!(
+                moved < 1e-4,
+                "segment {index} moved {moved} m sideways in open air"
+            );
+        }
+        for joint in 0..2 {
+            assert!(
+                chain.joint_gap(joint) < SETTLE_GAP,
+                "joint {joint} gap {}",
+                chain.joint_gap(joint)
+            );
+        }
+    }
+
+    #[test]
+    fn a_vertex_just_inside_a_terrace_leaves_by_the_nearer_face_onto_its_top() {
+        // Five millimetres under the terrace top and fifteen centimetres past its edge: the
+        // nearer way out is up. The settle lifts the overhang onto the top, the segment moves
+        // sideways by no more than its turn about the lift, and the joints close - where out
+        // through the riser alone it was shoved back further than its whole overhang (0.23 m,
+        // measured with the nearer-face half of the rule switched off).
+        let ground = stepped(0.3);
+        let hull = box_hull();
+        let (mut chain, before) = laid_across_an_edge(0.345);
+        chain.settle_against(Some(&hull), &ground);
+        let now = chain.segments[1].position;
+        let moved = ((now[0] - before[1][0]).powi(2) + (now[2] - before[1][2]).powi(2)).sqrt();
+        assert!(
+            moved < 1e-2,
+            "the second segment moved {moved} m sideways rather than up"
+        );
+        for joint in 0..2 {
+            assert!(
+                chain.joint_gap(joint) < 5e-3,
+                "joint {joint} gap {}",
+                chain.joint_gap(joint)
+            );
+        }
+    }
+
     #[test]
     fn a_wall_stops_the_chain_which_bends_at_its_joints_and_springs_back_when_it_relaxes() {
         // The floor rises half a metre at z = 0: a wall. A chain facing +Z drives into it with
@@ -1529,6 +1735,43 @@ mod tests {
             residual < 0.5 * bent,
             "relaxed to {residual} rad in all from a squeeze of {bent}"
         );
+    }
+
+    #[test]
+    fn a_head_shoved_into_a_wall_is_settled_out_with_its_joints_holding() {
+        // What separation does: the head moved sideways with no eye on the terrain, the
+        // chain carried after it - and a corner of the box ends inside the riser at z = 0.
+        // The world's last word puts it out; the pivots hold through it.
+        let ground = stepped(0.5);
+        let hull = box_hull();
+        let mut chain = Chain::new(4, 0.56, head_at(0.0, -0.6, std::f32::consts::PI));
+        let head = chain.head();
+        // Shoved 0.4 m toward the wall: the front face (a quarter metre ahead of the
+        // origin) ends 0.05 m past the line.
+        chain.set_head(
+            [head.position[0], head.position[1], -0.2],
+            head.yaw,
+            [0.0; 3],
+        );
+        chain.settle_against(Some(&hull), &ground);
+        for (index, segment) in chain.segments.iter().enumerate().take(4) {
+            let frame = Frame::of(segment.yaw, segment.pitch);
+            for vertex in &hull.vertices {
+                let at = add(segment.position, frame.offset(*vertex));
+                assert!(
+                    at[2] < 5e-3,
+                    "segment {index} vertex at z {} stands inside the wall",
+                    at[2]
+                );
+            }
+        }
+        for joint in 0..3 {
+            assert!(
+                chain.joint_gap(joint) < 5e-3,
+                "joint {joint} gap {} after the settle",
+                chain.joint_gap(joint)
+            );
+        }
     }
 
     #[test]

@@ -259,6 +259,19 @@ impl Roster {
     /// A host's `REZ`: judged against the world's bounds and the roster's state, then either
     /// embodied on the spawn pad, adopted where it stands, or refused in a word.
     pub fn rez(&mut self, sender: u64, model: Model) -> Admission {
+        /// A chain just laid behind its head, settled against the world before its first
+        /// tick, the head's pose following whatever the settle moved.
+        fn settle_new_chain(body: &mut Body) {
+            if !body.chain.trails() {
+                return;
+            }
+            body.chain
+                .settle_against(body.hull.as_ref(), &crate::physics::floor);
+            let head = body.chain.head();
+            body.position = head.position;
+            body.yaw = head.yaw;
+            body.pitch = head.pitch;
+        }
         let bounds = match world_bounds(&model.header) {
             Ok(bounds) => bounds,
             Err(reason) => return Admission::RefusedBounds(reason),
@@ -291,6 +304,11 @@ impl Roster {
                     if let Some(hull) = resident.body.hull.as_ref() {
                         resident.body.chain.set_keels(&hull.keels());
                     }
+                    // Laid straight with no eye on the terrain, and the world has the last
+                    // word before the first tick: a chain laid across a riser is otherwise
+                    // pushed out of it in one tick, centimetres in a tick being metres per
+                    // second (the deep tier's seed 120, a whole chain thrown at 14 m/s).
+                    settle_new_chain(&mut resident.body);
                     resident.model = model;
                     Admission::Adopted
                 }
@@ -327,6 +345,8 @@ impl Roster {
                             if let Some(hull) = body.hull.as_ref() {
                                 body.chain.set_keels(&hull.keels());
                             }
+                            // The pad is flat, the ground six metres behind it is anything.
+                            settle_new_chain(&mut body);
                             body
                         },
                         model,
@@ -451,6 +471,7 @@ impl Roster {
             crate::physics::step_body(&mut resident.body, intent, floor);
         }
         let ids: Vec<u32> = self.residents.keys().copied().collect();
+        let mut stood_apart: Vec<u32> = Vec::new();
         for (i, &first) in ids.iter().enumerate() {
             for &second in &ids[i + 1..] {
                 let touching = {
@@ -464,14 +485,35 @@ impl Roster {
                     if crate::physics::separate(&mut a, &mut b) {
                         self.residents.get_mut(&first).expect("resident").body = a;
                         self.residents.get_mut(&second).expect("resident").body = b;
+                        stood_apart.push(first);
+                        stood_apart.push(second);
                     }
                 }
             }
         }
         // The chains, after the pairs are stood apart: the path each trail follows is the
-        // head's settled pose, the one the row carries and the hash covers.
+        // head's settled pose, the one the row carries and the hash covers - and the world
+        // has the last word on it, because standing a pair apart knows nothing of the
+        // terrain and can shove a corner into a riser (the deep tier's seed 100).
         for resident in self.residents.values_mut() {
             crate::physics::advance_chain(&mut resident.body);
+        }
+        // Only a body a separation actually moved needs the settle: the solver's own step ended
+        // clean, and a settle for everyone every tick was measured to overrun the tick budget -
+        // the letters ran late and a host waiting on its own never counted a hosted tick.
+        for id in stood_apart {
+            let Some(resident) = self.residents.get_mut(&id) else {
+                continue;
+            };
+            let body = &mut resident.body;
+            if body.chain.trails() && body.bounds.max_joint_angle > 0.0 {
+                body.chain
+                    .settle_against(body.hull.as_ref(), &crate::physics::floor);
+                let head = body.chain.head();
+                body.position = head.position;
+                body.yaw = head.yaw;
+                body.pitch = head.pitch;
+            }
         }
         for (id, resident) in &mut self.residents {
             let previous_voice = previous_voices[id];

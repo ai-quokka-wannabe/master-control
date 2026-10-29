@@ -370,7 +370,7 @@ from its pivot until its own vertices meet the lower floor, a chain descending a
 by the step over the spacing, and a chain that walks off a cliff falls. Roll is locked, a
 simplification written down. Every segment's shape is the body's own hull at its pose - what
 the Grid draws - and every vertex of it is held above its own floor and stopped at a riser too
-tall to climb, measured against the floor under the segment's origin (a vertex nudged over a
+tall to climb - solid up to its top, a vertex inside leaving by the nearer face - measured against the floor under the segment's origin (a vertex nudged over a
 line after a wall pushed it out must not be taken for standing on the higher floor: the
 probe that found that saw a segment lifted a wall's height in one sweep). The head is segment
 zero of the same solver; `physics.rs` reads it out and keeps its single-body clauses for a
@@ -392,6 +392,15 @@ torque within its bound.
 rather than trust (the owner's note on Kalman filters belongs to the creature). Segment
 against segment and against other bodies' hulls is not yet a contact. Goldens re-recorded
 per movement.
+
+**Owed after the riser fix (the 2026-10-29 review of #69), none blocking:**
+
+- The servo's projection on the vertical takes the cosine of the joint's mean pitch; pitches are not wrapped, so
+  0 and 2 pi average to pi (no torque), and +3 and -3 average to 0 (full torque). Build it from each segment's own
+  cosine instead. It moves the physics, so it comes with a re-recorded golden.
+- The settle at REZ (`settle_new_chain`) is not guarded by `max_joint_angle > 0` as the per-tick settle is, so a
+  chain declared with no servos is settled at REZ and never after. Guard it, or say why not.
+- A body stood apart from several neighbours is settled once per pair; a deduplicated set would settle it once.
 
 ## Etape 7 — the scrape
 
