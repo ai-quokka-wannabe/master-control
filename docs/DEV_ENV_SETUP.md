@@ -147,6 +147,7 @@ stop signal).
 
 ```text
 master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
+               [--food-density <orbs per 100 m^2>] [--config <file>]
 master-control clu <log> [<disk>]
 ```
 
@@ -155,6 +156,21 @@ master-control clu <log> [<disk>]
 - `--disk` records the world in the wire's own bytes, rolling over to `<stem>.0002.disk` and
   on at `--disk-roll <MiB>` (48 by default, `0` never); `--log` records every intent judged and
   applied, every rez, and a state hash on the beat.
+- `--food-density` is how much food the world holds, orbs per 100 m^2 of open floor (0.1 by
+  default, fifteen orbs on the Grid's floor; `0` none; past about 0.43 the count would exceed
+  the 64 orbs a tick carries, and is refused). The density and the
+  food's seed go into the log's header, so Clu re-places the same food. Not yet on the wire:
+  the orbs travel with link v12.
+- `--config <file>` reads `key = value` lines - the long flags without their dashes, `#` for a
+  comment - and a flag on the command line wins over the file:
+
+  ```text
+  # world.conf
+  food-density = 0.2
+  log = world.log
+  verbose = true
+  ```
+
 - **Ctrl+C stops the world on request**: the tick in hand finishes, the log gets its `end`
   line, the Disk closes with its farewell, every client is hung up on, the exit is 0. A second
   Ctrl+C ends the process at once, the old way.

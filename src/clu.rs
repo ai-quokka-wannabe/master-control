@@ -88,6 +88,7 @@ enum Record {
         tick: u64,
         hash: u64,
     },
+    Food(crate::food::FoodSettings),
 }
 
 /// The servo bounds of a rez line: after the vertices, the count and the spacing, `which` is
@@ -221,6 +222,22 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                 }
             },
         })),
+        "food" => {
+            // The density as its bits and the food's seed in hex, and nothing else; a density
+            // the world could not have launched with is a log someone wrote by hand.
+            let malformed = || format!("malformed food record: {line}");
+            let (Some(density), Some(seed), None) = (words.get(1), words.get(2), words.get(3))
+            else {
+                return Err(malformed());
+            };
+            let density = hex_f32(density).map_err(|_| malformed())?;
+            let seed = u64::from_str_radix(seed, 16).map_err(|_| malformed())?;
+            crate::food::orb_count(density).map_err(|words| format!("food record: {words}"))?;
+            Ok(Some(Record::Food(crate::food::FoodSettings {
+                density,
+                seed,
+            })))
+        }
         "derez" => Ok(Some(Record::Derez {
             #[allow(clippy::cast_possible_truncation)]
             creature_id: number(2)? as u32,
@@ -430,6 +447,10 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
             Record::Claim { creature_id } => {
                 roster.claim(creature_id, 0);
             }
+            // The food is read and judged with the header (parse_line refuses a line the world
+            // could not have launched with); the roster's tick does not place or eat it until
+            // link v12 carries it, and then the orbs are placed again from these settings.
+            Record::Food(_) => {}
             Record::Applied {
                 tick,
                 creature_id,
@@ -700,5 +721,69 @@ mod tests {
         ));
         assert!(parse_line("teleport 3 7").is_err());
         assert!(parse_line("applied x 7 fresh 0 0 0").is_err());
+    }
+
+    #[test]
+    fn the_food_line_is_read_back_and_a_malformed_one_refused() {
+        match parse_line("food 3DCCCCCD 0123456789ABCDEF") {
+            Ok(Some(Record::Food(settings))) => {
+                assert_eq!(settings.density.to_bits(), 0x3DCC_CCCD);
+                assert_eq!(settings.seed, 0x0123_4567_89AB_CDEF);
+            }
+            other => panic!("{other:?}"),
+        }
+        for malformed in [
+            "food",
+            "food 3DCCCCCD",
+            "food 3DCCCCCD xyz",
+            "food zz 0123456789ABCDEF",
+            // Not a number, negative, and more orbs than a tick carries: the world never
+            // launched with any of them.
+            "food 7FC00000 0123456789ABCDEF",
+            "food BF800000 0123456789ABCDEF",
+            "food 42C80000 0123456789ABCDEF",
+        ] {
+            let refusal = parse_line(malformed).expect_err(malformed);
+            assert!(refusal.contains("food"), "{malformed}: {refusal}");
+        }
+    }
+
+    #[test]
+    fn clu_reads_a_log_with_food_and_refuses_one_whose_food_is_malformed() {
+        let wire = LinkDll::beside_executable().expect("wire");
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "master-control-clu-food-test-{}.log",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "# master-control input log
+food 3DCCCCCD 0123456789ABCDEF
+end 0
+",
+        )
+        .expect("write");
+        assert!(
+            matches!(
+                check(&path, None, &wire),
+                Ok(Verdict::Agreed { ended: true, .. })
+            ),
+            "a log with food replays"
+        );
+        std::fs::write(
+            &path,
+            "# master-control input log
+food 3DCCCCCD
+end 0
+",
+        )
+        .expect("write");
+        let refusal = check(&path, None, &wire).expect_err("malformed food");
+        assert!(
+            refusal.contains("line 2") && refusal.contains("food"),
+            "{refusal}"
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }
