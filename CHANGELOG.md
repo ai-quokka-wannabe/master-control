@@ -503,6 +503,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   random walk's riser invariant follows the geometry. Two tests hold it, each red under the old
   rule: a segment above a terrace edge is not moved sideways, and a vertex five millimetres
   inside one is lifted onto the top rather than shoved fifteen centimetres back.
+- **The linter's math renderer is the patched one.** markdownlint reaches KaTeX through
+  `micromark-extension-math`, whose `^0.16` range cannot reach the prototype-pollution fix in 0.18.2
+  (Dependabot #7), so `package.json` overrides it to 0.18.2. The linter loads it and passes as before.
 - **Every code file carries its notice.** `src/chain.rs` lost its GPL header when Etape 8
   movement 1 rewrote it, so the notices pass missed it; it has it back, and the two CI scripts
   (`check-toolchain-pin.sh`, `cleanup-caches.js`) carry it too, in their own comment syntax. A
