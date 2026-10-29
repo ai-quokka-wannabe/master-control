@@ -154,13 +154,14 @@ pub const ITERATIONS: usize = 32;
 /// Most substeps end in one or two passes; a bound keeps the order fixed.
 pub const CONTACT_SWEEPS: usize = 64;
 
-/// The most passes the settle after a separation takes, and the joint gap it settles to: a
-/// bound rather than a count, because a shove's size is the crowd's to decide.
+/// The most passes a settle takes - after a separation, or for a chain just laid at REZ - and
+/// the joint gap it settles to: a bound rather than a count, because a shove's size is the
+/// crowd's to decide.
 pub const SETTLE_PASSES_MAX: usize = 256;
 pub const SETTLE_GAP: f32 = 1e-4;
 
 /// The world's largest push in a pass below which it is at rest: a resting vertex is lifted a
-/// few hundred nanometres every pass by the gravity of a substep, and that is not a push.
+/// few hundred nanometres after each substep's gravity, and that is not a push.
 pub const SETTLE_PUSH: f32 = 1e-5;
 
 /// A segment's moment of inertia about any axis through its origin: an icosahedron is nearly
@@ -664,9 +665,8 @@ impl Chain {
     /// it out would otherwise see no rise, be taken for standing on the higher floor, and be
     /// lifted a wall's height in one sweep. A cell more than a climb above the body's own is
     /// a wall up to its top, whichever way the vertex got in, and a vertex inside it leaves by
-    /// the nearer face. What the walls pushed with and what the
-    /// floor lifted are added up for the letter, and every vertex touched is marked for the
-    /// velocity pass.
+    /// the nearer face. What the walls pushed with and what the floor lifted are added up for
+    /// the letter, and every vertex touched is marked for the velocity pass.
     #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
     fn touch_world(
         &mut self,
@@ -813,7 +813,7 @@ impl Chain {
         }
     }
 
-    /// The world's last word after the roster moved a body. A head stood apart from a
+    /// The world's last word after the roster moved a body, or laid a chain at REZ. A head stood apart from a
     /// neighbour is moved with no eye on the terrain, and the chain is carried after it, so
     /// a corner can end the tick inside a riser - the deep tier's seed 100 found one 7.7 mm
     /// in, shoved there by a crowd of eight against the wall. The same passes the solver
@@ -1659,7 +1659,8 @@ mod tests {
         // Five millimetres under the terrace top and fifteen centimetres past its edge: the
         // nearer way out is up. The settle lifts the overhang onto the top, the segment moves
         // sideways by no more than its turn about the lift, and the joints close - where out
-        // through the riser alone it was shoved the whole fifteen centimetres.
+        // through the riser alone it was shoved back further than its whole overhang (0.23 m,
+        // measured with the nearer-face half of the rule switched off).
         let ground = stepped(0.3);
         let hull = box_hull();
         let (mut chain, before) = laid_across_an_edge(0.345);

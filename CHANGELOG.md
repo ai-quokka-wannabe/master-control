@@ -490,6 +490,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A substep ends with the pivots and the world agreeing, a servo pushes only as far as it stands, and a chain is
+  laid settled.** Three changes the seed hunt made on the way to the riser below. The world's eight extra sweeps
+  after each substep (the entry "The world has the last word", further down) opened joints by what they moved - 11 mm
+  on seed 102 - so a substep now ends in `converge_world`: pivots and world together, until every joint is closed to
+  a tenth of a millimetre and the world pushes nothing, or 64 passes have gone. A servo's torque is projected on the
+  vertical, by the cosine of its joint's mean pitch and none past upright - a simplification, written down beside the
+  code. And a chain rezzed - embodied or adopted - is settled against the world before its first tick, the same
+  settle a separation gets: seed 120's chain had been laid with its tail inside a terrace and thrown at 14 m/s.
 - **A riser is solid only up to its top, and a vertex leaves it by the nearer face.** The deep
   tier's seed 120 threw a chain backwards off a terrace edge at step 975. `touch_world` measured
   a riser from the cell under the segment's origin and never compared the vertex with the higher
@@ -502,7 +510,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   vertex just under it still took the full horizontal shove, and seed 102 outran its wave. The
   random walk's riser invariant follows the geometry. Two tests hold it, each red under the old
   rule: a segment above a terrace edge is not moved sideways, and a vertex five millimetres
-  inside one is lifted onto the top rather than shoved fifteen centimetres back. The deep tier
+  inside one is lifted onto the top rather than shoved back further than its whole overhang. The deep tier
   (seeds 100-123) is green with it. The chain golden is re-recorded: a scripted life on the desk,
   1,786 ticks, 55 hashes, Clu agreeing.
 - **The linter's math renderer is the patched one.** markdownlint reaches KaTeX through

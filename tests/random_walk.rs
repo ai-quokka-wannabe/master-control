@@ -239,6 +239,8 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
         // its bounds bound the gait - the wave's phase speed is the top speed - while the head
         // itself, yanked by the chain, is held only to sanity, and its wag is the wave's.
         if body.chain.trails() {
+            // The message dumps the head, the torques and every segment: the seed-120 diagnosis
+            // needed exactly that to see a chain thrown, so it stays for the next one.
             assert!(
                 body.forward_speed.abs() <= CHAIN_SPEED_SANITY,
                 "{}",
