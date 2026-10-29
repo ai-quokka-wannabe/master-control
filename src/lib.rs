@@ -30,10 +30,12 @@ pub mod build_info {
 
 pub mod chain;
 pub mod clu;
+pub mod food;
 pub mod ground;
 pub mod heartbeat;
 pub mod hull;
 pub mod link_dll;
+pub mod odour;
 pub mod physics;
 pub mod record;
 pub mod roster;

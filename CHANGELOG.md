@@ -26,6 +26,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Food and smell, the world's half (no wire yet).** The first step of the flagship's
+  CHEMORECEPTION.md. `src/trig.rs` gains the world's own `exp` and `erfc`, fdlibm's `e_exp.c` and
+  `s_erf.c` in f64 - `exp` within an ulp of the platform's across its whole range, `erfc` held to
+  1e-12 against an independent quadrature and to published values; `clippy.toml` now bans
+  `f64::exp` beside `f32::exp`. `src/food.rs`: bright white orbs of a quarter metre, placed at
+  world start by the RNG of record (SplitMix64, a food substream of the master seed beside
+  `creature_seed`'s) on open floor - a diameter clear of every riser and the floor's edge,
+  judged exactly from the world's own ground function - at a density in orbs per 100 m^2 of it;
+  the mouth at the head's nose tip; a pump every ninth tick (3.56 Hz, the nearest the tick allows
+  to the measured 3.46 Hz) swallowing a 256th of an orb, so an orb lasts 72 seconds of feeding;
+  an orb eaten to nothing goes with a `FoodGone` (its id, where, who, when, and a pew at half a
+  call's loudness) and keeps its gone tick for its odour. `src/odour.rs`: the field in closed
+  form - a continuous point source with first-order loss, its mirror image below the floor, a
+  gone orb's equal negative source from its gone tick - proven against a numerical integral of
+  the instantaneous source at distances from 0.3 m to 150 m and times from 10 ms to ten minutes,
+  with and without loss; D scaled from air's (1e-5 m^2/s, unverified in place) by the worm's
+  4,480-fold size, a loss of a tenth per second (a decay length of exactly ten body lengths), and
+  an emission that binds half the receptors at that length. Each orb smells of its own pattern
+  over eight receptor types; two amphids a body's width apart at the nose report bound fractions
+  `c / (c + K)` from a counted concentration whose noise is Berg and Purcell's, one over the root
+  of the molecules counted, drawn per tick, creature, amphid and receptor. Nothing calls them from
+  the tick yet: the rows, the event and the letter wait for link v12, and no golden moved.
+- **`--food-density` and Master Control's first config file.** `--food-density <orbs per 100
+  m^2>` (0.1 by default, fifteen orbs; a density past the 64 orbs a tick carries is refused in
+  words), and `--config <file>`: `key = value` lines naming the long flags without their dashes
+  (`food-density`, `disk`, `disk-roll`, `log`, `verbose`), `#` comments, std only, a flag on the
+  command line winning over the file, an unknown key, a repeated one or a bad value refused with
+  its line. The input log's header gains `food <density_bits> <seed_hex>`; Clu reads it back and
+  refuses a malformed one, and a log from before food still replays, with none.
+
 - **Every contributor credited, and their copyright kept.** README.md gains a Contributors section that
   lists everyone who helps, for any kind of contribution - code, documentation, bug reports, reviews,
   ideas, answers in Discussions - following the All Contributors specification and its emoji key, kept by

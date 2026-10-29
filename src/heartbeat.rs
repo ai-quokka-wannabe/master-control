@@ -69,6 +69,9 @@ pub struct Config {
     pub input_log: Option<std::path::PathBuf>,
     /// Ticks between hashes in the input log: 32 is once a second.
     pub hash_every: u32,
+    /// How much food the world holds and which: written into the input log's header so Clu
+    /// re-places the same orbs. Placed and eaten once the tick carries food (link v12).
+    pub food: crate::food::FoodSettings,
 }
 
 impl Default for Config {
@@ -84,6 +87,7 @@ impl Default for Config {
             disk_roll_bytes: 48 * 1024 * 1024,
             input_log: None,
             hash_every: 32,
+            food: crate::food::FoodSettings::new(crate::food::DEFAULT_DENSITY, 0),
         }
     }
 }
@@ -193,7 +197,7 @@ impl Heartbeat {
             Some(path) => {
                 let mut fingerprint = [0u8; 32];
                 (wire.vtable().protocol_fingerprint)(fingerprint.as_mut_ptr());
-                let log = InputLog::create(
+                let mut log = InputLog::create(
                     path,
                     PROTOCOL_VERSION,
                     &fingerprint,
@@ -208,6 +212,7 @@ impl Heartbeat {
                         path.display()
                     )
                 })?;
+                log.food(&config.food);
                 log_info(&format!("logging every intent to {}.", path.display()));
                 Some(log)
             }

@@ -90,8 +90,22 @@ impl InputLog {
             "# rez <tick> <creature> <max_forward_bits> <max_turn_bits> <max_voice_bits> <max_contacts> <vertex_count> <vertex_bits...> <segment_count> <spacing_bits> <max_angle_bits> <max_torque_bits>"
         )?;
         writeln!(file, "# derez <tick> <creature>")?;
+        writeln!(file, "# food <density_bits> <food_seed_hex>")?;
         file.flush()?;
         Ok(InputLog { file })
+    }
+
+    /// The food the world was launched with, the last header line: the density as its bits and
+    /// the food's seed, everything placement needs, so a re-simulation re-places the same orbs.
+    /// A log without the line is from before food, and holds none.
+    pub fn food(&mut self, settings: &crate::food::FoodSettings) {
+        let _ = writeln!(
+            self.file,
+            "food {} {:016X}",
+            bits(settings.density),
+            settings.seed
+        );
+        let _ = self.file.flush();
     }
 
     /// One intent judged: what arrived, from whom, for which tick, and the verdict.
@@ -278,6 +292,30 @@ mod tests {
             "applied 102 7 coasted 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000\n"
         ));
         assert!(text.contains("hash 128 00000000DEADBEEF\n"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_header_carries_the_food_as_bits() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "master-control-input-log-food-test-{}.txt",
+            std::process::id()
+        ));
+        let mut log = InputLog::create(&path, 5, &[0; 32], 0, 0, 0, 32).expect("create");
+        log.food(&crate::food::FoodSettings {
+            density: 0.25,
+            seed: 0x0123_4567_89AB_CDEF,
+        });
+        let text = std::fs::read_to_string(&path).expect("read");
+        assert!(
+            text.contains(
+                "
+food 3E800000 0123456789ABCDEF
+"
+            ),
+            "the density as bits, the seed as hex: {text}"
+        );
         let _ = std::fs::remove_file(&path);
     }
 }

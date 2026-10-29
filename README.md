@@ -71,6 +71,7 @@ sacred 32 Hz:
 git submodule update --init
 cargo run --release            # Greetings, Programs! Master Control listening on port 30702.
 # master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
+#   [--food-density <orbs per 100 m^2>] [--config <file>]
 ```
 
 Then, from a tron-grid-lite build: `TronGridLite --window` to watch, or `TronGridLite --program
