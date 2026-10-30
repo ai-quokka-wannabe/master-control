@@ -80,6 +80,8 @@ pub const REFUSED_BOUNDS: u8 = 4;
 pub const EVENT_VOCALISATION: u8 = 1;
 /// `LNK_EVENT_SCRATCH`: a body sliding along a face - the floor, a riser, another body.
 pub const EVENT_SCRATCH: u8 = 2;
+/// `LNK_EVENT_FOOD_GONE`: an orb eaten to nothing, with its pew (protocol v12).
+pub const EVENT_FOOD_GONE: u8 = 3;
 
 /// `LNK_REZ_MAX_*`: the three caps of the one variable-size client input. The wire judges them
 /// before any copy; this side restates them so a roster can size itself without asking.
