@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Food in the world's tick.** The orbs are placed at world start from `--food-density` / `--config`, every body's
+  mouth eats in pumps each tick in roster order, an emptied orb goes with a pew (`EVENT_FOOD_GONE`: the eater, the
+  orb's centre, the strength), each owner's letter carries what it swallowed and what its two amphids smell, and the
+  orbs still standing ride in every TICK_STATE. Clu places the same orbs again from the log's `food` line. A new
+  test holds the pumps, the smell and the pew, each red with its wiring switched off.
 - **Food and smell, the world's half (no wire yet).** The first step of the flagship's
   CHEMORECEPTION.md. `src/trig.rs` gains the world's own `exp` and `erfc`, fdlibm's `e_exp.c` and
   `s_erf.c` in f64 - `exp` within an ulp of the platform's across its whole range, `erfc` held to

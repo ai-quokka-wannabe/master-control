@@ -447,10 +447,14 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
             Record::Claim { creature_id } => {
                 roster.claim(creature_id, 0);
             }
-            // The food is read and judged with the header (parse_line refuses a line the world
-            // could not have launched with); the roster's tick does not place or eat it until
-            // link v12 carries it, and then the orbs are placed again from these settings.
-            Record::Food(_) => {}
+            // The food the world launched with, placed again from the same settings (parse_line
+            // already refused a line the world could not have launched with): the same orbs,
+            // eaten by the same mouths, so the re-simulated letters match the logged life's.
+            Record::Food(settings) => {
+                let orbs = crate::food::place(&settings)
+                    .map_err(|words| format!("the log's food cannot be placed: {words}"))?;
+                roster = std::mem::take(&mut roster).with_food(orbs, 0);
+            }
             Record::Applied {
                 tick,
                 creature_id,

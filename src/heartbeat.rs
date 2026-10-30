@@ -179,7 +179,15 @@ impl Heartbeat {
 
         // The Disk opens with the world's own facts, as a WELCOME would state them; the roster
         // as it opens - the guest - is told to it first, exactly as to a late joiner.
-        let roster = Roster::with_the_guest();
+        // The food, placed once from the launch settings; the master seed is 0 until Master
+        // Control draws one (TODO, a master seed worth the name), as main.rs says.
+        let orbs = crate::food::place(&config.food)?;
+        log_info(&format!(
+            "the world holds {} orbs of food (density {} per 100 m^2).",
+            orbs.len(),
+            config.food.density
+        ));
+        let roster = Roster::with_the_guest().with_food(orbs, 0);
         let disk = match &config.disk {
             Some(path) => {
                 let connection = open_disk(wire, path, world_fingerprint, 0, &roster)?;
@@ -651,13 +659,13 @@ impl Heartbeat {
         let mut events = dressing.events;
         events.extend(telling.events);
         let letters = telling.letters;
+        let foods = telling.foods;
 
         #[allow(clippy::cast_possible_truncation)]
         let header = TickStateHeader {
             tick,
             creature_count: rows.len() as u32,
-            // No food is placed yet: the world's food rides on the wire from the next step.
-            food_count: 0,
+            food_count: foods.len() as u32,
         };
         let derez = blinker_derezzes_at(tick).then_some(Derez {
             tick,
@@ -668,7 +676,7 @@ impl Heartbeat {
         // The Disk first: it is told everything, every letter included - the record is whole.
         if let Some(disk) = self.disk.as_mut() {
             let disk = &mut disk.connection;
-            let mut told = disk.send_tick_state(&header, &rows, &[]) == LNK_OK;
+            let mut told = disk.send_tick_state(&header, &rows, &foods) == LNK_OK;
             if told && let Some(derez) = &derez {
                 told = disk.send_derez(derez) == LNK_OK;
             }
@@ -688,7 +696,7 @@ impl Heartbeat {
         let roster = &mut self.roster;
         let mut late_leaves: Vec<u32> = Vec::new();
         self.citizens.retain_mut(|citizen| {
-            let mut alive = citizen.connection.send_tick_state(&header, &rows, &[]) == LNK_OK;
+            let mut alive = citizen.connection.send_tick_state(&header, &rows, &foods) == LNK_OK;
             if alive && let Some(derez) = &derez {
                 alive = citizen.connection.send_derez(derez) == LNK_OK;
             }

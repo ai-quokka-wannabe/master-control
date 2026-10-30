@@ -463,6 +463,14 @@ instantaneous source; patterns over eight receptor types; two amphids, bound fra
 Berg-Purcell counting noise); `--food-density`, `--config <file>`, the log's `food` header line
 read back by Clu. Nothing in the roster's tick calls them, and no golden moved.
 
+**Done (2026-10-30), on the wire.** Link v12 (link#49), then the world's food in the tick: the heartbeat
+places the orbs at start from the launch settings, the roster feeds every body in roster order each tick
+(the pump, the bite, the pew as `EVENT_FOOD_GONE` at the orb's centre naming the eater), fills each owner's
+letter with its `intake` and its two amphids' `odour`, and hands the present orbs to every TICK_STATE.
+Clu places the same orbs again from the log's `food` line. A test holds the mouth, the pumps, the smell and
+the pew, each red when its wiring was switched off. The bodies' hash does not cover food yet (intake moves
+nothing), so the golden holds; the Grid draws the orbs and hands the senses on next (Program ABI 11).
+
 **Still owed:**
 
 - **The wire (after link v12)**: the roster places the food at world start from the Config's

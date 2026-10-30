@@ -186,12 +186,19 @@ pub struct Telling {
     pub rows: Vec<CreatureState>,
     pub events: Vec<Event>,
     pub letters: Vec<Letter>,
+    /// The orbs still in the world, for every client's TICK_STATE (protocol v12).
+    pub foods: Vec<crate::link_dll::FoodState>,
 }
 
 /// The roster of record.
 #[derive(Default)]
 pub struct Roster {
     residents: BTreeMap<u32, Resident>,
+    /// The world's food: placed at world start, eaten by the mouths, gone with a pew. An eaten
+    /// orb stays here, gone, because its odour lingers (CHEMORECEPTION.md).
+    food: Vec<crate::food::Orb>,
+    /// The run's master seed, for the senses' counting noise (the RNG-of-record rule).
+    master_seed: u64,
 }
 
 impl Roster {
@@ -208,6 +215,21 @@ impl Roster {
             },
         );
         roster
+    }
+
+    /// The world's food, placed by the caller from the launch settings, and the master seed
+    /// the senses' noise derives from.
+    #[must_use]
+    pub fn with_food(mut self, orbs: Vec<crate::food::Orb>, master_seed: u64) -> Roster {
+        self.food = orbs;
+        self.master_seed = master_seed;
+        self
+    }
+
+    /// Every orb the world holds, gone ones included (their odour lingers).
+    #[must_use]
+    pub fn food(&self) -> &[crate::food::Orb] {
+        &self.food
     }
 
     #[must_use]
@@ -515,9 +537,24 @@ impl Roster {
                 body.pitch = head.pitch;
             }
         }
+        let food = &mut self.food;
+        let master_seed = self.master_seed;
         for (id, resident) in &mut self.residents {
             let previous_voice = previous_voices[id];
             let body = &resident.body;
+            // The mouth eats, every body in roster order, so two mouths in one orb are settled
+            // the same way every run; the last bite empties the orb with its pew.
+            let feeding = crate::food::feed(food, crate::food::mouth(body), *id, tick);
+            if let Some(gone) = feeding.gone {
+                events.push(Event {
+                    tick: gone.tick,
+                    position: gone.position,
+                    strength: gone.strength,
+                    creature_id: gone.eater,
+                    kind: crate::link_dll::EVENT_FOOD_GONE,
+                    reserved0: [0; 3],
+                });
+            }
             rows.push(CreatureState {
                 creature_id: *id,
                 position: body.position,
@@ -611,9 +648,21 @@ impl Roster {
                     // And the load each holds with - what the letter alone can carry.
                     joint_torques: body.chain.torques,
                     contact_count: contacts.len() as u32,
-                    // Nothing eaten and nothing smelt until the world's food is on the wire.
-                    intake: 0.0,
-                    odour: [0.0; crate::link_dll::ODOUR_READINGS],
+                    // What the gut took in this tick, and what the two amphids smell.
+                    intake: feeding.intake,
+                    odour: {
+                        let readings = crate::odour::sense(
+                            food,
+                            body,
+                            crate::physics::creature_seed(master_seed, u64::from(*id)),
+                            tick,
+                        );
+                        let mut flat = [0.0; crate::link_dll::ODOUR_READINGS];
+                        for (slot, reading) in flat.iter_mut().zip(readings.iter().flatten()) {
+                            *slot = *reading;
+                        }
+                        flat
+                    },
                     reserved1: [0; 4],
                 };
                 letters.push(Letter {
@@ -623,10 +672,22 @@ impl Roster {
                 });
             }
         }
+        let foods = self
+            .food
+            .iter()
+            .filter(|orb| orb.present())
+            .map(|orb| crate::link_dll::FoodState {
+                food_id: orb.id,
+                position: orb.centre,
+                radius: orb.radius,
+                quantity: orb.quantity,
+            })
+            .collect();
         Telling {
             rows,
             events,
             letters,
+            foods,
         }
     }
 }
@@ -1240,6 +1301,73 @@ mod tests {
     }
 
     #[test]
+    fn a_mouth_in_an_orb_eats_in_pumps_smells_it_and_empties_it_with_a_pew() {
+        // An orb of two bites at the body's own mouth: the pump swallows one bite on each
+        // ninth tick and the letter says so; the amphids, a body's width from the orb's
+        // centre, smell it; the second bite empties it - a pew, and no row for it after.
+        let mut roster = Roster::with_the_guest();
+        assert_eq!(roster.rez(1, shaped(7)), Admission::Embodied);
+        let mouth = crate::food::mouth(&roster.resident(7).expect("7").body);
+        let orb = crate::food::Orb {
+            id: 1,
+            centre: mouth,
+            radius: crate::food::ORB_RADIUS,
+            quantity: 2.0 * crate::food::BITE,
+            pattern: [1.0; crate::odour::RECEPTOR_TYPES],
+            gone_tick: None,
+        };
+        let mut roster = roster.with_food(vec![orb], 0);
+        let letter_of = |telling: &Telling| {
+            telling
+                .letters
+                .iter()
+                .find(|letter| letter.header.creature_id == 7)
+                .expect("the owner's letter")
+                .header
+        };
+
+        let between = roster.step(8, |_| Intent::default());
+        assert_eq!(letter_of(&between).intake, 0.0, "no pump on tick 8");
+        assert_eq!(between.foods.len(), 1, "the orb is on the wire");
+
+        let first = roster.step(9, |_| Intent::default());
+        let header = letter_of(&first);
+        assert_eq!(header.intake, crate::food::BITE, "one bite on the pump");
+        assert!(
+            header
+                .odour
+                .iter()
+                .all(|reading| *reading > 0.0 && *reading <= 1.0),
+            "both amphids smell the orb at the mouth: {:?}",
+            header.odour
+        );
+        assert_eq!(first.foods.len(), 1);
+        assert_eq!(first.foods[0].quantity, crate::food::BITE);
+        assert!(
+            !first
+                .events
+                .iter()
+                .any(|e| e.kind == crate::link_dll::EVENT_FOOD_GONE)
+        );
+
+        let last = roster.step(18, |_| Intent::default());
+        assert_eq!(letter_of(&last).intake, crate::food::BITE);
+        let pews: Vec<&Event> = last
+            .events
+            .iter()
+            .filter(|e| e.kind == crate::link_dll::EVENT_FOOD_GONE)
+            .collect();
+        assert_eq!(pews.len(), 1, "the last bite goes with one pew");
+        assert_eq!(pews[0].creature_id, 7, "the eater");
+        assert_eq!(pews[0].position, mouth, "sounded at the orb's centre");
+        assert!(last.foods.is_empty(), "a gone orb is drawn no more");
+        assert!(
+            roster.food()[0].gone_tick.is_some(),
+            "but the world keeps it, for its lingering odour"
+        );
+    }
+
+    #[test]
     fn a_dragged_chain_scrapes_with_every_segment_and_a_standing_one_is_silent() {
         let mut roster = Roster::with_the_guest();
         let mut model = shaped(7);
@@ -1451,6 +1579,7 @@ mod tests {
             rows,
             events,
             letters,
+            ..
         } = roster.step(1, |_| Intent {
             forward_speed: 1.0,
             turn_rate: 0.0,
