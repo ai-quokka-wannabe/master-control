@@ -520,6 +520,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The linter's regular expressions are the patched ones.** markdownlint 0.42.0 pins re2js 2.8.6, which has a
+  quadratic-time denial of service in lookbehind matching (Dependabot #9 in link, #8 in master-control and the
+  siblings' own); `package.json` overrides it to 2.8.7, the patch release. The linter passes as before.
 - **A substep ends with the pivots and the world agreeing, a servo pushes only as far as it stands, and a chain is
   laid settled.** Three changes the seed hunt made on the way to the riser below. The world's eight extra sweeps
   after each substep (the entry "The world has the last word", further down) opened joints by what they moved - 11 mm
