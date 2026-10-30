@@ -656,7 +656,8 @@ impl Heartbeat {
         let header = TickStateHeader {
             tick,
             creature_count: rows.len() as u32,
-            reserved0: [0; 4],
+            // No food is placed yet: the world's food rides on the wire from the next step.
+            food_count: 0,
         };
         let derez = blinker_derezzes_at(tick).then_some(Derez {
             tick,
@@ -667,7 +668,7 @@ impl Heartbeat {
         // The Disk first: it is told everything, every letter included - the record is whole.
         if let Some(disk) = self.disk.as_mut() {
             let disk = &mut disk.connection;
-            let mut told = disk.send_tick_state(&header, &rows) == LNK_OK;
+            let mut told = disk.send_tick_state(&header, &rows, &[]) == LNK_OK;
             if told && let Some(derez) = &derez {
                 told = disk.send_derez(derez) == LNK_OK;
             }
@@ -687,7 +688,7 @@ impl Heartbeat {
         let roster = &mut self.roster;
         let mut late_leaves: Vec<u32> = Vec::new();
         self.citizens.retain_mut(|citizen| {
-            let mut alive = citizen.connection.send_tick_state(&header, &rows) == LNK_OK;
+            let mut alive = citizen.connection.send_tick_state(&header, &rows, &[]) == LNK_OK;
             if alive && let Some(derez) = &derez {
                 alive = citizen.connection.send_derez(derez) == LNK_OK;
             }

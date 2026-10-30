@@ -37,7 +37,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -125,8 +125,30 @@ pub struct Proprioception {
     /// in the angle's sense; at most the declared maximum, exactly that when it stalls.
     pub joint_torques: [f32; TRAILING_SEGMENTS_MAX],
     pub contact_count: u32,
-    /// Always zero: the eight bytes that round the letter to its alignment.
-    pub reserved1: [u8; 8],
+    /// What the body swallowed this tick, in the world's food unit: zero on most ticks, one bite
+    /// on a pump (protocol v12).
+    pub intake: f32,
+    /// What the two amphids smell: bound fractions in [0, 1], left amphid 0..8, right 8..16
+    /// (protocol v12).
+    pub odour: [f32; ODOUR_READINGS],
+    /// Always zero: the four bytes that round the letter to its alignment.
+    pub reserved1: [u8; 4],
+}
+
+/// `LNK_AMPHIDS * LNK_ODOUR_RECEPTORS`: the letter's odour readings, left amphid first.
+pub const ODOUR_READINGS: usize = 16;
+
+/// `LNK_TICK_STATE_MAX_FOOD`: the most orbs one TICK_STATE carries.
+pub const TICK_STATE_MAX_FOOD: usize = 64;
+
+/// `LnkFoodState`: one orb of food as the world holds it this tick (protocol v12).
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct FoodState {
+    pub food_id: u32,
+    pub position: [f32; 3],
+    pub radius: f32,
+    pub quantity: f32,
 }
 
 /// `LnkWorldDefinition`: what the simulated world is made of, the fields both ends must agree
@@ -240,7 +262,8 @@ pub struct CreatureState {
 pub struct TickStateHeader {
     pub tick: u64,
     pub creature_count: u32,
-    pub reserved0: [u8; 4],
+    /// Food rows after the creatures, at most [`TICK_STATE_MAX_FOOD`] (protocol v12).
+    pub food_count: u32,
 }
 
 #[repr(C)]
@@ -310,7 +333,8 @@ const _: () = assert!(size_of::<RezVertex>() == 12);
 const _: () = assert!(size_of::<RezTriangle>() == 16);
 const _: () = assert!(size_of::<RezMaterial>() == 32);
 const _: () = assert!(size_of::<Contact>() == 52);
-const _: () = assert!(size_of::<Proprioception>() == 96);
+const _: () = assert!(size_of::<Proprioception>() == 160);
+const _: () = assert!(size_of::<FoodState>() == 24);
 const _: () = assert!(size_of::<CreatureState>() == 188);
 const _: () = assert!(size_of::<TickStateHeader>() == 16);
 const _: () = assert!(size_of::<Actions>() == 96);
@@ -323,7 +347,7 @@ const _: () = assert!(size_of::<Refused>() == 16);
 // ---------------------------------------------------------------------------------------------
 
 /// `LNK_CLIENT_ABI_VERSION` this binding was written against; the export refuses any other.
-pub const CLIENT_ABI_VERSION: u32 = 9;
+pub const CLIENT_ABI_VERSION: u32 = 10;
 
 pub type LnkStatus = i32;
 
@@ -355,6 +379,7 @@ pub struct LnkServer {
 pub struct TickStateView {
     pub header: TickStateHeader,
     pub states: *const CreatureState,
+    pub foods: *const FoodState,
 }
 
 /// `LnkRezView`: the header by value, the rows borrowed until the next poll.
@@ -410,6 +435,7 @@ pub enum Message {
     TickState {
         header: TickStateHeader,
         states: Vec<CreatureState>,
+        foods: Vec<FoodState>,
     },
     Actions(Actions),
     /// A body, rows copied out - the wire already judged counts, indices and finiteness.
@@ -470,9 +496,16 @@ impl MessageView {
                     } else {
                         std::slice::from_raw_parts(view.states, count).to_vec()
                     };
+                    let food_count = view.header.food_count as usize;
+                    let foods = if food_count == 0 || view.foods.is_null() {
+                        Vec::new()
+                    } else {
+                        std::slice::from_raw_parts(view.foods, food_count).to_vec()
+                    };
                     Message::TickState {
                         header: view.header,
                         states,
+                        foods,
                     }
                 }
                 MSG_ACTIONS => Message::Actions(self.payload.actions),
@@ -558,6 +591,7 @@ pub struct LnkClientVTable {
         connection: *mut LnkClient,
         header: *const TickStateHeader,
         states: *const CreatureState,
+        foods: *const FoodState,
     ) -> LnkStatus,
     pub send_event: extern "C" fn(connection: *mut LnkClient, event: *const Event) -> LnkStatus,
     pub send_derez: extern "C" fn(connection: *mut LnkClient, derez: *const Derez) -> LnkStatus,
@@ -990,6 +1024,7 @@ impl Connection {
         &mut self,
         header: &TickStateHeader,
         states: &[CreatureState],
+        foods: &[FoodState],
     ) -> LnkStatus {
         (self.vtable.send_tick_state)(
             self.client,
@@ -998,6 +1033,11 @@ impl Connection {
                 std::ptr::null()
             } else {
                 states.as_ptr()
+            },
+            if foods.is_empty() {
+                std::ptr::null()
+            } else {
+                foods.as_ptr()
             },
         )
     }

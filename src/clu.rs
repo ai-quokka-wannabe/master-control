@@ -527,7 +527,7 @@ fn diff_against_disk(
     let mut lines = Vec::new();
     loop {
         match replay.poll() {
-            Ok(Some(Message::TickState { header, states })) if header.tick == tick => {
+            Ok(Some(Message::TickState { header, states, .. })) if header.tick == tick => {
                 for state in &states {
                     match roster.resident(state.creature_id) {
                         None => {

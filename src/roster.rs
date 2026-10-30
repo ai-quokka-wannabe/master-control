@@ -611,7 +611,10 @@ impl Roster {
                     // And the load each holds with - what the letter alone can carry.
                     joint_torques: body.chain.torques,
                     contact_count: contacts.len() as u32,
-                    reserved1: [0; 8],
+                    // Nothing eaten and nothing smelt until the world's food is on the wire.
+                    intake: 0.0,
+                    odour: [0.0; crate::link_dll::ODOUR_READINGS],
+                    reserved1: [0; 4],
                 };
                 letters.push(Letter {
                     owner,
@@ -1355,7 +1358,7 @@ mod tests {
             [0.0; 4],
             "a chain of four has three joints"
         );
-        assert_eq!(letter.header.reserved1, [0; 8]);
+        assert_eq!(letter.header.reserved1, [0; 4]);
         assert!(
             letter.header.joint_torques[..3]
                 .iter()

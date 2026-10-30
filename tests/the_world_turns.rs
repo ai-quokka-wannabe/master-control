@@ -89,7 +89,7 @@ fn await_tick(
     let deadline = Instant::now() + PATIENCE;
     loop {
         match connection.poll().expect("the wire stays healthy") {
-            Some(Message::TickState { header, states }) if header.tick >= at_least => {
+            Some(Message::TickState { header, states, .. }) if header.tick >= at_least => {
                 return (header.tick, states);
             }
             Some(Message::Ping(ping)) => {
@@ -875,7 +875,7 @@ fn an_identity_another_host_wears_is_refused_and_an_unrezzed_one_cannot_be_steer
             Some(Message::Rez { header, .. }) if header.creature_id == 7 => {
                 relayed_again = true;
             }
-            Some(Message::TickState { header, states }) => {
+            Some(Message::TickState { header, states, .. }) => {
                 assert!(
                     !states.iter().any(|s| s.creature_id == 9),
                     "9 was never rezzed"
@@ -1014,7 +1014,7 @@ fn a_world_with_a_disk_and_a_log_replays_what_it_said_and_logged_what_it_was_tol
                 saw_letter_7 = true
             }
             Ok(Some(Message::Derez(derez))) if derez.creature_id == 7 => saw_derez_7 = true,
-            Ok(Some(Message::TickState { header, states })) => {
+            Ok(Some(Message::TickState { header, states, .. })) => {
                 assert!(
                     header.tick > last_replayed_tick,
                     "the Disk tells ticks in order, never twice"

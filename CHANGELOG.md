@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **On the wire at protocol 12, with no food yet.** `external/link` moves to v12 and `link_dll.rs`'s mirror follows
+  client ABI 10: `TickStateHeader.food_count`, `FoodState` rows, `send_tick_state` with the food rows, and the
+  letter's `intake` and `odour[16]` (160 bytes). The world sends no food rows and a letter with nothing eaten and
+  nothing smelt, so every behaviour is the same; Clu reads the rows past. The chain golden is re-recorded at protocol
+  12 with the Grid, as a protocol bump requires (Clu refuses a log from another protocol by design): 1,182 ticks, 36
+  hashes, Clu agreeing.
 - **`external/link` at link's month-end tidy (5a1c6b0).** The pointer moves from the protocol-v11
   commit; the wire is unchanged - protocol 11, client ABI 9, the headers differing only by their
   notices and one comment - and every suite, the golden life included, passes against it.
