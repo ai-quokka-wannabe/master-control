@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Claude skills, shared across the org.** `.claude/skills/` gains live-world, windows-build and org-pr-flow - how to run, drive and stop a
+  live world, how to build and check on the Windows desk, and the way from a change to a PR - each mirrored verbatim
+  in every repo that uses it and improved every time it is used, so no session reinvents them.
+
 - **Food in the world's tick.** The orbs are placed at world start from `--food-density` / `--config`, every body's
   mouth eats in pumps each tick in roster order, an emptied orb goes with a pew (`EVENT_FOOD_GONE`: the eater, the
   orb's centre, the strength), each owner's letter carries what it swallowed and what its two amphids smell, and the
