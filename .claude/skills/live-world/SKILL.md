@@ -22,7 +22,7 @@ $s = '<repo>\.claude\skills\live-world\scripts'
 & "$s\drive.ps1" -Plan "fwd=100,turn=0,8" -Shot "$env:TEMP\grid.png"            # steer the worm, look
 & "$s\drive.ps1" -Shot "$env:TEMP\panel.png" -Window 'rc-worm - creature' -Scale 1 # read the panel
 $ids = Get-Content "$env:TEMP\live-world-pids.json" | ConvertFrom-Json
-Start-Process powershell -ArgumentList '-NoProfile','-File',"$s\stop-world.ps1",'-ProcessId',$ids.master_control -WindowStyle Hidden -Wait
+Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',"$s\stop-world.ps1",'-ProcessId',$ids.master_control -WindowStyle Hidden -Wait
 # then close the Grid windows (CloseMainWindow, Kill as a last resort) and run: master-control clu <log>
 ```
 
@@ -35,6 +35,20 @@ Start-Process powershell -ArgumentList '-NoProfile','-File',"$s\stop-world.ps1",
 - **Find food**: placement is deterministic from the density and the master seed (0 until `--seed` exists), so
   `master_control::food::place(&FoodSettings::new(density, 0))` in a throwaway crate in Temp prints every orb.
   The spawn pad is `roster::SPAWN_PAD_X/Z` (1, 5); bodies face -Z.
+
+## Pictures for the docs
+
+Few binaries, small ones: Mermaid or generated SVG for every diagram and plot; raster only for what is raster by
+nature (a capture of the Grid or a panel), and then a WebP still (`Image.save(..., quality=88, method=6)`, about
+50 KB at 960 px - a PNG of the same frame is eight times larger and a palette PNG bands the glow) or a short GIF
+(one global palette for the whole clip, so the black does not shimmer). No Git LFS while the org's media stays
+small; revisit past about 50 MB.
+
+- Stills and clips: `scripts/frames.ps1 -Out <dir> -Count 80 -IntervalMs 100` records the client area at real time
+  (`-Count 1` for a still), then Pillow scales and encodes.
+- The camera only looks along -Z from a script (mouse look would grab the desk's cursor), so to film the worm side
+  on, turn the worm, not the camera. Frame it low: a short `W`, then `Q` in steps of about 0.1 s - a longer `Q`
+  sinks below the floor and shows only the reflections.
 
 ## Record a golden life (master-control)
 
@@ -55,4 +69,7 @@ needs one `rez`, a call (an `applied` line whose voice is non-zero), at least te
 - Windows will not give an agent's process the foreground: capture with PrintWindow (`drive.ps1 -Shot`), never by
   screen copy of a window you expect on top.
 - At high food density the smell saturates everywhere (all sixteen bars full): judge chemotaxis at a low density.
+- Scripts are blocked by the execution policy when started as a new PowerShell process: pass
+  `-ExecutionPolicy Bypass` (the `Start-Process` line above needs it too). Calling them with `&` from an open
+  session works.
 - A busy desk (compiles, other agents) makes the host later still; record goldens on an idle machine.

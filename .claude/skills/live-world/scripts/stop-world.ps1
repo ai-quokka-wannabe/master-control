@@ -26,7 +26,7 @@
     exit code says so; ignore it).
 
 .EXAMPLE
-    Start-Process powershell -ArgumentList '-NoProfile','-File','stop-world.ps1','-ProcessId',$mc.Id -WindowStyle Hidden -Wait
+    Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','stop-world.ps1','-ProcessId',$mc.Id -WindowStyle Hidden -Wait
 #>
 param([Parameter(Mandatory = $true)] [int] $ProcessId)
 Add-Type @"
