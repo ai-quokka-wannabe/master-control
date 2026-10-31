@@ -2,6 +2,43 @@
 
 The Master Control Program: the world server of the Grid.
 
+**Master Control is the program that decides what is true in the Grid: 32 times a second it moves every
+creature, feeds the ones that find food, and tells everyone connected what happened.**
+
+![Top-down maps of the Grid's 128 m terraced floor with the glowing white food orbs placed at world start, at densities 0.1 (the default, 15 orbs), 0.25 and 0.43, and the magenta spawn pad near the centre](docs/figures/food-map.svg)
+
+## Start Here
+
+```text
+git submodule update --init    # the wire, external/link
+cargo build
+cargo test                     # unit tests, and whole worlds stood up on loopback
+cargo run --release            # Greetings, Programs! Master Control listening on port 30702.
+```
+
+- **First contribution?** Pick a [good first issue](https://github.com/ai-quokka-wannabe/master-control/issues?q=is%3Aopen+label%3A%22good+first+issue%22)
+  and read [CONTRIBUTING.md](CONTRIBUTING.md) - everyone who helps is [credited](#contributors).
+- **Starting from a bare machine?** [docs/DEV_ENV_SETUP.md](docs/DEV_ENV_SETUP.md) builds, tests and runs the world on
+  Windows or Linux exactly as CI does.
+
+## One Tick
+
+```mermaid
+flowchart LR
+    gather["gather<br/>ACTIONS, REZ, DEREZ<br/>from every client"] --> judge["judge<br/>the stager accepts<br/>or refuses each"]
+    judge --> physics["physics<br/>clamp each intent, step<br/>every body, stand pairs<br/>apart, drag the chains"]
+    physics --> food["food<br/>every mouth bites<br/>on the pump"]
+    food --> smell["smell<br/>each owned body's<br/>amphids read the field"]
+    smell --> out["TICK_STATE out<br/>the Disk first, then every<br/>client; events, letters"]
+```
+
+The loop gathers and judges on every turn; a tick steps whenever the wall clock owes one
+(`Heartbeat::run` and `step_one_tick` in [src/heartbeat.rs](src/heartbeat.rs), `Roster::step` in
+[src/roster.rs](src/roster.rs)). Food and smell go body by body in roster order, so two mouths in one orb
+are settled the same way on every replay.
+
+## What Master Control Is
+
 One authoritative, deviceless process that owns what is true — the tick, the roster-of-record,
 the validation of every Program's staged actions, the broadcast every client perceives through,
 and the logs that let the world replay. TronGrid Lite instances connect to it today as creature
@@ -64,14 +101,18 @@ sacred 32 Hz:
   `<stem>.0002.disk` and on at `--disk-roll <MiB>`, each file whole), `--log <path>` records
   every intent judged and applied and a periodic state hash, and **Clu** (`master-control clu
   <log> [<disk>]`) re-simulates a log and names the first bit that lies.
+- **Food and smell** — glowing orbs placed at world start by the RNG of record (`src/food.rs`), eaten a
+  bite per pharynx pump, and an odour field written down in closed form rather than simulated
+  (`src/odour.rs`) that each creature's two amphids read as a fraction of receptors bound. See
+  [Food and Smell, Drawn](#food-and-smell-drawn) below.
 
 [TODO.md](TODO.md) carries each etape's decisions and what is still owed.
 
+## Running the World
+
 ```text
-git submodule update --init
-cargo run --release            # Greetings, Programs! Master Control listening on port 30702.
-# master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
-#   [--food-density <orbs per 100 m^2>] [--config <file>]
+master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
+  [--food-density <orbs per 100 m^2>] [--config <file>]
 ```
 
 Then, from a tron-grid-lite build: `TronGridLite --window` to watch, or `TronGridLite --program
@@ -79,7 +120,32 @@ Then, from a tron-grid-lite build: `TronGridLite --window` to watch, or `TronGri
 
 Ctrl+C stops the world on request: the tick in hand finishes, the log gets its `end` line, the
 Disk closes with its `BYE`, and the exit is 0 — a life that ends this way is one Clu accepts
-without a word. A second Ctrl+C ends the process at once, the old way.
+without a word. A second Ctrl+C ends the process at once, the old way. The flagship's
+[RUNNING_THE_GRID.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/RUNNING_THE_GRID.md)
+stands the whole ecosystem up around it.
+
+## Food and Smell, Drawn
+
+Every figure here is drawn by the world's own code - `food::place`, `physics::floor` and the functions
+of `odour.rs` - so a figure that changes is a world that changed. After touching food, smell or the
+floor, regenerate them and commit what moved; the output is byte-identical from run to run:
+
+```text
+cargo run --example figures    # writes docs/figures/*.svg from examples/figures.rs
+```
+
+Alone, one orb's odour is a usable gradient: its settled reading is 0.96 a body length (4.48 m) away and
+0.5, half-saturation, at the decay length (44.8 m). Once eaten, its trace lingers for a moment, then
+fades over some ten seconds.
+
+![Left: one orb's settled receptor reading against distance, falling from 1 at the orb to 0.5 at 44.8 m, with magenta lines at the lowest reading found anywhere on the floor at each density: 0.44, 0.8 and 0.91. Right: the reading after the orb is eaten at 1, 3 and 10 body lengths, fading to near zero within about 20 seconds](docs/figures/smell.svg)
+
+**A known open problem, shown honestly:** every orb smells at once and the readings add. At the default
+density the floor never reads below 0.44 and 43% of all readings are already 0.9 or more; at 0.25 that
+is 97%, and at the most the wire carries (0.43, 64 orbs) every reading on the floor is 0.91 or more - the
+receptors saturate everywhere and the gradient towards any one orb all but vanishes.
+
+![Three maps of the floor coloured by the settled mean receptor reading at densities 0.1, 0.25 and 0.43: the default shows cyan-to-magenta gradients around each orb, the denser two are almost uniformly pale, which is saturated](docs/figures/smell-map.svg)
 
 ## The Doctrine
 
@@ -93,11 +159,6 @@ without a word. A second Ctrl+C ends the process at once, the old way.
   so any run can be replayed from what was recorded.
 
 ## Building
-
-> **New here?** [docs/DEV_ENV_SETUP.md](docs/DEV_ENV_SETUP.md) builds, tests and runs the world from
-> nothing on Windows or Linux, exactly as CI does; the flagship's
-> [RUNNING_THE_GRID.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/RUNNING_THE_GRID.md)
-> stands the whole ecosystem up around it.
 
 Rust 1.99.1, pinned by `rust-toolchain.toml` and installed by [rustup](https://rustup.rs/) on
 first use; no dependencies. `git submodule update --init` brings the wire
