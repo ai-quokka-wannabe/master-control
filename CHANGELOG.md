@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   live world, how to build and check on the Windows desk, and the way from a change to a PR - each mirrored verbatim
   in every repo that uses it and improved every time it is used, so no session reinvents them.
 
+- **Figures, and a README that starts with them.** `cargo run --example figures` (`examples/figures.rs`, std
+  only) draws three SVGs into `docs/figures/` from the world's own code - `food::place`, `physics::floor` and
+  `odour.rs`, nothing re-modelled - byte-identical on every run: the food map (every orb at densities 0.1, 0.25 and
+  0.43 on the terraced floor, with the spawn pad), smell against distance and against time after an orb is eaten,
+  and the settled smell over the whole floor. The last two make the open saturation problem visible with numbers:
+  at the default density no reading on the floor falls below 0.44 and 43% are 0.9 or more, and at 0.43 every
+  reading is 0.91 or more. The README now opens with one plain sentence, the food map, a Start Here block (build,
+  test, run, good first issues, CONTRIBUTING) and a Mermaid flowchart of one tick taken from `heartbeat.rs` and
+  `roster.rs`; the duplicated run and setup notes are folded together. Asked for because the organisation's pages
+  read as text-heavy.
 - **Food in the world's tick.** The orbs are placed at world start from `--food-density` / `--config`, every body's
   mouth eats in pumps each tick in roster order, an emptied orb goes with a pew (`EVENT_FOOD_GONE`: the eater, the
   orb's centre, the strength), each owner's letter carries what it swallowed and what its two amphids smell, and the
