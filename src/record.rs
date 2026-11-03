@@ -240,27 +240,11 @@ mod tests {
         assert!(InputLog::create(&climbing, 5, &[0; 32], 0, 0, 0, 32).is_err());
     }
 
-    /// A scratch file in the temp directory, removed when the test ends - passed or panicked.
-    struct Scratch(std::path::PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Scratch {
-            Scratch(
-                std::env::temp_dir()
-                    .join(format!("master-control-{name}-{}.txt", std::process::id())),
-            )
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.0);
-        }
-    }
+    use crate::scratch::Scratch;
 
     #[test]
     fn the_log_states_its_world_and_writes_floats_as_bits() {
-        let scratch = Scratch::new("input-log-test");
+        let scratch = Scratch::new("master-control-input-log-test.txt");
         let path = &scratch.0;
         let mut log =
             InputLog::create(path, 5, &[0xAB; 32], 0x1234, 100, 1_700_000_000, 32).expect("create");
@@ -313,7 +297,7 @@ mod tests {
 
     #[test]
     fn the_header_carries_the_food_as_bits() {
-        let scratch = Scratch::new("input-log-food-test");
+        let scratch = Scratch::new("master-control-input-log-food-test.txt");
         let path = &scratch.0;
         let mut log = InputLog::create(path, 5, &[0; 32], 0, 0, 0, 32).expect("create");
         log.food(&crate::food::FoodSettings {

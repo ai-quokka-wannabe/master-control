@@ -757,18 +757,8 @@ mod tests {
 
     #[test]
     fn clu_reads_a_log_with_food_and_refuses_one_whose_food_is_malformed() {
-        // A scratch file, removed when the test ends - passed or panicked.
-        struct Scratch(std::path::PathBuf);
-        impl Drop for Scratch {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_file(&self.0);
-            }
-        }
         let wire = LinkDll::beside_executable().expect("wire");
-        let scratch = Scratch(std::env::temp_dir().join(format!(
-            "master-control-clu-food-test-{}.log",
-            std::process::id()
-        )));
+        let scratch = crate::scratch::Scratch::new("master-control-clu-food-test.log");
         let path = &scratch.0;
         std::fs::write(
             path,
