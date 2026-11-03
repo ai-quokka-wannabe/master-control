@@ -556,6 +556,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Shell scripts keep LF.** `.gitattributes` gains `*.sh text eol=lf`, as link and `.github` now carry: with
+  `core.autocrlf` on Windows a script would otherwise check out with CRLF, which bash refuses.
+
 - **The world's step is three times faster, so a hosted creature's intents land on time.** The floor is piecewise
   constant - one level per cell - but every query recomputed its cell's level from the terrain noise, and the chain's
   solver asks for thousands of floor heights a tick (every hull vertex, every one of up to 384 sweeps). One 8-segment
