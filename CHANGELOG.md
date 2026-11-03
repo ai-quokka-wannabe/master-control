@@ -556,6 +556,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A new recording never rolls onto an earlier one.** `--disk life.disk` rolled to `life.0002.disk`, `life.0003.disk`
+  and on without asking whether an earlier run had left files of those names, so a long life recorded where an older
+  one had been overwrote it file by file and left one numbered set that was half of each. The world now refuses to
+  start a Disk beside an earlier run's first rolled file, naming it and saying to move the old files or name another
+  Disk; it deletes nothing. Found by the deep dive (#79).
+
 - **One licence notice, the full one, everywhere.** Every file now carries the FSF's three-paragraph GPL notice
   (the copyright line, the grant, the warranty disclaimer and "You should have received a copy"), the form most files
   already used; the short two-paragraph variant and the one file without a notice are gone. Comments only.
