@@ -178,8 +178,8 @@ pub fn grid_mesh_height(world_x: f32, world_z: f32, config: &GridFloorConfig) ->
     let cell_z = (grid_z as u32).min(config.cells - 1);
 
     // The world's own floor is asked thousands of times a tick - every hull vertex, every
-    // solver sweep - and its levels never change, so they are read from the table built once
-    // by the very function below. Any other floor is computed as it always was.
+    // solver sweep - and its levels never change, so they are read from a table `cell_level`
+    // itself fills once (`standard_levels`, below). Any other floor is computed as it always was.
     if *config == GRID_FLOOR_CONFIG {
         return standard_levels()[(cell_z * config.cells + cell_x) as usize];
     }
@@ -188,6 +188,9 @@ pub fn grid_mesh_height(world_x: f32, world_z: f32, config: &GridFloorConfig) ->
 
 /// Every cell level of [`GRID_FLOOR_CONFIG`], row by row in `z`, computed once by
 /// [`cell_level`] itself - the same function, so the same bits.
+///
+/// Not hidden state: a pure function of a constant, the same bits on every run and every
+/// machine, filled the same whichever thread asks first - nothing a hash or a replay could miss.
 fn standard_levels() -> &'static [f32] {
     static LEVELS: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
     LEVELS.get_or_init(|| {
@@ -202,8 +205,6 @@ fn standard_levels() -> &'static [f32] {
 mod tests {
     use super::*;
 
-    /// The contract held: every golden vector from the C++ implementation, bit for bit. A
-    /// tolerance here would forgive exactly the drift this mirror pattern exists to refuse.
     /// The table is a cache, never a second floor: every cell it holds is the bits the
     /// function computes, and a query anywhere in a cell answers what it always answered.
     #[test]
@@ -220,8 +221,8 @@ mod tests {
                 );
             }
         }
-        // Through the query too, the table's way and the old way: a config equal in value but
-        // not the constant itself still takes the table, and one cell off is computed directly.
+        // Through the query too: the world's floor answers from the table, a floor that differs
+        // in one field is computed directly, and each gives the bits its own cell_level does.
         let mut other = GRID_FLOOR_CONFIG;
         other.relief_seed += 1;
         for (x, z) in [
@@ -250,6 +251,8 @@ mod tests {
         }
     }
 
+    /// The contract held: every golden vector from the C++ implementation, bit for bit. A
+    /// tolerance here would forgive exactly the drift this mirror pattern exists to refuse.
     #[test]
     fn the_ground_agrees_with_the_flagship_bit_for_bit() {
         let goldens = include_str!("../tests/data/ground_goldens.txt");
