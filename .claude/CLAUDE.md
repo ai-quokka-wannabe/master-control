@@ -91,12 +91,15 @@ taste, and recorded so it is never re-litigated from memory:
   here: per-*vendor* float behaviour, 2.95% of bytes differing between NVIDIA and Intel on an
   identical scene. A GPU-stepped world would replay only on the exact card and driver that
   recorded it, which is no replay claim at all.
-- **The arithmetic is microscopic.** The physics is analytic closed forms — a few hundred
-  floating-point operations per body per tick. At 32 Hz, a *thousand* creatures cost well under
-  a millisecond of one core's 31.25 ms budget; the golden trajectory steps 256 ticks in
-  microseconds. GPUs win at millions of parallel identical items; a world of hundreds of
-  heterogeneous bodies with branching contacts is CPU territory, and every shipped MMO surveyed
-  by the audit simulates on CPU for exactly these reasons.
+- **The arithmetic was microscopic, and is now measured.** When this was written the physics
+  was analytic closed forms — a few hundred floating-point operations per body per tick, a
+  *thousand* creatures well under a millisecond of one core's 31.25 ms budget. Since Etape 8 a
+  body is an articulated chain stepped by an XPBD solver, and one 8-segment worm measured about
+  6 ms of that budget on the desk (2026-11-03, PR #77; 18-22 ms before the floor table). That is
+  a budget to watch as lives fill with creatures: profile and optimise on the CPU first. GPUs win
+  at millions of parallel identical items; a world of hundreds of heterogeneous bodies with
+  branching contacts is CPU territory, and every shipped MMO surveyed by the audit simulates on
+  CPU for exactly these reasons.
 - **Deviceless is a deployment property.** "A server that runs headless in a cupboard" — any
   machine, any cloud, no driver in the dependency chain of the world's truth.
 - **Rust is not the obstacle, and never was**: Vulkan bindings exist for Rust should some

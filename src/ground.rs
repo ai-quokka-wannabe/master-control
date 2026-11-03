@@ -177,12 +177,79 @@ pub fn grid_mesh_height(world_x: f32, world_z: f32, config: &GridFloorConfig) ->
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let cell_z = (grid_z as u32).min(config.cells - 1);
 
+    // The world's own floor is asked thousands of times a tick - every hull vertex, every
+    // solver sweep - and its levels never change, so they are read from a table `cell_level`
+    // itself fills once (`standard_levels`, below). Any other floor is computed as it always was.
+    if *config == GRID_FLOOR_CONFIG {
+        return standard_levels()[(cell_z * config.cells + cell_x) as usize];
+    }
     cell_level(cell_x, cell_z, config)
+}
+
+/// Every cell level of [`GRID_FLOOR_CONFIG`], row by row in `z`, computed once by
+/// [`cell_level`] itself - the same function, so the same bits.
+///
+/// Not hidden state: a pure function of a constant, the same bits on every run and every
+/// machine, filled the same whichever thread asks first - nothing a hash or a replay could miss.
+fn standard_levels() -> &'static [f32] {
+    static LEVELS: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
+    LEVELS.get_or_init(|| {
+        let cells = GRID_FLOOR_CONFIG.cells;
+        (0..cells * cells)
+            .map(|index| cell_level(index % cells, index / cells, &GRID_FLOOR_CONFIG))
+            .collect()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The table is a cache, never a second floor: every cell it holds is the bits the
+    /// function computes, and a query anywhere in a cell answers what it always answered.
+    #[test]
+    fn the_floor_table_holds_exactly_what_the_floor_function_computes() {
+        let cells = GRID_FLOOR_CONFIG.cells;
+        for cell_z in 0..cells {
+            for cell_x in 0..cells {
+                let direct = cell_level(cell_x, cell_z, &GRID_FLOOR_CONFIG);
+                let cached = standard_levels()[(cell_z * cells + cell_x) as usize];
+                assert_eq!(
+                    cached.to_bits(),
+                    direct.to_bits(),
+                    "cell ({cell_x}, {cell_z}) differs"
+                );
+            }
+        }
+        // Through the query too: the world's floor answers from the table, a floor that differs
+        // in one field is computed directly, and each gives the bits its own cell_level does.
+        let mut other = GRID_FLOOR_CONFIG;
+        other.relief_seed += 1;
+        for (x, z) in [
+            (0.3, -7.9),
+            (-63.99, 63.99),
+            (12.0, 12.0),
+            (-1.0e-3, 1.0e-3),
+            (500.0, -500.0),
+        ] {
+            let via_table = grid_mesh_height(x, z, &GRID_FLOOR_CONFIG);
+            let half = (cells as f32 * GRID_FLOOR_CONFIG.cell_size) * 0.5;
+            let gx = (((x + half) / GRID_FLOOR_CONFIG.cell_size).clamp(0.0, cells as f32) as u32)
+                .min(cells - 1);
+            let gz = (((z + half) / GRID_FLOOR_CONFIG.cell_size).clamp(0.0, cells as f32) as u32)
+                .min(cells - 1);
+            assert_eq!(
+                via_table.to_bits(),
+                cell_level(gx, gz, &GRID_FLOOR_CONFIG).to_bits(),
+                "({x}, {z})"
+            );
+            assert_eq!(
+                grid_mesh_height(x, z, &other).to_bits(),
+                cell_level(gx, gz, &other).to_bits(),
+                "({x}, {z}) off the table"
+            );
+        }
+    }
 
     /// The contract held: every golden vector from the C++ implementation, bit for bit. A
     /// tolerance here would forgive exactly the drift this mirror pattern exists to refuse.
