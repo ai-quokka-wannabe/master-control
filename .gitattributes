@@ -1,6 +1,10 @@
 # automatically normalise line endings to the user's Git preferences
 * text=auto
 
+# shell scripts always check out with LF: bash refuses a CRLF script, and core.autocrlf on Windows
+# would otherwise hand Git Bash exactly that
+*.sh text eol=lf
+
 # The goldens are recorded data, not prose: a line-by-line merge of two generations of a golden
 # would be a file that is neither. A conflict there is regenerated, never hand-merged. (Adopted
 # from the owner's queen-of-towers-game.) Diffs stay on - a golden that moved is worth reading.
