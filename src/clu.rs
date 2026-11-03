@@ -101,17 +101,15 @@ fn servo_bound(words: &[&str], which: usize) -> Result<f32, String> {
     } else {
         0
     };
-    let at = 10 + count * 3 + which;
+    let at = count
+        .checked_mul(3)
+        .and_then(|values| values.checked_add(10 + which))
+        .ok_or_else(|| "malformed rez: vertex count".to_string())?;
     if words.len() > at {
         hex_f32(words[at])
     } else {
         Ok(0.0)
     }
-}
-
-/// The trailing-segment count as a const, for an array in a record.
-const fn master_control_trailing() -> usize {
-    crate::link_dll::TRAILING_SEGMENTS_MAX
 }
 
 fn hex_f32(word: &str) -> Result<f32, String> {
@@ -131,11 +129,24 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
             .and_then(|word| word.parse::<u64>().ok())
             .ok_or_else(|| format!("malformed record: {line}"))
     };
+    // An identity or a count the world keeps in 32 bits: a wider number is a log written by
+    // hand, never one the world wrote.
+    let narrow = |at: usize| -> Result<u32, String> {
+        number(at)
+            .and_then(|wide| u32::try_from(wide).map_err(|_| format!("malformed record: {line}")))
+    };
+    // Where a field after the mesh sits: `offset` words past the vertex count's three each.
+    let after_mesh = |count: u64, offset: usize| -> Result<usize, String> {
+        usize::try_from(count)
+            .ok()
+            .and_then(|count| count.checked_mul(3))
+            .and_then(|values| values.checked_add(offset))
+            .ok_or_else(|| format!("malformed rez, its vertex count: {line}"))
+    };
     match *kind {
         "#" | "start" | "hash_every" => Ok(None),
         "protocol" => Ok(Some(Record::Protocol {
-            #[allow(clippy::cast_possible_truncation)]
-            version: number(1)? as u32,
+            version: narrow(1)?,
             fingerprint: words
                 .get(2)
                 .ok_or_else(|| format!("malformed protocol record: {line}"))?
@@ -156,8 +167,7 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
             Ok(Some(Record::World(fingerprint)))
         }
         "rez" => Ok(Some(Record::Rez {
-            #[allow(clippy::cast_possible_truncation)]
-            creature_id: number(2)? as u32,
+            creature_id: narrow(2)?,
             bounds: BodyBounds {
                 max_forward_speed: hex_f32(
                     words
@@ -174,8 +184,7 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                         .get(5)
                         .ok_or_else(|| format!("malformed rez: {line}"))?,
                 )?,
-                #[allow(clippy::cast_possible_truncation)]
-                max_contact_count: number(6)? as usize,
+                max_contact_count: narrow(6)? as usize,
                 // The servos, after the chain's spacing; a log from before servos declares none.
                 max_joint_angle: servo_bound(&words, 0)?,
                 max_joint_torque: servo_bound(&words, 1)?,
@@ -185,8 +194,7 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                 let count = if words.len() > 7 { number(7)? } else { 0 };
                 let mut vertices = Vec::new();
                 for index in 0..count {
-                    #[allow(clippy::cast_possible_truncation)]
-                    let at = 8 + (index as usize) * 3;
+                    let at = after_mesh(index, 8)?;
                     let mut vertex = [0.0f32; 3];
                     for (axis, slot) in vertex.iter_mut().enumerate() {
                         *slot = hex_f32(words.get(at + axis).ok_or_else(|| {
@@ -200,21 +208,12 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
             // The chain, after the mesh; a log from before chains is a chain of one.
             segment_count: {
                 let count = if words.len() > 7 { number(7)? } else { 0 };
-                #[allow(clippy::cast_possible_truncation)]
-                let at = 8 + (count as usize) * 3;
-                if words.len() > at {
-                    #[allow(clippy::cast_possible_truncation)]
-                    {
-                        number(at)? as u32
-                    }
-                } else {
-                    1
-                }
+                let at = after_mesh(count, 8)?;
+                if words.len() > at { narrow(at)? } else { 1 }
             },
             segment_spacing: {
                 let count = if words.len() > 7 { number(7)? } else { 0 };
-                #[allow(clippy::cast_possible_truncation)]
-                let at = 9 + (count as usize) * 3;
+                let at = after_mesh(count, 9)?;
                 if words.len() > at {
                     hex_f32(words[at])?
                 } else {
@@ -239,17 +238,14 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
             })))
         }
         "derez" => Ok(Some(Record::Derez {
-            #[allow(clippy::cast_possible_truncation)]
-            creature_id: number(2)? as u32,
+            creature_id: narrow(2)?,
         })),
         "claim" => Ok(Some(Record::Claim {
-            #[allow(clippy::cast_possible_truncation)]
-            creature_id: number(2)? as u32,
+            creature_id: narrow(2)?,
         })),
         "applied" => Ok(Some(Record::Applied {
             tick: number(1)?,
-            #[allow(clippy::cast_possible_truncation)]
-            creature_id: number(2)? as u32,
+            creature_id: narrow(2)?,
             intent: Intent {
                 forward_speed: hex_f32(
                     words
@@ -268,7 +264,7 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                 )?,
                 // The servos, after the three; a log from before servos drove none.
                 joint_targets: {
-                    let mut targets = [0.0f32; master_control_trailing()];
+                    let mut targets = [0.0f32; crate::link_dll::TRAILING_SEGMENTS_MAX];
                     for (slot, target) in targets.iter_mut().enumerate() {
                         if let Some(word) = words.get(7 + slot) {
                             *target = hex_f32(word)?;
@@ -285,8 +281,8 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                 .and_then(|word| u64::from_str_radix(word, 16).ok())
                 .ok_or_else(|| format!("malformed hash record: {line}"))?,
         })),
-        // A record this build does not know is the log being newer than Clu: the rest of the
-        // log is still worth reading, and the unknown line is reported once by the caller.
+        // The judged records are testimony, not input to the re-simulation: read past them. A
+        // record this Clu does not know is refused, by name.
         "judged" => Ok(None),
         other => Err(format!("a record this Clu does not know: {other}")),
     }
@@ -317,6 +313,7 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     };
 
+    // The roster as the world opened: the guest, whose intents the log names by its id.
     let mut roster = Roster::with_the_guest();
     let mut pending: BTreeMap<u32, Intent> = BTreeMap::new();
     let mut pending_tick: Option<u64> = None;
@@ -326,7 +323,6 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
     let mut ended = false;
     let mut other_build: Option<String> = None;
 
-    // The roster as the world opened: the guest, whose intents the log names by its id.
     let step = |roster: &mut Roster, tick: u64, intents: &BTreeMap<u32, Intent>| {
         let _ = roster.step(tick, |creature_id| {
             intents.get(&creature_id).copied().unwrap_or_default()
@@ -358,13 +354,13 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
             }
             _ => None,
         };
+        if ended {
+            return Err(format!(
+                "line {}: a record after the world's end line - the log was appended to",
+                line_number + 1
+            ));
+        }
         if let Some(tick) = record_tick {
-            if ended {
-                return Err(format!(
-                    "line {}: a record after the world's end line - the log was appended to",
-                    line_number + 1
-                ));
-            }
             if tick < last_tick {
                 return Err(format!(
                     "line {}: tick {tick} after tick {last_tick} - the log is out of order",
@@ -382,7 +378,7 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
                 if version != own_protocol || fingerprint != own_fingerprint {
                     return Err(format!(
                         "this log was made under Link protocol {version} ({}) and this Master Control speaks {own_protocol} ({}) - re-simulate it with the build it was made with",
-                        &fingerprint[..fingerprint.len().min(16)],
+                        fingerprint.get(..16).unwrap_or(&fingerprint),
                         &own_fingerprint[..16]
                     ));
                 }
@@ -523,7 +519,7 @@ fn diff_against_disk(
     if welcome.current_tick >= tick {
         // A rolled-over Disk: this file is a later one. The operator is told which to bring.
         return Ok(vec![format!(
-            "the Disk {} begins at tick {}, after tick {tick}: give the earlier file of the rollover",
+            "the Disk {} begins at tick {}, not before tick {tick}: give the earlier file of the rollover",
             disk.display(),
             welcome.current_tick
         )]);
@@ -607,7 +603,11 @@ fn diff_against_disk(
                 return Ok(lines);
             }
             Ok(Some(_)) | Ok(None) => {}
-            Err(_) => return Ok(vec![format!("the Disk ends before tick {tick}")]),
+            Err(_) => {
+                return Ok(vec![format!(
+                    "the Disk ends before tick {tick}: if it rolled over, give the later file"
+                )]);
+            }
         }
     }
 }
@@ -724,6 +724,9 @@ mod tests {
             }))
         ));
         assert!(parse_line("teleport 3 7").is_err());
+        // Numbers no world writes: an identity past 32 bits, a vertex count past any line.
+        assert!(parse_line("derez 9 4294967396").is_err());
+        assert!(parse_line("rez 5 7 3F800000 3FC90FDB 3F800000 4 18446744073709551615").is_err());
         assert!(parse_line("applied x 7 fresh 0 0 0").is_err());
     }
 
@@ -754,14 +757,21 @@ mod tests {
 
     #[test]
     fn clu_reads_a_log_with_food_and_refuses_one_whose_food_is_malformed() {
+        // A scratch file, removed when the test ends - passed or panicked.
+        struct Scratch(std::path::PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
         let wire = LinkDll::beside_executable().expect("wire");
-        let mut path = std::env::temp_dir();
-        path.push(format!(
+        let scratch = Scratch(std::env::temp_dir().join(format!(
             "master-control-clu-food-test-{}.log",
             std::process::id()
-        ));
+        )));
+        let path = &scratch.0;
         std::fs::write(
-            &path,
+            path,
             "# master-control input log
 food 3DCCCCCD 0123456789ABCDEF
 end 0
@@ -770,24 +780,38 @@ end 0
         .expect("write");
         assert!(
             matches!(
-                check(&path, None, &wire),
+                check(path, None, &wire),
                 Ok(Verdict::Agreed { ended: true, .. })
             ),
             "a log with food replays"
         );
         std::fs::write(
-            &path,
+            path,
             "# master-control input log
 food 3DCCCCCD
 end 0
 ",
         )
         .expect("write");
-        let refusal = check(&path, None, &wire).expect_err("malformed food");
+        let refusal = check(path, None, &wire).expect_err("malformed food");
         assert!(
             refusal.contains("line 2") && refusal.contains("food"),
             "{refusal}"
         );
-        let _ = std::fs::remove_file(&path);
+        // Nothing may follow the end line, whatever the record: a rez appended after it is a
+        // log someone added to.
+        std::fs::write(
+            path,
+            "# master-control input log
+end 0
+derez 1 100
+",
+        )
+        .expect("write");
+        let refusal = check(path, None, &wire).expect_err("appended");
+        assert!(
+            refusal.contains("line 3") && refusal.contains("after the world's end line"),
+            "{refusal}"
+        );
     }
 }

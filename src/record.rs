@@ -31,8 +31,8 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-/// The input log, open for the world's life. Every write is `line`-buffered and flushed per
-/// tick by [`InputLog::flush`], so a crash loses at most one tick of records.
+/// The input log, open for the world's life. Every write is buffered and flushed per tick by
+/// [`InputLog::flush`], so a crash loses at most one tick of records.
 pub struct InputLog {
     file: BufWriter<File>,
 }
@@ -90,6 +90,8 @@ impl InputLog {
             "# rez <tick> <creature> <max_forward_bits> <max_turn_bits> <max_voice_bits> <max_contacts> <vertex_count> <vertex_bits...> <segment_count> <spacing_bits> <max_angle_bits> <max_torque_bits>"
         )?;
         writeln!(file, "# derez <tick> <creature>")?;
+        writeln!(file, "# claim <tick> <creature>")?;
+        writeln!(file, "# end <tick>")?;
         writeln!(file, "# food <density_bits> <food_seed_hex>")?;
         file.flush()?;
         Ok(InputLog { file })
@@ -238,15 +240,30 @@ mod tests {
         assert!(InputLog::create(&climbing, 5, &[0; 32], 0, 0, 0, 32).is_err());
     }
 
+    /// A scratch file in the temp directory, removed when the test ends - passed or panicked.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Scratch {
+            Scratch(
+                std::env::temp_dir()
+                    .join(format!("master-control-{name}-{}.txt", std::process::id())),
+            )
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
     #[test]
     fn the_log_states_its_world_and_writes_floats_as_bits() {
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "master-control-input-log-test-{}.txt",
-            std::process::id()
-        ));
-        let mut log = InputLog::create(&path, 5, &[0xAB; 32], 0x1234, 100, 1_700_000_000, 32)
-            .expect("create");
+        let scratch = Scratch::new("input-log-test");
+        let path = &scratch.0;
+        let mut log =
+            InputLog::create(path, 5, &[0xAB; 32], 0x1234, 100, 1_700_000_000, 32).expect("create");
         log.judged(
             1,
             7,
@@ -276,7 +293,7 @@ mod tests {
         log.applied(102, 7, Applied::Coasted);
         log.hash(128, 0xDEAD_BEEF);
         log.flush();
-        let text = std::fs::read_to_string(&path).expect("read");
+        let text = std::fs::read_to_string(path).expect("read");
         assert!(text.starts_with("# master-control input log\n"));
         assert!(text.contains("protocol 5 abababab"));
         assert!(text.contains("world 0000000000001234\n"));
@@ -292,22 +309,18 @@ mod tests {
             "applied 102 7 coasted 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000\n"
         ));
         assert!(text.contains("hash 128 00000000DEADBEEF\n"));
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn the_header_carries_the_food_as_bits() {
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "master-control-input-log-food-test-{}.txt",
-            std::process::id()
-        ));
-        let mut log = InputLog::create(&path, 5, &[0; 32], 0, 0, 0, 32).expect("create");
+        let scratch = Scratch::new("input-log-food-test");
+        let path = &scratch.0;
+        let mut log = InputLog::create(path, 5, &[0; 32], 0, 0, 0, 32).expect("create");
         log.food(&crate::food::FoodSettings {
             density: 0.25,
             seed: 0x0123_4567_89AB_CDEF,
         });
-        let text = std::fs::read_to_string(&path).expect("read");
+        let text = std::fs::read_to_string(path).expect("read");
         assert!(
             text.contains(
                 "
@@ -316,6 +329,5 @@ food 3E800000 0123456789ABCDEF
             ),
             "the density as bits, the seed as hex: {text}"
         );
-        let _ = std::fs::remove_file(&path);
     }
 }

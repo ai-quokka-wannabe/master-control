@@ -782,13 +782,13 @@ unsafe impl Send for Listener {}
 unsafe impl Send for Connection {}
 
 impl LinkDll {
-    /// The client half's handshake, wrapped for the tests that dial the world this server
-    /// stands up. Master Control itself never places an outbound call.
     /// The fingerprint over a world definition, by the one implementation there is.
     pub fn world_fingerprint(&self, definition: &WorldDefinition) -> u64 {
         (self.vtable.world_fingerprint)(definition)
     }
 
+    /// The client half's handshake, wrapped for the tests that dial the world this server
+    /// stands up. Master Control itself never places an outbound call.
     pub fn connect(
         &self,
         address: &str,
@@ -1153,8 +1153,16 @@ mod tests {
                 "LNK_TICK_STATE_MAX_CREATURES",
                 u64::from(TICK_STATE_MAX_CREATURES),
             ),
+            ("LNK_TICK_STATE_MAX_FOOD", TICK_STATE_MAX_FOOD as u64),
             ("LNK_MSG_HELLO", u64::from(MSG_HELLO)),
+            ("LNK_MSG_WELCOME", u64::from(MSG_WELCOME)),
             ("LNK_MSG_REZ", u64::from(MSG_REZ)),
+            ("LNK_MSG_TICK_STATE", u64::from(MSG_TICK_STATE)),
+            ("LNK_MSG_ACTIONS", u64::from(MSG_ACTIONS)),
+            ("LNK_MSG_EVENT", u64::from(MSG_EVENT)),
+            ("LNK_MSG_DEREZ", u64::from(MSG_DEREZ)),
+            ("LNK_MSG_PING", u64::from(MSG_PING)),
+            ("LNK_MSG_PONG", u64::from(MSG_PONG)),
             ("LNK_MSG_PROPRIOCEPTION", u64::from(MSG_PROPRIOCEPTION)),
             ("LNK_MSG_REFUSED", u64::from(MSG_REFUSED)),
             ("LNK_REFUSED_OWNED", u64::from(REFUSED_OWNED)),
@@ -1171,6 +1179,7 @@ mod tests {
             ("LNK_ROLE_CREATURE_HOST", u64::from(ROLE_CREATURE_HOST)),
             ("LNK_EVENT_VOCALISATION", u64::from(EVENT_VOCALISATION)),
             ("LNK_EVENT_SCRATCH", u64::from(EVENT_SCRATCH)),
+            ("LNK_EVENT_FOOD_GONE", u64::from(EVENT_FOOD_GONE)),
         ] {
             assert!(
                 PROTOCOL_HEADER.contains(&format!("#define {name} {value}u")),
@@ -1182,6 +1191,20 @@ mod tests {
                 "#define LNK_CLIENT_ABI_VERSION {CLIENT_ABI_VERSION}u"
             )),
             "LNK_CLIENT_ABI_VERSION drifted from lnk_client.h"
+        );
+        // The letter's odour block is the two amphids' receptors, row by row.
+        let defined = |name: &str| {
+            PROTOCOL_HEADER
+                .lines()
+                .find_map(|line| line.strip_prefix(&format!("#define {name} ")))
+                .and_then(|rest| rest.split('u').next())
+                .and_then(|number| number.trim().parse::<usize>().ok())
+                .unwrap_or_else(|| panic!("{name} is not defined in lnk_protocol.h"))
+        };
+        assert_eq!(
+            ODOUR_READINGS,
+            defined("LNK_AMPHIDS") * defined("LNK_ODOUR_RECEPTORS"),
+            "ODOUR_READINGS drifted from LNK_AMPHIDS x LNK_ODOUR_RECEPTORS"
         );
     }
 

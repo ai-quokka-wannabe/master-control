@@ -114,7 +114,7 @@ fn intent(rng: &mut SplitMix64) -> Intent {
 fn assert_events(told: &Telling, seed: u64, step: u64) {
     let at = |what: &str| format!("seed {seed} step {step}: {what}");
     // Every scrape and scratch a chain or a body sounds is within the rule: a strength in
-    // (threshold, 1], a finite place.
+    // [threshold, 1], a finite place.
     for event in &told.events {
         if event.kind == master_control::link_dll::EVENT_SCRATCH {
             assert!(
@@ -275,9 +275,8 @@ fn assert_invariants(roster: &Roster, seed: u64, step: u64) {
             // sanity - a segment hanging off an edge swings past the vertical on its ball joint as
             // a dangling rod does (seed 102's tail, at 98 degrees, falling), so the bound is four
             // turns against a runaway, not a right angle - no vertex of its hull more than a
-            // centimetre under its own
-            // floor - the contact solve's residual, never a fall through it - and every
-            // servo's load within the torque its body declared.
+            // centimetre under its own floor - the contact solve's residual, never a fall through
+            // it - and every servo's load within the torque its body declared.
             let count = body.chain.segment_count as usize;
             for (index, segment) in body.chain.segments.iter().enumerate().take(count) {
                 assert!(
@@ -416,7 +415,8 @@ fn walk(seed: u64, steps: u64) -> Vec<u64> {
     let mut next_id = 256u32;
     let mut hashes = Vec::with_capacity(steps as usize);
     for step in 1..=steps {
-        // Churn: a rez, a derez, a claim, a leave, or nothing - the roster of record at work.
+        // Churn: a rez, a derez, a claim, an orphaning (a host's crash), or nothing - the roster
+        // of record at work.
         match rng.below(20) {
             0 | 1 => {
                 let host = 1 + rng.below(3);

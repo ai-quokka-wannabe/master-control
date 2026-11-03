@@ -18,12 +18,13 @@ Fixes #(issue number)
 ## Testing
 
 - [ ] I have tested these changes locally
-- [ ] Builds and tests pass on all relevant presets (`cmake --workflow --preset=<name>`)
+- [ ] Build and tests pass (`cargo build` and `cargo test`)
+- [ ] Clippy reports nothing (`cargo clippy --all-targets`)
 
 ## Code Quality
 
 - [ ] Code compiles without warnings
-- [ ] Code is formatted (`.clang-format`)
+- [ ] Code is formatted (`cargo fmt`)
 - [ ] British spelling used in comments and documentation
 
 ## Screenshots / Logs

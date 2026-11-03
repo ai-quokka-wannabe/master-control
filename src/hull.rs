@@ -35,8 +35,8 @@ pub struct Face {
 }
 
 /// The hull: its vertices (body frame, the subset of the mesh's that are extreme), its faces,
-/// and its unique edges as index pairs - what the separating-axis test between two hulls will
-/// enumerate.
+/// and its unique edges as index pairs - what the separating-axis test between two hulls
+/// enumerates.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Hull {
     pub vertices: Vec<[f32; 3]>,
@@ -236,7 +236,7 @@ impl Hull {
 }
 
 /// The most keels a hull declares; more than this and the body is a sled with many runners,
-/// and the rest are folded into the average the same way.
+/// and the rest are ignored.
 pub const KEELS_MAX: usize = 8;
 
 /// How far above the hull's lowest point a vertex still counts as touching the floor: the ring
@@ -258,7 +258,7 @@ impl Hull {
     /// it glides along its length and ploughs across it, which is where an undulator's
     /// anisotropy comes from - and so its propulsion. Unit vectors in (x, z), sign-free (a
     /// runner is the same runner either way), at most [`KEELS_MAX`], in the hull's own order.
-    /// None for a body that rests on a point: it slides the same every way.
+    /// Empty for a body that rests on a point: it slides the same every way.
     #[must_use]
     pub fn keels(&self) -> Vec<[f32; 2]> {
         let lowest = self.lowest();

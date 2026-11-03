@@ -94,8 +94,7 @@ pub const FRICTION: f32 = 0.5;
 pub const SCRATCH_THRESHOLD: f32 = 0.01;
 
 /// The bounds the server clamps every intent against - the slice of `TglCreatureDesc` the
-/// validator needs. The full descriptor arrives over the wire with REZ (Link Etape 6); until
-/// then every creature wears the first body's numbers.
+/// validator needs, read from the REZ header; [`FIRST_BODY`] is what a bodiless guest wears.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct BodyBounds {
     pub max_forward_speed: f32,
@@ -108,8 +107,8 @@ pub struct BodyBounds {
     pub max_joint_torque: f32,
 }
 
-/// The first body: a metre a second and a right angle a second - legible in a log, exactly the
-/// flagship's default until real descriptors travel.
+/// The first body: a metre a second and a right angle a second - legible in a log, the
+/// flagship's default and the scripted guest's bounds.
 pub const FIRST_BODY: BodyBounds = BodyBounds {
     max_forward_speed: 1.0,
     max_turn_rate: std::f32::consts::FRAC_PI_2,
@@ -242,8 +241,8 @@ pub struct Body {
     /// is a bodiless creature, which keeps the point proxy the goldens hold.
     pub hull: Option<crate::hull::Hull>,
     pub bounds: BodyBounds,
-    /// The chain: the trailing segments placed along this head's recorded path. A single body
-    /// has none. Simulation state, hashed whole (chain.rs).
+    /// The chain: the articulated segments behind and including this head. A single body has
+    /// no trailing ones. Simulation state, hashed whole (chain.rs).
     pub chain: crate::chain::Chain,
 }
 
@@ -268,7 +267,7 @@ impl Body {
         }
     }
 
-    /// The head's pose as the chain records it.
+    /// The head's pose, to lay a chain behind it at rez.
     #[must_use]
     pub fn path_sample(&self) -> crate::chain::PathSample {
         crate::chain::PathSample {
@@ -281,8 +280,8 @@ impl Body {
 /// After the pairs are stood apart and before the rows are told: the head's settled pose -
 /// the one the row carries and the hash covers - written back into the chain, so the chain
 /// and the head are one body. The chain itself stepped inside `step_body`, where the gait
-/// drives it; standing a pair apart moves only the head, and the next step's pivots take
-/// that difference up.
+/// drives it; standing a pair apart moves the head, and `set_head` carries the trailing
+/// segments after it at once.
 pub fn advance_chain(body: &mut Body) {
     body.chain.set_head(body.position, body.yaw, body.velocity);
 }
@@ -570,8 +569,8 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
                     .map(|(index, _)| index)
                     .collect();
                 let share = support / resting.len().max(1) as f32;
-                // The slip: the body's horizontal velocity along the floor, in the body's frame -
-                // the whole of it for a chain's head, which slides sideways as it wags.
+                // The slip, in the body's frame: the walk along its facing while it stands or
+                // lands, the horizontal velocity it arrived with otherwise.
                 let forward = forward_for(yaw_after);
                 let slip_world = if body.grounded || arrested >= 0.0 {
                     [
@@ -811,7 +810,7 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 
                 }
             }
         }
-        // The chain: its length and spacing, the gait's phase and the targets the motors hold,
+        // The chain: its length and spacing, the targets the motors hold,
         // every segment's pose and velocity - the articulated state whole - and the poses
         // told on the wire, derived but where a divergence must be caught at once.
         hasher.u32(body.chain.segment_count);
@@ -1612,8 +1611,9 @@ mod hull_tests {
             .iter()
             .find(|c| c.normal == [0.0, 0.0, 1.0])
             .expect("the wall was met");
-        // Per tick: the walk is 1 m/s at 45 degrees, so 0.707 m/s into the wall... the cube's
-        // front corner reaches the line 0.64 of the way; of the rest, the -X component slides.
+        // Per tick: the walk is 1 m/s at 45 degrees, so 0.707 m/s into the wall; the cube's
+        // front corner reaches the line 0.58 of the way through the tick; of the rest, the -X
+        // component slides.
         assert!(
             body.position[0] < 0.0,
             "slid along the wall towards -X: {:?}",
@@ -1914,8 +1914,7 @@ mod tests {
         );
     }
 
-    /// Etape 16's twin: two identical runs hash bit-identically at every tick, and the floor
-    /// under the comparison - a frozen world agreeing about nothing - is checked too.
+    /// The hash tells apart every state a lazier hash would merge.
     #[test]
     fn the_state_hash_tells_apart_what_a_lazier_hash_would_not() {
         let body = Body::standing_at(0.5, 6.5, floor(0.5, 6.5), FIRST_BODY);
@@ -1991,6 +1990,8 @@ mod tests {
         assert_ne!(state_hash([(7u32, &minus)]), state_hash([(7u32, &plus)]));
     }
 
+    /// Etape 16's twin: two identical runs hash bit-identically at every tick, and the floor
+    /// under the comparison - a frozen world agreeing about nothing - is checked too.
     #[test]
     fn the_same_run_hashes_bit_identically_twice() {
         let run = || {

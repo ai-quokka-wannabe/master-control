@@ -137,8 +137,8 @@ pub enum Admission {
     /// An orphan - or the sender's own creature, rezzed again - taken up where it stands,
     /// wearing the new model.
     Adopted,
-    /// Another host owns this identity; the host keeps its body and the sender hears nothing
-    /// but a log line.
+    /// Another host owns this identity; the host keeps its body and the sender is told
+    /// `REFUSED_OWNED`, without the owner's name.
     RefusedOwned { owner: u64 },
     /// The snapshot could not carry one more row.
     RefusedFull,
@@ -259,11 +259,6 @@ impl Roster {
     #[must_use]
     pub fn resident(&self, creature_id: u32) -> Option<&Resident> {
         self.residents.get(&creature_id)
-    }
-
-    /// Every body, in roster order - what the periodic hash is taken over.
-    pub fn bodies(&self) -> impl Iterator<Item = &Body> {
-        self.residents.values().map(|resident| &resident.body)
     }
 
     /// Every body with its identity, in roster order: what the state hash covers.
@@ -1385,8 +1380,6 @@ mod tests {
             "nothing slides, nothing scrapes: {:?}",
             standing.events
         );
-        // Walk: the head scratches as any body does, and every trailing segment, dragged
-        // along behind it, scrapes - four scratches from one worm.
         // The Program's gait, as rc-worm sends it: a travelling wave of servo targets, a
         // fifty-degree swing, a wavelength of four segments, a metre a second of phase speed.
         let mut phase = 0.0f32;

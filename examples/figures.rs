@@ -47,7 +47,7 @@ const SETTLED_TICK: u64 = 32 * 600;
 /// How much bigger than life the food map draws an orb: a quarter-metre ball is under a pixel.
 const ORB_EXAGGERATION: f64 = 4.0;
 
-/// Samples per side of the smell map: one per 4 m cell of floor.
+/// Samples per side of the smell map: one every 4 m of floor, every second 2 m cell.
 const SMELL_SAMPLES: u32 = 32;
 
 /// A reading at or above this is called saturated in the figures: the receptors are nine-tenths

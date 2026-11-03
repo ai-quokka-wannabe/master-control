@@ -24,7 +24,7 @@
 use crate::link_dll::{ACTIONS_REPEAT_TICKS, Actions};
 use std::collections::BTreeMap;
 
-/// The twelve bytes of intent, staged or applied.
+/// The intent, staged or applied: the three velocity words and the servos' joint targets.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Intent {
     pub forward_speed: f32,
@@ -98,8 +98,7 @@ struct CreatureStaging {
     ever_accepted: bool,
 }
 
-/// The stager for every steerable creature. Etape 1 has exactly one (the scripted guest), but
-/// nothing here knows that.
+/// The stager for every steerable creature, as many as the roster admits.
 #[derive(Default)]
 pub struct ActionStager {
     creatures: BTreeMap<u32, CreatureStaging>,

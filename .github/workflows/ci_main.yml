@@ -55,7 +55,7 @@ jobs:
                 key: npm-${{ runner.os }}-node-${{ steps.setup-node.outputs.node-version }}-lock-${{ hashFiles('package-lock.json') }}
 
             # A carriage return sitting inside a line is invisible in every editor, survives
-            # clang-format and markdownlint, and reads as ordinary text in review. Three reached
+            # rustfmt and markdownlint, and reads as ordinary text in review. Three reached
             # the flagship's main before this step existed there, each one a Doxygen \return
             # written through a tool chain that collapsed the escape, leaving a control character
             # and a word reading "eturn" where the tag should be.

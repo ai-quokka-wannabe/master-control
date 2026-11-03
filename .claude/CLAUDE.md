@@ -126,9 +126,9 @@ link repository's cargo-flavoured shape - and the `CI Success` gate the ruleset 
 exact name. CodeQL (rust, actions, c-cpp for the submodule) runs beside it.
 
 Quick-checks also run lychee offline over every markdown file (internal links and anchors; the
-external ones on a weekly schedule in `links.yml`), and `cargo doc --document-private-items`
-with warnings as errors; the toolchain is pinned in `rust-toolchain.toml` and every cargo step is
-`--locked`.
+external ones on a weekly schedule in `links.yml`) and the toolchain-pin check; each Build job
+also runs `cargo doc --no-deps --document-private-items` with warnings as errors. The toolchain
+is pinned in `rust-toolchain.toml` and every cargo step but `fmt` is `--locked`.
 
 ## Process
 

@@ -22,8 +22,8 @@
 //!
 //! `--config <file>` is Master Control's first config file: `key = value` lines naming the long
 //! flags without their dashes (`food-density = 0.2`, `log = world.log`, `verbose = true`), `#`
-//! comments; every long flag but `--version` and `--config` may be written there (the port stays the one positional
-//! argument), and a flag on the command line wins.
+//! comments; every long flag but `--version` and `--config` may be written there (the port stays
+//! the one positional argument), and a flag on the command line wins.
 
 use master_control::food::{DEFAULT_DENSITY, FoodSettings};
 use master_control::heartbeat::{Config, Heartbeat};
@@ -36,9 +36,16 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// divergence say where - in the state, with the Disk - or at least when.
 fn clu_main(arguments: Vec<String>) -> std::process::ExitCode {
     let Some(log) = arguments.first() else {
-        eprintln!("[FATAL] clu needs a log: master-control clu <log> [<disk>]");
+        eprintln!("[FATAL] Clu needs a log: master-control clu <log> [<disk>]");
         return std::process::ExitCode::FAILURE;
     };
+    if arguments.len() > 2 {
+        eprintln!(
+            "[FATAL] Clu takes a log and at most one Disk, not {} words: master-control clu <log> [<disk>]",
+            arguments.len()
+        );
+        return std::process::ExitCode::FAILURE;
+    }
     let disk = arguments.get(1).map(std::path::PathBuf::from);
     let wire = match LinkDll::beside_executable() {
         Ok(wire) => wire,
@@ -56,7 +63,7 @@ fn clu_main(arguments: Vec<String>) -> std::process::ExitCode {
         }) => {
             if let Some(stamp) = other_build {
                 println!(
-                    "[WARN] Clu: the log was made by build {stamp}; this is build {}. They agreed - but a later disagreement would be a different binary first.",
+                    "[INFO] Clu: the log was made by build {stamp}; this is build {}. They agreed - but a later disagreement would be a different binary first.",
                     master_control::build_info::build_hash_hex()
                 );
             }
