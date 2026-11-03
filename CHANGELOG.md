@@ -556,6 +556,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One licence notice, the full one, everywhere.** Every file now carries the FSF's three-paragraph GPL notice
+  (the copyright line, the grant, the warranty disclaimer and "You should have received a copy"), the form most files
+  already used; the short two-paragraph variant and the one file without a notice are gone. Comments only.
+
 - **Shell scripts keep LF.** `.gitattributes` gains `*.sh text eol=lf`, as link and `.github` now carry: with
   `core.autocrlf` on Windows a script would otherwise check out with CRLF, which bash refuses.
 
