@@ -63,9 +63,14 @@ needs one `rez`, a call (an `applied` line whose voice is non-zero), at least te
   `stop-world.ps1`. Killing it leaves a log with no end line, which the golden test refuses.
 - Keys posted to rc-worm's panel move sliders that keep their course; Space through posted keys never reached the
   call - press the **call button** (`call` step) and set the **voice slider** high.
-- One-shot intents get lost: the world refuses late ACTIONS as stale (tron-grid-lite#170), so a single call may
-  never land, and a long run can coast the body to a standstill while the panel asks for full speed. Press the
-  call several times; check the log's `judged` lines (`awk '{print $NF}'`) to see how many were late.
+- **Late intents (tron-grid-lite#170, fixed by master-control#77):** the world sends `TICK_STATE` only after
+  its step, so a host has 31.25 ms minus the step to sense, think and answer. When it misses, every intent is
+  refused stale and the body coasts while the panel asks for full speed. Measure, don't guess: count the log's
+  `judged` verdicts (`awk '{print $NF}' | sort | uniq -c`; a late frame shows as two `refused_stale`), and time
+  both sides (Master Control's step, the host's ready-to-acted) in a throwaway build. On 2026-11-03 one worm's
+  step was ~6 ms and the host's 6-14 ms: 99.7% on time. A new physics cost must keep that margin.
+- Measure on a real Release (see windows-build: a stale cache made "Release" a validation build), and read
+  every program's whole log, warnings included, not only the counts.
 - Windows will not give an agent's process the foreground: capture with PrintWindow (`drive.ps1 -Shot`), never by
   screen copy of a window you expect on top.
 - At high food density the smell saturates everywhere (all sixteen bars full): judge chemotaxis at a low density.
