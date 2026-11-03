@@ -151,6 +151,15 @@ struct Disk {
 }
 
 impl Disk {
+    /// An earlier run's first rolled file beside `named`, if one is there. A new recording beside
+    /// it would roll onto it - and onto every later one - and leave one set of numbered files
+    /// that is half this life and half another, so the world refuses to start one there. It
+    /// never deletes what an operator recorded: moving it is the operator's call.
+    fn stale_roll(named: &std::path::Path) -> Option<std::path::PathBuf> {
+        let first_roll = Disk::path_for(named, 2);
+        first_roll.exists().then_some(first_roll)
+    }
+
     /// `<stem>.NNNN.disk` beside the named file, for number two and on.
     fn path_for(named: &std::path::Path, number: u32) -> std::path::PathBuf {
         if number <= 1 {
@@ -194,6 +203,13 @@ impl Heartbeat {
         let roster = Roster::with_the_guest().with_food(orbs, crate::MASTER_SEED);
         let disk = match &config.disk {
             Some(path) => {
+                if let Some(stale) = Disk::stale_roll(path) {
+                    return Err(format!(
+                        "an earlier recording's rolled Disk file {} sits beside {}, and this run would roll onto it - move the old files away or name another Disk; the world never overwrites a recording",
+                        stale.display(),
+                        path.display()
+                    ));
+                }
                 let connection = open_disk(wire, path, world_fingerprint, 0, &roster)?;
                 log_info(&format!("recording the world to {}.", path.display()));
                 Some(Disk {
@@ -1020,4 +1036,37 @@ fn log_info(message: &str) {
 
 fn log_warn(message: &str) {
     println!("[WARN] {message}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Disk;
+    use crate::scratch::Scratch;
+
+    #[test]
+    fn a_disk_beside_an_earlier_runs_rolled_files_is_refused_and_nothing_is_deleted() {
+        let named = Scratch::new("roll-guard.disk");
+        assert!(
+            Disk::stale_roll(&named.0).is_none(),
+            "no earlier rolls: the world may record"
+        );
+
+        let first_roll = Scratch(Disk::path_for(&named.0, 2));
+        std::fs::write(&first_roll.0, b"an earlier life").expect("write");
+        assert_eq!(
+            Disk::stale_roll(&named.0).as_deref(),
+            Some(first_roll.0.as_path())
+        );
+        assert!(first_roll.0.exists(), "refusing deletes nothing");
+    }
+
+    #[test]
+    fn the_rolled_names_count_from_two_beside_the_named_file() {
+        let named = std::path::Path::new("lives/world.disk");
+        assert_eq!(Disk::path_for(named, 1), named);
+        assert_eq!(
+            Disk::path_for(named, 2),
+            std::path::Path::new("lives/world.0002.disk")
+        );
+    }
 }
