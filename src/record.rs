@@ -284,7 +284,7 @@ mod tests {
         assert!(text.contains("start 100 1700000000\n"));
         assert!(
             text.contains("judged 1 7 101 101 3F800000 BF000000 3E800000 accepted\n"),
-            "floats are bit patterns, not roundings: {text}"
+            "floats are bit patterns, not roundings"
         );
         assert!(text.contains(
             "applied 101 7 fresh 3F800000 BF000000 3E800000 00000000 00000000 00000000 00000000 00000000 00000000 00000000\n"
@@ -311,7 +311,7 @@ mod tests {
 food 3E800000 0123456789ABCDEF
 "
             ),
-            "the density as bits, the seed as hex: {text}"
+            "the density as bits, the seed as hex"
         );
     }
 }

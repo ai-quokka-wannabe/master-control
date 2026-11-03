@@ -98,9 +98,8 @@ fn clu_main(arguments: Vec<String>) -> std::process::ExitCode {
     }
 }
 
-/// The run's master seed. The world draws none of its own yet: every world is seed zero, so two
-/// lives of one world meet the same food, until a flag to choose another is owed (TODO.md).
-const MASTER_SEED: u64 = 0;
+/// The run's master seed: the crate's one constant ([`master_control::MASTER_SEED`]).
+use master_control::MASTER_SEED;
 
 /// The surface, said once for every refusal that names it.
 const SURFACE: &str = "[port], --verbose, --version, --disk <path>, --disk-roll <MiB>, --log <path>, --food-density <orbs per 100 m^2>, --config <file>";

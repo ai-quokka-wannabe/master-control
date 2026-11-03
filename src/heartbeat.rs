@@ -88,7 +88,7 @@ impl Default for Config {
             disk_roll_bytes: 48 * 1024 * 1024,
             input_log: None,
             hash_every: 32,
-            food: crate::food::FoodSettings::new(crate::food::DEFAULT_DENSITY, 0),
+            food: crate::food::FoodSettings::new(crate::food::DEFAULT_DENSITY, crate::MASTER_SEED),
         }
     }
 }
@@ -183,15 +183,15 @@ impl Heartbeat {
 
         // The Disk opens with the world's own facts, as a WELCOME would state them; the roster
         // as it opens - the guest - is told to it first, exactly as to a late joiner.
-        // The food, placed once from the launch settings; the master seed is 0 until Master
-        // Control draws one (TODO, a master seed worth the name), as main.rs says.
+        // The food, placed once from the launch settings, and the smell's noise seeded from the
+        // same master seed (`crate::MASTER_SEED`: zero until Master Control draws one).
         let orbs = crate::food::place(&config.food)?;
         log_info(&format!(
             "the world holds {} orbs of food (density {} per 100 m^2).",
             orbs.len(),
             config.food.density
         ));
-        let roster = Roster::with_the_guest().with_food(orbs, 0);
+        let roster = Roster::with_the_guest().with_food(orbs, crate::MASTER_SEED);
         let disk = match &config.disk {
             Some(path) => {
                 let connection = open_disk(wire, path, world_fingerprint, 0, &roster)?;

@@ -559,6 +559,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Shell scripts keep LF.** `.gitattributes` gains `*.sh text eol=lf`, as link and `.github` now carry: with
   `core.autocrlf` on Windows a script would otherwise check out with CRLF, which bash refuses.
 
+- **One master seed, Clu compares pitch, the stamp covers Link's headers - no simulated bit moves.** The master seed was
+  a constant in `main.rs` and a literal `0` in three other places (the default food, the world's roster and Clu's
+  re-simulation), so a seed drawn one day would have reached the food but not the smell's counting noise or the replay;
+  it is now `master_control::MASTER_SEED`, read everywhere (still zero). Clu's diff now compares the head's pitch and
+  every segment's, so a pitch drift is named rather than missed. The build stamp now hashes `external/link/include`
+  too, so a header-only Link change is a different build. Two tests no longer print a read-back log in their failure
+  message (CodeQL `rust/log-injection`, alert #80). Found by the deep dive (#79).
+
 - **The world's step is three times faster, so a hosted creature's intents land on time.** The floor is piecewise
   constant - one level per cell - but every query recomputed its cell's level from the terrain noise, and the chain's
   solver asks for thousands of floor heights a tick (every hull vertex, every one of up to 384 sweeps). One 8-segment
