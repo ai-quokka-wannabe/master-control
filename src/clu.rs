@@ -449,7 +449,9 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
             Record::Food(settings) => {
                 let orbs = crate::food::place(&settings)
                     .map_err(|words| format!("the log's food cannot be placed: {words}"))?;
-                roster = std::mem::take(&mut roster).with_food(orbs, 0);
+                // The smell's noise from the same master seed the world used - the crate's one
+                // constant until the log's header records a drawn one.
+                roster = std::mem::take(&mut roster).with_food(orbs, crate::MASTER_SEED);
             }
             Record::Applied {
                 tick,
@@ -541,6 +543,7 @@ fn diff_against_disk(
                                 ("py", state.position[1], body.position[1]),
                                 ("pz", state.position[2], body.position[2]),
                                 ("yaw", state.yaw, body.yaw),
+                                ("pitch", state.pitch, body.pitch),
                                 ("vx", state.velocity[0], body.velocity[0]),
                                 ("vy", state.velocity[1], body.velocity[1]),
                                 ("vz", state.velocity[2], body.velocity[2]),
@@ -574,14 +577,19 @@ fn diff_against_disk(
                                         ));
                                     }
                                 }
-                                if recorded.yaw.to_bits() != resimulated.yaw.to_bits() {
-                                    lines.push(format!(
-                                        "creature {} segment {} yaw: recorded {:08X} re-simulated {:08X}",
-                                        state.creature_id,
-                                        slot + 1,
-                                        recorded.yaw.to_bits(),
-                                        resimulated.yaw.to_bits()
-                                    ));
+                                for (name, recorded, resimulated) in [
+                                    ("yaw", recorded.yaw, resimulated.yaw),
+                                    ("pitch", recorded.pitch, resimulated.pitch),
+                                ] {
+                                    if recorded.to_bits() != resimulated.to_bits() {
+                                        lines.push(format!(
+                                            "creature {} segment {} {name}: recorded {:08X} re-simulated {:08X}",
+                                            state.creature_id,
+                                            slot + 1,
+                                            recorded.to_bits(),
+                                            resimulated.to_bits()
+                                        ));
+                                    }
                                 }
                             }
                             for (name, recorded, resimulated) in fields {

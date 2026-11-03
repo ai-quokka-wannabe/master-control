@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The build's own provenance: a hash over every source this binary was compiled from - the
-/// crate's Rust, its manifests, this script, and the wire's sources - written into OUT_DIR as
+/// crate's Rust, its manifests, this script, and the wire's sources and C headers - written into OUT_DIR as
 /// `build_info.rs`. Git-independent on purpose, so a tarball or a container build stamps as
 /// honestly as a checkout. `--version` prints it and the input log records it, so a replay that
 /// disagrees can say "a different binary" before anyone says "a simulation bug".
@@ -41,6 +41,7 @@ fn stamp_build(manifest_dir: &Path, out_dir: &Path) {
         "Cargo.toml",
         "Cargo.lock",
         "external/link/src",
+        "external/link/include",
         "external/link/Cargo.toml",
     ] {
         collect_sources(&manifest_dir.join(root), &mut files);
