@@ -26,8 +26,8 @@
 //! 2017) - each pump swallowing one fixed bite. Pulsatile on purpose: a gut is told of food in
 //! pumps, never as a trickle.
 //!
-//! Not yet on the wire: the rows, the event and the letter's intake travel with link v12, and
-//! the roster's tick calls into this module only then.
+//! On the wire since link v12: the rows in every TICK_STATE, the food-gone `EVENT` and the
+//! letter's intake; the roster's tick feeds every mouth through this module.
 
 use crate::chain::Frame;
 use crate::ground::GRID_FLOOR_CONFIG;
@@ -302,7 +302,6 @@ pub fn place(settings: &FoodSettings) -> Result<Vec<Orb>, String> {
     let count = orb_count(settings.density)?;
     let mut draws = SplitMix64(settings.seed);
     let (low_x, low_z) = cell_origin(0, 0);
-    #[allow(clippy::cast_precision_loss)]
     let span = f64::from(GRID_FLOOR_CONFIG.cells) * f64::from(GRID_FLOOR_CONFIG.cell_size);
     let mut orbs: Vec<Orb> = Vec::with_capacity(count);
     // Far more tries than a floor with any open ground needs; a floor with none says so.

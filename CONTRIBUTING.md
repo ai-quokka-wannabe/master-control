@@ -77,6 +77,7 @@ When submitting:
 - [ ] Code compiles without warnings (`cargo build`, warnings are denied in the manifest)
 - [ ] Code is formatted (`cargo fmt`)
 - [ ] Clippy reports nothing (`cargo clippy --all-targets`)
+- [ ] Tests pass (`cargo test --locked`)
 - [ ] Documentation is updated if needed
 - [ ] An entry added to `CHANGELOG.md` § Unreleased for anything user-visible
 - [ ] Commit messages follow [conventional commits](#commit-messages)

@@ -161,8 +161,7 @@ fn the_world_stops_on_request_and_its_logs_end_properly() {
         }
     });
 
-    // Greeted: the world is up and the hook is in (the hook is installed before the greeting's
-    // companion line about Ctrl+C is printed, which the greeting precedes; wait for that line).
+    // Armed: the hook is installed before the Ctrl+C line is printed, so wait for that line.
     let deadline = Instant::now() + BUDGET;
     let mut seen = Vec::new();
     loop {
@@ -232,11 +231,7 @@ fn the_world_stops_on_request_and_its_logs_end_properly() {
         "the log's last line is its end line, not {last:?}"
     );
     assert!(
-        text.lines()
-            .filter(|line| line.starts_with("hash "))
-            .count()
-            > 0
-            || text.lines().count() > 4,
+        text.lines().any(|line| line.starts_with("applied ")),
         "the world turned before it stopped:\n{text}"
     );
 

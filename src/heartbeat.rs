@@ -70,7 +70,8 @@ pub struct Config {
     /// Ticks between hashes in the input log: 32 is once a second.
     pub hash_every: u32,
     /// How much food the world holds and which: written into the input log's header so Clu
-    /// re-places the same orbs. Placed and eaten once the tick carries food (link v12).
+    /// re-places the same orbs. Placed at world start, eaten by the mouths, told in every
+    /// TICK_STATE.
     pub food: crate::food::FoodSettings,
 }
 
@@ -118,6 +119,9 @@ pub struct Heartbeat {
     input_log: Option<InputLog>,
     /// The wire, kept for the Disk's rollover: the next file opens through it.
     wire: LinkDll,
+    /// A rollover failed and has not succeeded since: it is retried on every judged tick, but
+    /// said once rather than four times a second.
+    disk_roll_failing: bool,
 }
 
 /// One change to the roster, in the order it happened - the order is the record. A DEREZ
@@ -233,6 +237,7 @@ impl Heartbeat {
             disk,
             input_log,
             wire: *wire,
+            disk_roll_failing: false,
             config,
             citizens: Vec::new(),
             stager: ActionStager::default(),
@@ -253,8 +258,9 @@ impl Heartbeat {
         self.overruns
     }
 
-    /// Turn the world until `stop` says otherwise. The only wall clock in the process lives in
-    /// this function.
+    /// Turn the world until `stop` says otherwise. The pacing clock lives in this function; the
+    /// module's other wall-clock reads are the keepalive's and the log and Disk headers' start
+    /// time, none of which reaches the simulated state.
     pub fn run(&mut self, stop: &AtomicBool) {
         let dt = Duration::from_secs_f64(f64::from(TICK_SECONDS));
         let mut next_tick_time = Instant::now() + dt;
@@ -459,11 +465,11 @@ impl Heartbeat {
                                     Admission::RefusedOwned { owner } => log_info(&format!(
                                         "client {sender} tried to rez creature {creature_id}, which client {owner} wears - refused."
                                     )),
-                                    Admission::RefusedFull => log_warn(&format!(
+                                    Admission::RefusedFull => log_info(&format!(
                                         "client {sender} tried to rez creature {creature_id} into a full world ({} bodies) - refused.",
                                         roster.len()
                                     )),
-                                    Admission::RefusedCrowded => log_warn(&format!(
+                                    Admission::RefusedCrowded => log_info(&format!(
                                         "client {sender} tried to rez creature {creature_id} onto a crowded spawn pad ({} bodies, no free spot) - refused.",
                                         roster.len()
                                     )),
@@ -774,8 +780,6 @@ fn part_with(citizen: &mut Citizen, roster: &mut Roster, what_failed: &str) -> V
     }
 }
 
-/// One body over one connection, the host's own rows. Queued, not flushed: the caller
-/// flushes once it has said everything.
 impl Heartbeat {
     /// The rollover: once the file has reached the configured size, this tick - already told to
     /// it whole - is the last it holds. It closes with BYE as a world does, and the next file
@@ -811,6 +815,7 @@ impl Heartbeat {
                 });
                 // Dropping the old connection closes it: BYE, then the file.
                 drop(previous);
+                self.disk_roll_failing = false;
                 log_info(&format!(
                     "the Disk rolled over at tick {tick}: {} ({bytes} bytes) closed, {} opened.",
                     Disk::path_for(&self.disk.as_ref().expect("just placed").named, number - 1)
@@ -819,9 +824,12 @@ impl Heartbeat {
                 ));
             }
             Err(reason) => {
-                log_warn(&format!(
-                    "the Disk could not roll over - {reason} - recording continues in the current file."
-                ));
+                if !self.disk_roll_failing {
+                    log_warn(&format!(
+                        "the Disk could not roll over - {reason} - recording continues in the current file, and the rollover is retried quietly every eighth tick."
+                    ));
+                }
+                self.disk_roll_failing = true;
             }
         }
     }
@@ -879,6 +887,8 @@ fn tell_changes(connection: &mut Connection, changes: &[Change], tick: u64) -> b
     true
 }
 
+/// One body over one connection, the host's own rows. Queued, not flushed: the caller
+/// flushes once it has said everything.
 fn send_model(connection: &mut Connection, model: &Model) -> bool {
     connection.send_rez(
         &model.header,

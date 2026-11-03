@@ -187,11 +187,11 @@ pub const FRICTION_GLIDE: f32 = 0.1;
 
 /// Coulomb friction of a tube shoved across its length: it ploughs. The Grid floor's answer
 /// to a runner pushed sideways - two, because a plough is not a slide: the tube bites. With
-/// the glide above, the worm's two runners at thirty degrees give it about six times the
-/// resistance across its axis that it meets along it, which is what a sled has; measured on
-/// the desk, the same wave that wriggled in place on a point carries the body a metre in ten
-/// seconds on them, straight to a few millimetres, and as far backwards when the wave runs
-/// the other way.
+/// the glide above, the worm's two runners at thirty degrees give it about two and a half
+/// times (2.65) the resistance across its axis that it meets along it, which is what a sled
+/// has; measured on the desk, the same wave that wriggled in place on a point carries the body
+/// a metre in ten seconds on them, straight to a few millimetres, and as far backwards when the
+/// wave runs the other way.
 pub const FRICTION_PLOUGH: f32 = 2.0;
 
 /// Friction against a segment spinning on its runners, as a fraction of gravity over the
@@ -226,7 +226,8 @@ pub struct Chain {
     pub torques: [f32; TRAILING_SEGMENTS_MAX],
     /// The keels every segment rests on, body frame, unit (x, z), `keel_count` meaningful:
     /// read from the hull at rez, fixed for the life, hashed - a body with other runners
-    /// slides elsewhere. None: the body rests on a point and rubs the same every way.
+    /// slides elsewhere. None (a count of zero): the body rests on a point and rubs the same
+    /// every way.
     pub keels: [[f32; 2]; KEELS_MAX],
     pub keel_count: u32,
     /// The trailing segments' poses, `segment_count - 1` meaningful, the rest zero - the wire's
@@ -873,22 +874,6 @@ impl Chain {
             .collect()
     }
 
-    /// The world-space joint tips: for a chain of n, n - 1 points, tip `k` where segment `k`'s
-    /// tail meets segment `k + 1`'s nose - each the mean of the two ends the constraint holds
-    /// together. For the tests and the record.
-    #[must_use]
-    pub fn pivots(&self) -> [[f32; 3]; TRAILING_SEGMENTS_MAX] {
-        let mut pivots = [[0.0; 3]; TRAILING_SEGMENTS_MAX];
-        let half = 0.5 * self.spacing;
-        let joints = self.segment_count.saturating_sub(1) as usize;
-        for (joint, pivot) in pivots.iter_mut().enumerate().take(joints) {
-            let tail = tail_tip(&self.segments[joint], half);
-            let nose = nose_tip(&self.segments[joint + 1], half);
-            *pivot = scale(add(tail, nose), 0.5);
-        }
-        pivots
-    }
-
     /// How far apart the two ends of joint `k` stand, in space - zero when the constraint is met.
     #[must_use]
     pub fn joint_gap(&self, joint: usize) -> f32 {
@@ -1175,8 +1160,8 @@ mod tests {
         0.0
     }
 
-    /// A terrace: the floor a step higher for z beyond `edge` - the cell line at z = 0 for a
-    /// floor of even cells centred on the origin.
+    /// A terrace: the floor a step higher for z > 0 - the cell line at z = 0 for a floor of
+    /// even cells centred on the origin.
     fn stepped(rise: f32) -> impl Fn(f32, f32) -> f32 {
         move |_x, z| if z > 0.0 { rise } else { 0.0 }
     }
@@ -1242,6 +1227,27 @@ mod tests {
         for joint in 0..3 {
             assert!(chain.joint_gap(joint) < 1e-6);
         }
+    }
+
+    #[test]
+    fn two_runners_at_thirty_degrees_resist_across_two_and_a_half_times_as_along() {
+        // FRICTION_PLOUGH's documented ratio: runners at +-30 degrees from the body's axis.
+        let mut chain = Chain::single();
+        assert!(
+            (chain.friction_along([1.0, 0.0]) - crate::physics::FRICTION).abs() < f32::EPSILON,
+            "no runners: the floor's own friction, every way"
+        );
+        chain.set_keels(&[[0.5, 0.866_025_4], [-0.5, 0.866_025_4]]);
+        let along = chain.friction_along([0.0, 1.0]);
+        let across = chain.friction_along([1.0, 0.0]);
+        let ratio = across / along;
+        assert!(
+            (ratio - 2.65).abs() < 0.01,
+            "across {across} / along {along} = {ratio}"
+        );
+        // More runners than a hull declares are ignored, never folded in.
+        chain.set_keels(&[[1.0, 0.0]; KEELS_MAX + 3]);
+        assert_eq!(chain.keel_count as usize, KEELS_MAX);
     }
 
     #[test]
@@ -1333,7 +1339,6 @@ mod tests {
         let mut chain = Chain::new(8, 0.56, head_at(0.0, 0.0, 0.0));
         let mut drive = Drive::default();
         for (joint, target) in drive.targets.iter_mut().enumerate().take(7) {
-            #[allow(clippy::cast_precision_loss)]
             let sign = if joint % 2 == 0 { 1.0 } else { -1.0 };
             *target = 0.5 * sign;
         }
@@ -1722,7 +1727,7 @@ mod tests {
             "the joints gave against the wall by {bent} rad in all"
         );
         // Relaxed: the servos are asked for straight and give back most of the squeeze - not
-        // all of it. A servo's five newton-metres over a quarter-metre lever is eighteen newtons,
+        // all of it. A servo's five newton-metres over a 0.28 m lever is eighteen newtons,
         // and straightening a segment drags it sideways across its runners against a plough of
         // twice its weight, so a body pressed into a wall stays a few degrees bent when it
         // relaxes, as a weak-servoed robot would. A finding, reported: not tuned away.

@@ -22,7 +22,7 @@
 
 use crate::link_dll::{CreatureState, EVENT_VOCALISATION, Event};
 
-/// The blinker's period, in ticks: four seconds there, four seconds gone - the understudy's
+/// The blinker's half period, in ticks: four seconds there, then four gone - the understudy's
 /// rhythm, kept so a spectator shows snapshot-authoritative removal against this server too.
 const BLINK_HALF_PERIOD: u64 = 128;
 

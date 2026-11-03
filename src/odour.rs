@@ -314,7 +314,7 @@ pub fn sense(
 }
 
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)] // The platform's exp and ln, for an independent quadrature.
+#[allow(clippy::disallowed_methods)] // The platform's exp, ln and powf, for an independent quadrature.
 mod tests {
     use super::*;
     use crate::food::ORB_RADIUS;

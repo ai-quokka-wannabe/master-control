@@ -89,7 +89,7 @@ CI runs, on both platforms, on every pull request and on `main`:
 |------|---------|---------------|
 | Format | `cargo fmt --check` | rustfmt, the pinned toolchain's own |
 | Lint | `cargo clippy --locked --all-targets -- --deny warnings` | `clippy::all` as errors, plus the rules in `clippy.toml` (below) |
-| Docs | `cargo doc --locked --no-deps --document-private-items` | Every doc comment, warnings as errors |
+| Docs | `cargo doc --locked --no-deps --document-private-items`, with `RUSTDOCFLAGS=-D warnings` | Every doc comment, warnings as errors |
 | Tests, debug | `cargo test --locked` | The unit suite and the integration suite that stands whole worlds up on loopback |
 | Tests, release-check | `cargo test --locked --profile release-check` | The same suite with release codegen and overflow checks and debug assertions on - a wrap that only happens at the speed of an optimised build is exactly the shape of a replay divergence |
 | Markdown | `npm ci && npm run lint:md` | The pinned markdownlint-cli2 |
@@ -159,8 +159,8 @@ master-control clu <log> [<disk>]
 - `--food-density` is how much food the world holds, orbs per 100 m^2 of open floor (0.1 by
   default, fifteen orbs on the Grid's floor; `0` none; past about 0.43 the count would exceed
   the 64 orbs a tick carries, and is refused). The density and the
-  food's seed go into the log's header, so Clu re-places the same food. Not yet on the wire:
-  the orbs travel with link v12.
+  food's seed go into the log's header, so Clu re-places the same food. The orbs travel in
+  every `TICK_STATE` since link v12.
 - `--config <file>` reads `key = value` lines - the long flags without their dashes, `#` for a
   comment - and a flag on the command line wins over the file:
 
@@ -185,10 +185,10 @@ has the window and the worm.
 
 ## Editing
 
-VS Code with rust-analyzer is what the repository is set up for (`.vscode/`); rust-analyzer
-reads the pinned toolchain from `rust-toolchain.toml` and needs no configuration. Format on
-save with rustfmt; clippy's rules appear inline with rust-analyzer's `checkOnSave` set to
-`clippy`.
+VS Code with the rust-analyzer extension works with no configuration: it reads the pinned
+toolchain from `rust-toolchain.toml` and formats with rustfmt. `.vscode/` carries the
+organisation's shared editor settings (format on save, markdownlint, the rulers); set
+rust-analyzer's `rust-analyzer.check.command` to `clippy` to see clippy's rules inline.
 
 Markdown is linted by the pinned markdownlint-cli2 (`npm ci`, then `npm run lint:md`) against
 `.markdownlint.json`; British English throughout.
@@ -197,7 +197,7 @@ Markdown is linted by the pinned markdownlint-cli2 (`npm ci`, then `npm run lint
 
 ## Troubleshooting
 
-### `the Link submodule is empty` at build time
+### `external/link is empty` at build time
 
 `external/link` was not initialised. `git submodule update --init`, then build again.
 

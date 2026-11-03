@@ -35,6 +35,29 @@ use std::time::{Duration, Instant};
 
 const PATIENCE: Duration = Duration::from_secs(5);
 
+/// A test's scratch directory under cargo's own target/tmp, removed with everything in it when
+/// the test ends - passed or panicked - so a red run leaves nothing behind.
+struct Scratch(std::path::PathBuf);
+
+impl Scratch {
+    fn new(name: &str) -> Scratch {
+        let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("the-world-turns-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("a scratch directory");
+        Scratch(directory)
+    }
+
+    fn join(&self, file: &str) -> std::path::PathBuf {
+        self.0.join(file)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A world stood up for one test: the heartbeat on its own thread, stopped and joined on drop.
 struct World {
     port: u16,
@@ -961,10 +984,9 @@ fn a_reaped_hosts_body_stays_and_the_next_host_takes_it_up_by_rezzing_it() {
 
 #[test]
 fn a_world_with_a_disk_and_a_log_replays_what_it_said_and_logged_what_it_was_told() {
-    let mut disk_path = std::env::temp_dir();
-    disk_path.push(format!("master-control-test-{}.disk", std::process::id()));
-    let mut log_path = std::env::temp_dir();
-    log_path.push(format!("master-control-test-{}.log", std::process::id()));
+    let scratch = Scratch::new("test");
+    let disk_path = scratch.join("test.disk");
+    let log_path = scratch.join("test.log");
     let config = Config {
         disk: Some(disk_path.clone()),
         input_log: Some(log_path.clone()),
@@ -1081,17 +1103,13 @@ fn a_world_with_a_disk_and_a_log_replays_what_it_said_and_logged_what_it_was_tol
             .and_then(|tick| tick.parse::<u64>().ok())
             .is_some_and(|tick| tick.is_multiple_of(4))
     }));
-
-    let _ = std::fs::remove_file(&disk_path);
-    let _ = std::fs::remove_file(&log_path);
 }
 
 #[test]
 fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
-    let mut disk_path = std::env::temp_dir();
-    disk_path.push(format!("master-control-clu-{}.disk", std::process::id()));
-    let mut log_path = std::env::temp_dir();
-    log_path.push(format!("master-control-clu-{}.log", std::process::id()));
+    let scratch = Scratch::new("clu");
+    let disk_path = scratch.join("clu.disk");
+    let log_path = scratch.join("clu.log");
     let config = Config {
         disk: Some(disk_path.clone()),
         input_log: Some(log_path.clone()),
@@ -1158,8 +1176,7 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
         tampered.push('\n');
     }
     assert!(lied, "the log carries the steered intent to lie about");
-    let mut lie_path = std::env::temp_dir();
-    lie_path.push(format!("master-control-clu-{}-lie.log", std::process::id()));
+    let lie_path = scratch.join("clu-lie.log");
     std::fs::write(&lie_path, tampered).expect("write");
     match master_control::clu::check(&lie_path, Some(&disk_path), &wire).expect("clu reads the lie")
     {
@@ -1186,11 +1203,7 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
 
     // Given a later file of a rollover - a Disk that begins after the divergence - Clu names
     // it and asks for the earlier one, rather than claiming the Disk ends early.
-    let mut later_path = std::env::temp_dir();
-    later_path.push(format!(
-        "master-control-clu-{}-later.disk",
-        std::process::id()
-    ));
+    let later_path = scratch.join("clu-later.disk");
     {
         let roster = master_control::roster::Roster::with_the_guest();
         let mut later = wire
@@ -1221,7 +1234,6 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
         }
         other => panic!("the lie is still a lie: {other:?}"),
     }
-    let _ = std::fs::remove_file(&later_path);
 
     // Another world's log is refused in words, never re-simulated.
     let other_world = text.replacen(
@@ -1232,10 +1244,6 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
     std::fs::write(&lie_path, other_world).expect("write");
     let refusal = master_control::clu::check(&lie_path, None, &wire).expect_err("another world");
     assert!(refusal.contains("different world"), "{refusal}");
-
-    let _ = std::fs::remove_file(&disk_path);
-    let _ = std::fs::remove_file(&log_path);
-    let _ = std::fs::remove_file(&lie_path);
 }
 
 // ---- The adversary with a socket: bytes the DLL would never send, at the world's own door ----
@@ -1631,8 +1639,8 @@ fn a_body_reaching_too_far_or_subnormal_is_refused_by_the_world_and_a_cap_sized_
 
 #[test]
 fn a_disk_rolls_over_at_a_size_and_every_file_is_whole() {
-    let mut disk_path = std::env::temp_dir();
-    disk_path.push(format!("master-control-roll-{}.disk", std::process::id()));
+    let scratch = Scratch::new("roll");
+    let disk_path = scratch.join("roll.disk");
     let config = Config {
         disk: Some(disk_path.clone()),
         disk_roll_bytes: 4 * 1024,
@@ -1721,17 +1729,13 @@ fn a_disk_rolls_over_at_a_size_and_every_file_is_whole() {
         }
         previous_end = Some(last_row_tick);
     }
-    for file in &files {
-        let _ = std::fs::remove_file(file);
-    }
 }
 
 #[test]
 fn a_derez_and_a_rez_of_one_identity_in_one_breath_are_told_in_that_order() {
-    let mut disk_path = std::env::temp_dir();
-    disk_path.push(format!("master-control-swap-{}.disk", std::process::id()));
-    let mut log_path = std::env::temp_dir();
-    log_path.push(format!("master-control-swap-{}.log", std::process::id()));
+    let scratch = Scratch::new("swap");
+    let disk_path = scratch.join("swap.disk");
+    let log_path = scratch.join("swap.log");
     let config = Config {
         disk: Some(disk_path.clone()),
         input_log: Some(log_path.clone()),
@@ -1797,8 +1801,6 @@ fn a_derez_and_a_rez_of_one_identity_in_one_breath_are_told_in_that_order() {
         master_control::clu::Verdict::Agreed { ticks, .. } => assert!(ticks >= last_tick - 2),
         other => panic!("an honest log must agree: {other:?}"),
     }
-    let _ = std::fs::remove_file(&disk_path);
-    let _ = std::fs::remove_file(&log_path);
 }
 
 /// A bad log is refused, and says why - one corruption, one distinct reason. A replayer that
@@ -1806,10 +1808,9 @@ fn a_derez_and_a_rez_of_one_identity_in_one_breath_are_told_in_that_order() {
 /// one is a diagnostic.
 #[test]
 fn clu_names_every_way_a_log_can_lie() {
-    let mut disk_path = std::env::temp_dir();
-    disk_path.push(format!("master-control-lies-{}.disk", std::process::id()));
-    let mut log_path = std::env::temp_dir();
-    log_path.push(format!("master-control-lies-{}.log", std::process::id()));
+    let scratch = Scratch::new("lies");
+    let disk_path = scratch.join("lies.disk");
+    let log_path = scratch.join("lies.log");
     let config = Config {
         disk: Some(disk_path.clone()),
         input_log: Some(log_path.clone()),
@@ -1838,11 +1839,7 @@ fn clu_names_every_way_a_log_can_lie() {
         "the world ended on request"
     );
 
-    let mut lie_path = std::env::temp_dir();
-    lie_path.push(format!(
-        "master-control-lies-{}-lie.log",
-        std::process::id()
-    ));
+    let lie_path = scratch.join("lies-lie.log");
     let check = |text: String| {
         std::fs::write(&lie_path, text).expect("write");
         master_control::clu::check(&lie_path, Some(&disk_path), &wire)
@@ -1932,8 +1929,4 @@ fn clu_names_every_way_a_log_can_lie() {
         check(corrupted),
         Ok(master_control::clu::Verdict::Diverged { tick: 8, .. })
     ));
-
-    for path in [&disk_path, &log_path, &lie_path] {
-        let _ = std::fs::remove_file(path);
-    }
 }

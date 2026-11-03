@@ -39,6 +39,8 @@ pub mod odour;
 pub mod physics;
 pub mod record;
 pub mod roster;
+#[cfg(test)]
+mod scratch;
 pub mod script;
 pub mod stager;
 pub mod stop;

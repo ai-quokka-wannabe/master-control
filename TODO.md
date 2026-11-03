@@ -1,7 +1,7 @@
 # TODO
 
 The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` and the
-`grid` library) and the wire carries a tick (link protocol v3 then; v11 today). The blueprint is the flagship's
+`grid` library) and the wire carries a tick (link protocol v3 then; v12 today). The blueprint is the flagship's
 [docs/TOPOLOGY.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/TOPOLOGY.md)
 — its § Master Control's mechanics and § One tick, across the wire sections carry every
 mechanism below with its citation; this file only stages the server-side etapes so they are not
@@ -129,16 +129,17 @@ ends, the Disk closes with `BYE`, the citizens are hung up on, the exit is 0. A 
 ends the process at once - the way out of a wedged world stays the operator's. Tested with the
 real signal against the real binary; Clu is content with what it leaves.
 
-**Still owed, deliberately:** the master seed in the log's header - once the world draws one.
-Nothing in the world is random yet (`creature_seed` exists and nothing calls it), and a field
-for a number nobody draws is the versioning-before-need the owner warned against.
+**Still owed, deliberately:** the master seed in the log's header - once a world can draw one
+other than zero. The food and the smell's counting noise draw from it now (the food's seed is
+in the log's `food` line), but every world is seed zero; the flag and the header field are
+[Food and smell](#food-and-smell)'s "A master seed worth the name".
 
 ## Etape 5 — contacts, exact
 
 The owner's observation (2026-08-22), ruled in `TOPOLOGY.md` § Master Control's mechanics: the
 Grid and every creature are triangles and squares only, so contacts are closed-form and the
 capsule-against-height-function body in `src/physics.rs` is a placeholder that `REZ` retires.
-Gated on the `REZ` payload (Link protocol v4, now v11) and on Etape 2's roster of record.
+Gated on the `REZ` payload (Link protocol v4, now v12) and on Etape 2's roster of record.
 
 - **World collision geometry** = planar faces with adjacency, derived from the same
   world-definition source as the mesh and the reflectors — never from a triangle soup. **A
@@ -473,11 +474,9 @@ nothing), so the golden holds; the Grid draws the orbs and hands the senses on n
 
 **Still owed:**
 
-- **The wire (after link v12)**: the roster places the food at world start from the Config's
-  settings, feeds every mouth in roster order on the tick, sends the food rows in `TICK_STATE`,
-  the food-gone `EVENT` with its pew, and `intake` and `odour[2][8]` in the letter; Clu places
-  the same food from the log's header line and feeds as the world did; the goldens re-recorded.
-  The food then joins the state hash (quantities and gone ticks are state).
+- **The food in the state hash**: the wire half is done (above), but the hash still covers
+  the bodies alone. The orbs' quantities and gone ticks are state, so they join the hash, and
+  the goldens are re-recorded with them.
 - **A master seed worth the name.** Every world is master seed zero (`MASTER_SEED` in
   `main.rs`), so every world meets the same food. When lives want different food, a `--seed`
   flag (and config key) sets it, and the log's header carries it beside the food line.

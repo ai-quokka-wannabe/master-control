@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A deep audit: honest warnings, a sturdier Clu, comments that agree with the code.** Asked for by the owner:
+  every issue, even a cosmetic one, and every warning an executable prints. Clu's note that a log came from
+  another build while the two agreed is now `[INFO]`, not `[WARN]` - agreement is not a problem - and a full or
+  crowded world refusing a `REZ` is `[INFO]` like the other refusals, the host being told `REFUSED` already. A
+  failed Disk rollover warns once rather than every eighth tick. Clu refuses what no world writes instead of
+  wrapping or panicking on it - an identity past 32 bits, a vertex count whose arithmetic overflows, any record
+  after the end line, extra words after `clu <log> [<disk>]` - and its Disk messages name the rollover file to
+  bring. The input log's legend lists `claim` and `end`. Tests no longer leave files in the temp directory when
+  they fail (a scratch directory removed on drop), two assertions that could not fail now can (the golden life
+  is checked for servo targets, the stopped world for `applied` lines), the twin tests hold every mirrored wire
+  constant to `lnk_protocol.h`, and a new test pins the runners' documented across-to-along friction of 2.65.
+  Some twenty stale comments are corrected (the friction ratio said "six times", food was "not yet on the
+  wire", the chain "followed a recorded path"); `Chain::pivots` and `Roster::bodies`, called by nothing, are
+  gone. The docs follow: TODO.md's protocol version and its done food wire, DEV_ENV_SETUP.md's food note,
+  build-failure text and editor notes, CLAUDE.md's CI summary, a cargo-shaped pull-request template, and the
+  tests in CONTRIBUTING.md's checklist. No simulated bit, golden or wire byte moved.
 - **On the wire at protocol 12, with no food yet.** `external/link` moves to v12 and `link_dll.rs`'s mirror follows
   client ABI 10: `TickStateHeader.food_count`, `FoodState` rows, `send_tick_state` with the food rows, and the
   letter's `intake` and `odour[16]` (160 bytes). The world sends no food rows and a letter with nothing eaten and
@@ -35,7 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Claude skills, shared across the org.** `.claude/skills/` gains live-world, windows-build and org-pr-flow - how to run, drive and stop a
   live world, how to build and check on the Windows desk, and the way from a change to a PR - each mirrored verbatim
   in every repo that uses it and improved every time it is used, so no session reinvents them.
-
 - **Figures, and a README that starts with them.** `cargo run --example figures` (`examples/figures.rs`, std
   only) draws three SVGs into `docs/figures/` from the world's own code - `food::place`, `physics::floor` and
   `odour.rs`, nothing re-modelled - byte-identical on every run: the food map (every orb at densities 0.1, 0.25 and
@@ -80,7 +95,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command line winning over the file, an unknown key, a repeated one or a bad value refused with
   its line. The input log's header gains `food <density_bits> <seed_hex>`; Clu reads it back and
   refuses a malformed one, and a log from before food still replays, with none.
-
 - **Every contributor credited, and their copyright kept.** README.md gains a Contributors section that
   lists everyone who helps, for any kind of contribution - code, documentation, bug reports, reviews,
   ideas, answers in Discussions - following the All Contributors specification and its emoji key, kept by
@@ -88,7 +102,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep the copyright of what they write - no contributor licence agreement, no assignment, contributions
   licensed under GPL-3.0-or-later like everything else. The copyright notices follow: every source
   file's header and the README's licence line name The AiQuokkaWannabe Authors, not one person.
-
 - **The long arc, in public: `docs/VISION.md`.** The owner's decision (2026-10-10): the
   organisation's whole vision is written into every repository and onto its landing page, told
   in full and as the multi-year arc it is - one persistent Grid where AI creatures live and
@@ -231,7 +244,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unsafe`. The binary is tested end to end with the real signal (Ctrl+Break to its own
   process group on Windows, SIGINT on Unix): it exits clean, the log's last line is `end`, and
   Clu agrees with the log and the Disk without missing an end line.
-
 - **The chain.** Etape 6, the owner's ruling (2026-08-26): a worm is a chain of icosahedra
   joined spike to spike, and it undulates. The world's part: the head stays the one rigid body
   physics steps, and every trailing segment is kinematic trail placed one spacing further back
@@ -268,7 +280,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   floats and any workflow that installs a toolchain of its own (a third-party toolchain action,
   `rustup toolchain install`, a curl of rustup) - a second source of truth for the compiler
   version is the kind of drift that leaves everything building.
-
 - **The goldens never merge.** `tests/data/*.txt` carry `-merge` in `.gitattributes`: a
   line-by-line merge of two generations of a recorded golden would be a file that is neither,
   so a conflict there is regenerated deliberately, never hand-merged. Diffs stay on. Adopted
