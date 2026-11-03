@@ -556,6 +556,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The world's step is three times faster, so a hosted creature's intents land on time.** The floor is piecewise
+  constant - one level per cell - but every query recomputed its cell's level from the terrain noise, and the chain's
+  solver asks for thousands of floor heights a tick (every hull vertex, every one of up to 384 sweeps). One 8-segment
+  worm cost 17.7-22 ms of the 31.25 ms tick, and `TICK_STATE` goes out only after the step, so a creature host was
+  left about 13.5 ms to sense, think and answer; past that every intent arrived a tick late, was refused stale, and
+  the body coasted (tron-grid-lite#170). The world's own floor now reads its 4,096 cell levels from a table built
+  once by the same function: the same bits (a test compares every cell, and every golden holds), the step down to
+  about 6 ms, and in a live 45 s life 1,549 intents of 1,553 landed on their tick (was about 72%, falling to almost
+  none). Any other floor configuration is computed as before.
+
 - **The linter's regular expressions are the patched ones.** markdownlint 0.42.0 pins re2js 2.8.6, which has a
   quadratic-time denial of service in lookbehind matching (Dependabot #9 in link, #8 in master-control and the
   siblings' own); `package.json` overrides it to 2.8.7, the patch release. The linter passes as before.
