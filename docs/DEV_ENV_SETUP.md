@@ -148,6 +148,7 @@ stop signal).
 ```text
 master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
                [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--config <file>]
+               [--leach-rate <per s>] [--solute-fade <per s>]
 master-control clu <log> [<disk>]
 ```
 

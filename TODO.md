@@ -2,6 +2,20 @@
 
 The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` an
 
+**Done (2026-11-04), the floor's solutes.** The world's half of taste (CHEMORECEPTION.md "Taste (ruled
+2026-11-04)"): every orb carries a taste profile over sugar, salt, acid and bitter, drawn from its own stream of
+the food's seed (`food::taste_seed`), so no earlier draw moved and the chain golden replays unchanged.
+`src/solutes.rs` is a 2D field on the floor's 2 m cells, Douglas-Rachford ADI, risers as walls, the floor's
+edge sealed, stepped after the air in the roster's step; outside the state hash; 0.15 ms a tick. Free-water
+diffusivities read (sucrose, acetic acid; salt by Nernst-Hartley from read conductances), bitter assumed
+(tryptophan's), all scaled by the air's `LENGTH_SCALE` squared. Owed:
+
+- **Taste organs**, declared with the body in the organs bump: an organ reads `Floor::at` under it, or the orb
+  it is inside. Then the leach rate and fade go into the input log's header (Clu re-steps the field with the
+  defaults today, harmless while nothing reads it).
+- **Caffeine's own diffusivity** (Price, Trickett and Harris 1989), to replace the bitter assumption; and Rard
+  and Miller 1979 for salt, read at the primary.
+
 **Done (2026-11-04), the air.** The flagship's ruling of the day (tron-grid-lite#186): Master Control owns the air.
 `src/air.rs` is a numerical diffusion field on a grid of 2 m columns over the floor cut at its terraces, risers
 as walls, open at its sides and top, stepped by Douglas-Gunn ADI (`theta = 1`) every tick in the roster's step,

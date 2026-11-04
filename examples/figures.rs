@@ -30,6 +30,7 @@ use master_control::odour::{
 };
 use master_control::physics::{BODY_HALF_HEIGHT, CLIMB_LIMIT_METRES, TICK_SECONDS, floor};
 use master_control::roster::{SPAWN_PAD_X, SPAWN_PAD_Z};
+use master_control::solutes::{COMPOUNDS, DIFFUSIVITY, SALT, SoluteSettings};
 use std::fmt::Write as _;
 use std::path::Path;
 
@@ -83,6 +84,7 @@ fn main() {
         ("food-map.svg", food_map(&worlds)),
         ("smell.svg", smell(&worlds, &maps)),
         ("smell-map.svg", smell_map(&worlds, &maps)),
+        ("taste.svg", taste(&worlds[0].1)),
     ];
     for (name, svg) in figures {
         std::fs::write(out.join(name), svg).expect("the figure can be written");
@@ -607,6 +609,7 @@ fn lone_orb() -> Orb {
         radius: ORB_RADIUS,
         quantity: 1.0,
         pattern: [1.0; RECEPTOR_TYPES],
+        taste: [1.0; COMPOUNDS],
         gone_tick: None,
     }
 }
@@ -1133,4 +1136,211 @@ fn smell_map(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
         "Five decades of receptor affinity (#76): with every orb summed, each orb still stands out as a peak a body can climb to, even at the densest setting.",
     );
     svg.finish()
+}
+
+/// The taste figure's window: cells to a side around the chosen orb's cell, and the moments
+/// drawn - seconds since the world began, the chosen orb eaten at the hour.
+const TASTE_WINDOW: usize = 21;
+const TASTE_EATEN: u64 = 3600;
+const TASTE_MOMENTS: [(u64, &str); 4] = [
+    (60, "1 min of leaching"),
+    (600, "10 min"),
+    (3600, "60 min"),
+    (4200, "eaten at 60 min, 10 min on"),
+];
+
+/// The orb the taste figure centres on: the first, in id order, whose window lies on the floor
+/// and with a terrace step within three cells of its own, so the figure shows a riser at work.
+fn taste_orb(floor: &master_control::solutes::Floor, orbs: &[Orb]) -> usize {
+    let columns = GRID_FLOOR_CONFIG.cells as usize;
+    let levels = floor.levels();
+    orbs.iter()
+        .position(|orb| {
+            let cell = floor.cell_at(f64::from(orb.centre[0]), f64::from(orb.centre[2]));
+            let (i, j) = (cell % columns, cell / columns);
+            let half = TASTE_WINDOW / 2;
+            let inside = |k: usize| k >= half && k + half < columns;
+            inside(i)
+                && inside(j)
+                && (i.saturating_sub(3)..(i + 4).min(columns)).any(|a| {
+                    (j.saturating_sub(3)..(j + 4).min(columns))
+                        .any(|b| (levels[b * columns + a] - levels[cell]).abs() > 1e-6)
+                })
+        })
+        .unwrap_or(0)
+}
+
+/// A concentration's colour on three decades below the reference: the floor's blue-black, then
+/// orange, then white at the reference.
+fn taste_colour(value: f64, reference: f64) -> String {
+    let dark = [9.0, 16.0, 28.0];
+    if value <= 0.0 {
+        return mix(dark, dark, 0.0);
+    }
+    let t = ((value / reference).log10() / 3.0 + 1.0).clamp(0.0, 1.0);
+    if t < 0.7 {
+        mix(dark, [255.0, 158.0, 27.0], t / 0.7)
+    } else {
+        mix([255.0, 158.0, 27.0], [255.0, 255.0, 255.0], (t - 0.7) / 0.3)
+    }
+}
+
+/// Figure: the salt one orb leaches into the floor, in a window around it, at four moments of
+/// the world's own field (solutes.rs), every orb of the default world leaching.
+#[allow(clippy::too_many_lines)]
+fn taste(orbs: &[Orb]) -> String {
+    let mut floor = master_control::solutes::Floor::new(SoluteSettings::default(), orbs);
+    let chosen = taste_orb(&floor, orbs);
+    let columns = GRID_FLOOR_CONFIG.cells as usize;
+    let centre = floor.cell_at(
+        f64::from(orbs[chosen].centre[0]),
+        f64::from(orbs[chosen].centre[2]),
+    );
+    let half = TASTE_WINDOW / 2;
+    let (ci, cj) = (
+        (centre % columns).clamp(half, columns - 1 - half),
+        (centre / columns).clamp(half, columns - 1 - half),
+    );
+    let window: Vec<usize> = (cj - half..=cj + half)
+        .flat_map(|j| (ci - half..=ci + half).map(move |i| j * columns + i))
+        .collect();
+    let mut snapshots: Vec<Vec<f64>> = Vec::new();
+    let mut world = orbs.to_vec();
+    let mut tick = 0u64;
+    for (second, _) in TASTE_MOMENTS {
+        while tick < second * 32 {
+            if tick == TASTE_EATEN * 32 {
+                world[chosen].gone_tick = Some(tick);
+            }
+            floor.step(&world);
+            tick += 1;
+        }
+        snapshots.push(
+            window
+                .iter()
+                .map(|&cell| floor.field()[cell][SALT])
+                .collect(),
+        );
+    }
+    // The chosen orb's own cell, and its salt at the hour: the scale every panel is drawn on.
+    let own = window
+        .iter()
+        .position(|&cell| cell == centre)
+        .expect("the window holds its orb");
+    let reference = snapshots[2][own];
+
+    let (size, gap, margin, top) = (260.0, 24.0, 24.0, 70.0);
+    #[allow(clippy::cast_precision_loss)]
+    let panels = TASTE_MOMENTS.len() as f64;
+    let width = 2.0 * margin + panels * size + (panels - 1.0) * gap;
+    let height = top + size + 96.0;
+    let mut svg = Svg::new(
+        width,
+        height,
+        "Taste: the salt rings around food",
+        "The salt one orb leaches into the floor beneath it, in a 42 m window of 2 m cells, after 1, 10 and 60 minutes and 10 minutes after it is eaten, \
+         from the world's own floor field (solutes.rs), a second orb's salt beside it: it spreads within its terrace, never across a riser (cyan), and fades once the orb is gone.",
+    );
+    svg.text(
+        margin,
+        30.0,
+        20.0,
+        TEXT,
+        "start",
+        "Taste: the salt rings around food",
+    );
+    let reach = 2.0 * (DIFFUSIVITY[SALT] * 60.0).sqrt();
+    svg.text(
+        margin,
+        52.0,
+        13.0,
+        DIM,
+        "start",
+        &format!(
+            "Salt on the floor around orb {chosen}, one 2 m cell per square, coloured over three decades below the salt under it at 60 min. A minute spreads it {} m (2 sqrt(D t)).",
+            n(reach)
+        ),
+    );
+    #[allow(clippy::cast_precision_loss)]
+    let cell = size / TASTE_WINDOW as f64;
+    let levels = floor.levels();
+    let low = floor.centre_of(window[0]);
+    let scale = cell / f64::from(GRID_FLOOR_CONFIG.cell_size);
+    for (index, ((_, label), snapshot)) in TASTE_MOMENTS.iter().zip(&snapshots).enumerate() {
+        #[allow(clippy::cast_precision_loss)]
+        let left = margin + index as f64 * (size + gap);
+        svg.0.push_str("<g shape-rendering=\"crispEdges\">\n");
+        for (at, value) in snapshot.iter().enumerate() {
+            #[allow(clippy::cast_precision_loss)]
+            let (x, y) = (
+                left + (at % TASTE_WINDOW) as f64 * cell,
+                top + (at / TASTE_WINDOW) as f64 * cell,
+            );
+            svg.rect(x, y, cell, cell, &taste_colour(*value, reference));
+        }
+        svg.0.push_str("</g>\n");
+        // Every terrace step in the window: a wall the salt does not cross.
+        let mut path = String::new();
+        for (at, &here) in window.iter().enumerate() {
+            let (a, b) = (at % TASTE_WINDOW, at / TASTE_WINDOW);
+            #[allow(clippy::cast_precision_loss)]
+            let (x, y) = (left + a as f64 * cell, top + b as f64 * cell);
+            if a + 1 < TASTE_WINDOW && (levels[here] - levels[here + 1]).abs() > 1e-6 {
+                let _ = write!(path, "M{} {}V{}", n(x + cell), n(y), n(y + cell));
+            }
+            if b + 1 < TASTE_WINDOW && (levels[here] - levels[here + columns]).abs() > 1e-6 {
+                let _ = write!(path, "M{} {}H{}", n(x), n(y + cell), n(x + cell));
+            }
+        }
+        let _ = writeln!(
+            svg.0,
+            r#"<path d="{path}" fill="none" stroke="{CYAN}" stroke-width="1.5" stroke-opacity="0.8"/>"#
+        );
+        // Every orb in the window, where it lay: white while present, the chosen one a magenta
+        // ring once eaten.
+        for (id, orb) in orbs.iter().enumerate() {
+            let (px, py) = (
+                left + (f64::from(orb.centre[0]) - low[0]) * scale + 0.5 * cell,
+                top + (f64::from(orb.centre[2]) - low[1]) * scale + 0.5 * cell,
+            );
+            if !(left..left + size).contains(&px) || !(top..top + size).contains(&py) {
+                continue;
+            }
+            let eaten = id == chosen && second_of(index) > TASTE_EATEN;
+            let _ = writeln!(
+                svg.0,
+                r#"<circle cx="{}" cy="{}" r="{}" fill="{}" stroke="{MAGENTA}" stroke-width="1.5"/>"#,
+                n(px),
+                n(py),
+                n(f64::from(ORB_RADIUS) * scale * ORB_EXAGGERATION),
+                if eaten { "none" } else { "#ffffff" }
+            );
+        }
+        svg.text(left, top + size + 22.0, 14.0, TEXT, "start", label);
+        svg.text(
+            left,
+            top + size + 40.0,
+            12.0,
+            DIM,
+            "start",
+            &format!(
+                "under orb {chosen}: {}% of its 60-minute level",
+                n(100.0 * snapshot[own] / reference)
+            ),
+        );
+    }
+    svg.text(
+        margin,
+        height - 16.0,
+        12.0,
+        DIM,
+        "start",
+        "Orb drawn 4x its size. Leach 1 unit/s, fade 5e-4 /s: chosen world settings, not measured (solutes.rs).",
+    );
+    svg.finish()
+}
+
+/// The second a moment of the taste figure is drawn at.
+fn second_of(index: usize) -> u64 {
+    TASTE_MOMENTS[index].0
 }

@@ -13,7 +13,7 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
-//! `master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>] [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--config <file>]` - the world server of the Grid;
+//! `master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>] [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--config <file>] [--leach-rate <per s>] [--solute-fade <per s>]` - the world server of the Grid;
 //! `master-control clu <log> [<disk>]` - Clu, the re-simulation and the hash check.
 //!
 //! The command line keeps the flagship's ruled shape: where the world listens is the plain
@@ -102,7 +102,7 @@ fn clu_main(arguments: Vec<String>) -> std::process::ExitCode {
 use master_control::MASTER_SEED;
 
 /// The surface, said once for every refusal that names it.
-const SURFACE: &str = "[port], --verbose, --version, --disk <path>, --disk-roll <MiB>, --log <path>, --food-density <orbs per 100 m^2>, --reflection-attenuation <0..1>, --config <file>";
+const SURFACE: &str = "[port], --verbose, --version, --disk <path>, --disk-roll <MiB>, --log <path>, --food-density <orbs per 100 m^2>, --reflection-attenuation <0..1>, --config <file>, --leach-rate <per s>, --solute-fade <per s>";
 
 /// What the operator asked for, from the command line or from a config file: every setting
 /// unsaid until said, so the two can be laid over each other and the command line win.
@@ -115,6 +115,8 @@ struct Settings {
     log: Option<PathBuf>,
     food_density: Option<f32>,
     reflection_attenuation: Option<f32>,
+    leach_rate: Option<f64>,
+    solute_fade: Option<f64>,
     config: Option<PathBuf>,
     version: bool,
 }
@@ -131,6 +133,8 @@ impl Settings {
             log: self.log.or(file.log),
             food_density: self.food_density.or(file.food_density),
             reflection_attenuation: self.reflection_attenuation.or(file.reflection_attenuation),
+            leach_rate: self.leach_rate.or(file.leach_rate),
+            solute_fade: self.solute_fade.or(file.solute_fade),
             config: self.config,
             version: self.version,
         }
@@ -183,6 +187,16 @@ fn reflection_attenuation(word: Option<&str>) -> Result<f32, String> {
         .map_err(|words| format!("--reflection-attenuation: {words}."))
 }
 
+/// A rate of the floor's solutes, per second, zero or more: `--leach-rate`, what an orb leaches
+/// a second per unit of its taste profile, or `--solute-fade`, the first-order fade of what is
+/// dissolved (solutes.rs) - both chosen world settings.
+fn solute_rate(flag: &str, word: Option<&str>) -> Result<f64, String> {
+    let value = word
+        .and_then(|word| word.parse::<f64>().ok())
+        .ok_or_else(|| format!("{flag} needs a rate per second, zero or more."))?;
+    master_control::solutes::rate(&flag[2..], value).map_err(|words| format!("{flag}: {words}."))
+}
+
 /// The command line, judged word by word. `clu` is taken before this is asked.
 fn from_command_line(arguments: impl IntoIterator<Item = String>) -> Result<Settings, String> {
     let mut settings = Settings::default();
@@ -197,6 +211,12 @@ fn from_command_line(arguments: impl IntoIterator<Item = String>) -> Result<Sett
             "--food-density" => settings.food_density = Some(food_density(value().as_deref())?),
             "--reflection-attenuation" => {
                 settings.reflection_attenuation = Some(reflection_attenuation(value().as_deref())?);
+            }
+            "--leach-rate" => {
+                settings.leach_rate = Some(solute_rate("--leach-rate", value().as_deref())?);
+            }
+            "--solute-fade" => {
+                settings.solute_fade = Some(solute_rate("--solute-fade", value().as_deref())?);
             }
             "--config" => {
                 settings.config = Some(
@@ -275,9 +295,17 @@ fn from_config(text: &str) -> Result<Settings, String> {
             "reflection-attenuation" => {
                 settings.reflection_attenuation = Some(reflection_attenuation(word).map_err(at)?);
             }
+            "leach-rate" if settings.leach_rate.is_some() => return Err(said_twice()),
+            "leach-rate" => {
+                settings.leach_rate = Some(solute_rate("--leach-rate", word).map_err(at)?);
+            }
+            "solute-fade" if settings.solute_fade.is_some() => return Err(said_twice()),
+            "solute-fade" => {
+                settings.solute_fade = Some(solute_rate("--solute-fade", word).map_err(at)?);
+            }
             other => {
                 return Err(at(format!(
-                    "unknown key \"{other}\". A config sets the long flags without their dashes: verbose, disk, disk-roll, log, food-density, reflection-attenuation."
+                    "unknown key \"{other}\". A config sets the long flags without their dashes: verbose, disk, disk-roll, log, food-density, reflection-attenuation, leach-rate, solute-fade."
                 )));
             }
         }
@@ -355,6 +383,10 @@ fn main() -> std::process::ExitCode {
         reflection_attenuation: settings
             .reflection_attenuation
             .unwrap_or(defaults.reflection_attenuation),
+        solutes: master_control::solutes::SoluteSettings {
+            leach_rate: settings.leach_rate.unwrap_or(defaults.solutes.leach_rate),
+            fade_rate: settings.solute_fade.unwrap_or(defaults.solutes.fade_rate),
+        },
         ..defaults
     };
     let port = settings.port.unwrap_or(DEFAULT_PORT);
@@ -505,6 +537,44 @@ reflection-attenuation = 0.3
             "the file fills the rest"
         );
         assert_eq!(merged.disk_roll_mib, Some(16));
+    }
+
+    #[test]
+    fn the_floors_solute_rates_are_rates_and_refused_in_words_otherwise() {
+        let settings =
+            from_command_line(words("--leach-rate 2 --solute-fade 0.001")).expect("parses");
+        assert_eq!(settings.leach_rate, Some(2.0));
+        assert_eq!(settings.solute_fade, Some(0.001));
+        for (line, says) in [
+            ("--leach-rate", "--leach-rate needs a rate per second"),
+            (
+                "--solute-fade salty",
+                "--solute-fade needs a rate per second",
+            ),
+            ("--leach-rate -1", "zero or more"),
+            ("--solute-fade NaN", "zero or more"),
+            ("--solute-fade inf", "zero or more"),
+        ] {
+            let refusal = from_command_line(words(line)).expect_err(line);
+            assert!(refusal.contains(says), "{line}: {refusal}");
+        }
+        let file = from_config(
+            "leach-rate = 0.5
+solute-fade = 0
+",
+        )
+        .expect("a config sets them");
+        assert_eq!(file.leach_rate, Some(0.5));
+        assert_eq!(file.solute_fade, Some(0.0));
+        assert!(
+            from_config(
+                "solute-fade = 1
+solute-fade = 2
+"
+            )
+            .is_err(),
+            "said twice"
+        );
     }
 
     #[test]

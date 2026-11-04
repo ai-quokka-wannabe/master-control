@@ -71,6 +71,7 @@ pub mod roster;
 #[cfg(test)]
 mod scratch;
 pub mod script;
+pub mod solutes;
 pub mod stager;
 pub mod stop;
 pub mod trig;

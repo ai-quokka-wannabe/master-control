@@ -201,6 +201,9 @@ pub struct Roster {
     /// World state, but outside the state hash: odour never moves a body, and the field is a
     /// pure function of the food and the ticks its orbs were emptied on (odour.rs).
     odour: Option<crate::odour::Field>,
+    /// The floor's solutes the food leaches, stepped after the air every tick; none without
+    /// food. Outside the state hash, like the odour: nothing tastes them yet (solutes.rs).
+    solutes: Option<crate::solutes::Floor>,
     /// The run's master seed, for the senses' counting noise (the RNG-of-record rule).
     master_seed: u64,
 }
@@ -226,9 +229,26 @@ impl Roster {
     #[must_use]
     pub fn with_food(mut self, orbs: Vec<crate::food::Orb>, master_seed: u64) -> Roster {
         self.odour = (!orbs.is_empty()).then(|| crate::odour::Field::new(&orbs));
+        self.solutes = (!orbs.is_empty())
+            .then(|| crate::solutes::Floor::new(crate::solutes::SoluteSettings::default(), &orbs));
         self.food = orbs;
         self.master_seed = master_seed;
         self
+    }
+
+    /// The floor's solutes laid out again under the launch settings' leach rate and fade; call
+    /// it after [`Roster::with_food`], before the first tick.
+    #[must_use]
+    pub fn with_solutes(mut self, settings: crate::solutes::SoluteSettings) -> Roster {
+        self.solutes =
+            (!self.food.is_empty()).then(|| crate::solutes::Floor::new(settings, &self.food));
+        self
+    }
+
+    /// The floor's solutes, if the world has food.
+    #[must_use]
+    pub fn solutes(&self) -> Option<&crate::solutes::Floor> {
+        self.solutes.as_ref()
     }
 
     /// Every orb the world holds, gone ones included (their odour lingers).
@@ -491,6 +511,9 @@ impl Roster {
         // the noses below read this tick's field. An orb emptied last tick emits no more.
         if let Some(odour) = &mut self.odour {
             odour.step(&self.food);
+        }
+        if let Some(solutes) = &mut self.solutes {
+            solutes.step(&self.food);
         }
         for (id, resident) in &mut self.residents {
             let intent = sanitise_and_clamp(intent_for(*id), &resident.body.bounds);
@@ -1320,6 +1343,7 @@ mod tests {
             radius: crate::food::ORB_RADIUS,
             quantity: 2.0 * crate::food::BITE,
             pattern: [1.0; crate::odour::RECEPTOR_TYPES],
+            taste: [1.0; crate::solutes::COMPOUNDS],
             gone_tick: None,
         };
         let mut roster = roster.with_food(vec![orb], 0);
