@@ -1,6 +1,13 @@
 # TODO
 
-The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` and the
+The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` an
+
+**Done (2026-11-04), the air.** The flagship's ruling of the day (tron-grid-lite#186): Master Control owns the air.
+`src/air.rs` is a numerical diffusion field on a grid of 2 m columns over the floor cut at its terraces, risers
+as walls, open at its sides and top, stepped by Douglas-Gunn ADI (`theta = 1`) every tick in the roster's step,
+so the heartbeat and Clu step it alike; `odour.rs` emits each orb into it and reads the amphids from it. The
+closed form stays as the open-floor reference (within 8%). Outside the state hash; 1.47 ms a tick. Owed next: the
+organ declaration on the wire, then the smoke in the spectator window (the ruling's order).d the
 `grid` library) and the wire carries a tick (link protocol v3 then; v12 today). The blueprint is the flagship's
 [docs/TOPOLOGY.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/TOPOLOGY.md)
 — its § Master Control's mechanics and § One tick, across the wire sections carry every

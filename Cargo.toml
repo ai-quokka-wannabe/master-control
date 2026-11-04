@@ -25,6 +25,14 @@ unsafe_code = "deny"
 [lints.clippy]
 all = { level = "deny", priority = -1 }
 
+# The everyday build optimises a little: the world's air (src/air.rs) is some 1.5 ms of a tick in
+# release and about 45 ms unoptimised, longer than the 31.25 ms tick itself, so an unoptimised world
+# with food fell behind real time and its hosts' intents arrived stale. One level of optimisation
+# keeps it inside the tick; debug assertions and overflow checks stay on, and no optimisation level
+# changes a bit of the world's arithmetic (no fast-math, no contraction - IEEE basic operations).
+[profile.dev]
+opt-level = 1
+
 # Release, with the arithmetic still watched. A wrap that only happens at the speed of an
 # optimised build is exactly the shape of a replay divergence the debug test suite can never
 # reproduce, so the whole suite also runs under this profile: release codegen, overflow checks

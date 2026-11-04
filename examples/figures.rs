@@ -26,7 +26,7 @@
 use master_control::food::{self, DEFAULT_DENSITY, FoodSettings, ORB_RADIUS, Orb};
 use master_control::ground::GRID_FLOOR_CONFIG;
 use master_control::odour::{
-    BODY_LENGTH, DECAY_LENGTH, RECEPTOR_TYPES, bound_fraction, concentrations, orb_concentration,
+    BODY_LENGTH, DECAY_LENGTH, Field, RECEPTOR_TYPES, bound_fraction, open_air_reference,
 };
 use master_control::physics::{BODY_HALF_HEIGHT, CLIMB_LIMIT_METRES, TICK_SECONDS, floor};
 use master_control::roster::{SPAWN_PAD_X, SPAWN_PAD_Z};
@@ -40,15 +40,16 @@ const DENSITIES: [f32; 3] = [DEFAULT_DENSITY, 0.25, 0.43];
 /// The master seed the figures place food with: the server's default.
 const MASTER_SEED: u64 = 0;
 
-/// When a field counts as settled: ten minutes into the world, long after every orb's odour has
-/// reached across the floor (the loss alone settles it in some tens of seconds).
-const SETTLED_TICK: u64 = 32 * 600;
+/// When a field counts as settled: two minutes of ticks into the world, the field stepped by the
+/// world's own air (odour.rs) - the loss alone settles it in some tens of seconds, so what is left
+/// to settle is under a part in a hundred thousand.
+const SETTLED_TICK: u64 = 32 * 120;
 
 /// How much bigger than life the food map draws an orb: a quarter-metre ball is under a pixel.
 const ORB_EXAGGERATION: f64 = 4.0;
 
-/// Samples per side of the smell map: one every 4 m of floor, every second 2 m cell.
-const SMELL_SAMPLES: u32 = 32;
+/// Samples per side of the smell map: one in every 2 m cell of the air, so every riser shows.
+const SMELL_SAMPLES: u32 = 64;
 
 /// A reading at or above this is called saturated in the figures: the receptors are nine-tenths
 /// bound and the reading has a tenth of its range left to move in.
@@ -462,11 +463,11 @@ fn food_map(worlds: &[(f32, Vec<Orb>)]) -> String {
 
 /// What a nose at floor level reads of the field: the bound fraction of every receptor type,
 /// noise-free (the counting noise is a fraction of a percent at these strengths).
-fn readings_at(orbs: &[Orb], x: f64, z: f64, tick: u64) -> [f64; RECEPTOR_TYPES] {
+fn readings_at(field: &Field, x: f64, z: f64) -> [f64; RECEPTOR_TYPES] {
     #[allow(clippy::cast_possible_truncation)]
     let (x, z) = (x as f32, z as f32);
     let point = [x, floor(x, z) + BODY_HALF_HEIGHT, z];
-    concentrations(orbs, point, tick).map(|c| f64::from(bound_fraction(c)))
+    field.at(point).map(|c| f64::from(bound_fraction(c)))
 }
 
 /// The settled smell of one world, sampled over the floor: the mean reading over the receptor
@@ -479,6 +480,10 @@ struct SmellMap {
 
 impl SmellMap {
     fn of(orbs: &[Orb]) -> SmellMap {
+        let mut field = Field::new(orbs);
+        for _ in 0..SETTLED_TICK {
+            field.step(orbs);
+        }
         let (low, side) = floor_extent();
         let step = side / f64::from(SMELL_SAMPLES);
         let mut all = Vec::new();
@@ -488,7 +493,7 @@ impl SmellMap {
                     .map(|i| {
                         let x = low + (f64::from(i) + 0.5) * step;
                         let z = low + (f64::from(j) + 0.5) * step;
-                        let readings = readings_at(orbs, x, z, SETTLED_TICK);
+                        let readings = readings_at(&field, x, z);
                         all.extend(readings);
                         #[allow(clippy::cast_precision_loss)]
                         let mean = readings.iter().sum::<f64>() / RECEPTOR_TYPES as f64;
@@ -591,23 +596,54 @@ impl Plot {
     }
 }
 
-/// One whole orb, odour of the strongest type only, resting on a flat floor at the origin.
-fn lone_orb(gone_tick: Option<u64>) -> Orb {
+/// Where the lone orb rests: a column's centre in the middle of a flat floor of the world's size.
+const LONE_AT: f32 = 1.0;
+
+/// One whole orb, resting on a flat floor at [`LONE_AT`].
+fn lone_orb() -> Orb {
     Orb {
         id: 0,
-        centre: [0.0, ORB_RADIUS, 0.0],
+        centre: [LONE_AT, ORB_RADIUS, LONE_AT],
         radius: ORB_RADIUS,
-        quantity: if gone_tick.is_some() { 0.0 } else { 1.0 },
+        quantity: 1.0,
         pattern: [1.0; RECEPTOR_TYPES],
-        gone_tick,
+        gone_tick: None,
     }
 }
 
-/// The lone orb's reading at a horizontal distance, at nose height, at a tick.
-fn lone_reading(orb: &Orb, distance: f64, tick: u64) -> f64 {
+/// The world's floor with its relief flattened.
+fn flat_floor() -> master_control::ground::GridFloorConfig {
+    master_control::ground::GridFloorConfig {
+        relief_amplitude: 0.0,
+        ..GRID_FLOOR_CONFIG
+    }
+}
+
+/// A point at nose height a horizontal distance from the lone orb, along x.
+fn lone_point(distance: f64) -> [f32; 3] {
     #[allow(clippy::cast_possible_truncation)]
-    let point = [distance as f32, BODY_HALF_HEIGHT, 0.0];
-    f64::from(bound_fraction(orb_concentration(orb, point, tick)))
+    let x = (f64::from(LONE_AT) + distance) as f32;
+    [x, BODY_HALF_HEIGHT, LONE_AT]
+}
+
+/// The lone orb's reading at a horizontal distance, at nose height, in a field.
+fn lone_reading(field: &Field, distance: f64) -> f64 {
+    f64::from(bound_fraction(field.at(lone_point(distance))[0]))
+}
+
+/// The open-air closed form's reading at the same point: what the field is held against.
+fn closed_form_reading(distance: f64) -> f64 {
+    let centre = [
+        f64::from(LONE_AT),
+        f64::from(ORB_RADIUS),
+        f64::from(LONE_AT),
+    ];
+    let c = open_air_reference(
+        centre,
+        f64::from(ORB_RADIUS),
+        lone_point(distance).map(f64::from),
+    );
+    f64::from(bound_fraction(c))
 }
 
 /// Figure: smell against distance (settled) and against time after the orb is eaten.
@@ -688,14 +724,33 @@ fn smell(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
         );
         svg.text(x, left.top + left.height + 20.0, 12.0, DIM, "middle", label);
     }
-    let orb = lone_orb(None);
+    // The lone orb's odour in the world's air over a flat floor, stepped tick by tick to settled.
+    let mut orbs = [lone_orb()];
+    let mut field = Field::over(&flat_floor(), &orbs, f64::from(TICK_SECONDS));
+    for _ in 0..SETTLED_TICK {
+        field.step(&orbs);
+    }
+    let settled = field.clone();
+    // Beyond the floor there is no field to read; the closed form's line stops there too.
+    let on_floor = |r: f64| r <= 60.0;
     let curve: Vec<(f64, f64)> = distances
         .iter()
         .enumerate()
+        .filter(|(_, r)| on_floor(**r))
         .map(|(k, &r)| {
             #[allow(clippy::cast_precision_loss)]
             let k = k as f64;
-            (k, lone_reading(&orb, r, SETTLED_TICK))
+            (k, lone_reading(&settled, r))
+        })
+        .collect();
+    let reference: Vec<(f64, f64)> = distances
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| on_floor(**r))
+        .map(|(k, &r)| {
+            #[allow(clippy::cast_precision_loss)]
+            let k = k as f64;
+            (k, closed_form_reading(r))
         })
         .collect();
     // Half-saturation: c = K, reached by one whole orb at a decay length.
@@ -722,7 +777,7 @@ fn smell(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
     ] {
         let x = left.x(k_of(r));
         svg.line((x, left.top), (x, left.top + left.height), DIM, 1.0, "2 4");
-        let reading = lone_reading(&orb, r, SETTLED_TICK);
+        let reading = lone_reading(&settled, r);
         svg.text(
             x + 4.0,
             left.top + left.height - 8.0,
@@ -793,7 +848,24 @@ fn smell(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
         "start",
         "every orb of the world summed",
     );
+    left.polyline(&mut svg, &reference, DIM, 1.5);
     left.polyline(&mut svg, &curve, CYAN, 2.5);
+    svg.text(
+        left.left + left.width - 6.0,
+        left.top + 16.0,
+        11.0,
+        CYAN,
+        "end",
+        "the air on its 2 m grid (cyan)",
+    );
+    svg.text(
+        left.left + left.width - 6.0,
+        left.top + 30.0,
+        11.0,
+        DIM,
+        "end",
+        "the open-air closed form (grey)",
+    );
 
     // Right: against time, an orb eaten at t = 0 after the field had settled.
     let right = Plot {
@@ -848,18 +920,34 @@ fn smell(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
     );
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let per_second = (1.0 / TICK_SECONDS).round() as u64;
-    let gone = SETTLED_TICK;
-    let eaten = lone_orb(Some(gone));
-    for (lengths, colour) in [(1.0, CYAN), (3.0, ORANGE), (10.0, MAGENTA)] {
-        let r = lengths * BODY_LENGTH;
-        let mut points = Vec::new();
-        for tick in (gone - 5 * per_second..=gone + 30 * per_second).step_by(2) {
-            #[allow(clippy::cast_precision_loss)]
-            let t = (tick as f64 - gone as f64) / per_second as f64;
-            points.push((t, lone_reading(&eaten, r, tick)));
+    // Five seconds more of the settled field, then the orb is eaten and the air runs on.
+    let lengths_drawn = [1.0, 3.0, 10.0];
+    let mut traces: Vec<Vec<(f64, f64)>> = vec![Vec::new(); lengths_drawn.len()];
+    let (before, after) = (5 * per_second, 30 * per_second);
+    for tick in 0..=before + after {
+        if tick == before {
+            orbs[0].quantity = 0.0;
+            orbs[0].gone_tick = Some(SETTLED_TICK + tick);
         }
+        if tick > 0 {
+            field.step(&orbs);
+        }
+        if tick % 2 == 0 {
+            #[allow(clippy::cast_precision_loss)]
+            let t = (tick as f64 - before as f64) / per_second as f64;
+            for (trace, lengths) in traces.iter_mut().zip(lengths_drawn) {
+                trace.push((t, lone_reading(&field, lengths * BODY_LENGTH)));
+            }
+        }
+    }
+    for ((lengths, colour), points) in lengths_drawn
+        .into_iter()
+        .zip([CYAN, ORANGE, MAGENTA])
+        .zip(&traces)
+    {
+        let r = lengths * BODY_LENGTH;
         let start = points[0].1;
-        right.polyline(&mut svg, &points, colour, 2.2);
+        right.polyline(&mut svg, points, colour, 2.2);
         svg.text(
             right.x(-4.6),
             right.y(start) - 6.0,
@@ -884,8 +972,8 @@ fn smell(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
         "start",
         &format!(
             "Alone, one orb reads {} at a body length and {} at a decay length: a gradient a body can climb.",
-            n(lone_reading(&orb, BODY_LENGTH, SETTLED_TICK)),
-            n(lone_reading(&orb, DECAY_LENGTH, SETTLED_TICK))
+            n(lone_reading(&settled, BODY_LENGTH)),
+            n(lone_reading(&settled, DECAY_LENGTH))
         ),
     );
     svg.text(
@@ -932,7 +1020,7 @@ fn smell_map(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
         width,
         height,
         "Smell over the whole floor",
-        "The settled mean receptor reading over the floor at three food densities, from odour.rs: \
+        "The settled mean receptor reading over the floor at three food densities, from the world's air on its grid (odour.rs, air.rs), risers as walls: \
          white is saturated (0.9 or more), where an orb's own gradient has almost no range left.",
     );
     svg.text(
