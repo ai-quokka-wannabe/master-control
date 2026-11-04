@@ -48,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The world owns its reflection attenuation (protocol v13).** One number, the fraction of radiance and acoustic
+  energy a surface - the Grid's or a body's - returns at each bounce, so a creature can tell a wall from open space
+  (tron-grid-lite#177, ruled in its `docs/TOPOLOGY.md`). `--reflection-attenuation` and the config key
+  `reflection-attenuation` set it (0.9 by default, refused unless finite and in [0, 1]); `WELCOME` tells every
+  client, the Disk's header carries it for a replay, and the input log's header records it as a `reflection` line
+  Clu reads back. The physics never reads it. `external/link` moves to v13 and the mirror to client ABI 11; the
+  chain golden is re-recorded at protocol 13: 1,730 ticks, 54 hashes, every intent on its tick.
+
 - **Claude skills, shared across the org.** `.claude/skills/` gains live-world, windows-build and org-pr-flow - how to run, drive and stop a
   live world, how to build and check on the Windows desk, and the way from a change to a PR - each mirrored verbatim
   in every repo that uses it and improved every time it is used, so no session reinvents them.
