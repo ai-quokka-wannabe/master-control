@@ -76,6 +76,9 @@ pub struct Config {
     /// The fraction of radiance and acoustic energy a surface returns per bounce: told to every
     /// client in `WELCOME`, recorded in the Disk's header and the input log's.
     pub reflection_attenuation: f32,
+    /// The floor's solutes' leach rate and fade (solutes.rs): world settings, outside the state
+    /// hash and not in the logs yet, because nothing tastes the floor.
+    pub solutes: crate::solutes::SoluteSettings,
     /// The floor's thermal map and the pillars' heat: the world's temperature field (heat.rs).
     /// Not yet in the input log's header - nothing reads the field yet, so Clu has nothing of
     /// it to re-simulate (TODO.md).
@@ -97,6 +100,7 @@ impl Default for Config {
             hash_every: 32,
             food: crate::food::FoodSettings::new(crate::food::DEFAULT_DENSITY, crate::MASTER_SEED),
             reflection_attenuation: crate::DEFAULT_REFLECTION_ATTENUATION,
+            solutes: crate::solutes::SoluteSettings::default(),
             heat: crate::heat::HeatSettings::default(),
         }
     }
@@ -211,7 +215,8 @@ impl Heartbeat {
         ));
         let roster = Roster::with_the_guest()
             .with_food(orbs, crate::MASTER_SEED)
-            .with_heat(&config.heat);
+            .with_heat(&config.heat)
+            .with_solutes(config.solutes);
         let disk = match &config.disk {
             Some(path) => {
                 if let Some(stale) = Disk::stale_roll(path) {

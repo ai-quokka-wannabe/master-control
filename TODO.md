@@ -494,6 +494,20 @@ so the heartbeat and Clu step it alike; `odour.rs` emits each orb into it and re
 closed form stays as the open-floor reference (within 8%). Outside the state hash; 1.47 ms a tick. Owed next: the
 organ declaration on the wire, then the smoke in the spectator window (the ruling's order).
 
+**Done (2026-11-04), the floor's solutes.** The world's half of taste (CHEMORECEPTION.md "Taste (ruled
+2026-11-04)"): every orb carries a taste profile over sugar, salt, acid and bitter, drawn from its own stream of
+the food's seed (`food::taste_seed`), so no earlier draw moved and the chain golden replays unchanged.
+`src/solutes.rs` is a 2D field on the floor's 2 m cells, Douglas-Rachford ADI, risers as walls, the floor's
+edge sealed, stepped after the air in the roster's step; outside the state hash; 0.15 ms a tick. Free-water
+diffusivities read (sucrose, acetic acid; salt by Nernst-Hartley from read conductances), bitter assumed
+(tryptophan's), all scaled by the air's `LENGTH_SCALE` squared. Owed:
+
+- **Taste organs**, declared with the body in the organs bump: an organ reads `Floor::at` under it, or the orb
+  it is inside. Then the leach rate and fade go into the input log's header (Clu re-steps the field with the
+  defaults today, harmless while nothing reads it).
+- **Caffeine's own diffusivity** (Price, Trickett and Harris 1989), to replace the bitter assumption; and Rard
+  and Miller 1979 for salt, read at the primary.
+
 **Done (2026-11-04), heat: the temperature field** - step 2 of the flagship's
 [docs/THERMORECEPTION.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/THERMORECEPTION.md)
 § The build, in order. `src/heat.rs` is the excess over the ambient in an air of its own over the same grid

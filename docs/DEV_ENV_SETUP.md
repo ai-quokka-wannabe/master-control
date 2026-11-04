@@ -150,6 +150,7 @@ master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>
                [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--ambient <°C>]
                [--floor-gradient <°C per cm>] [--floor-gradient-direction <degrees>] [--pillar-heat <K>]
                [--config <file>]
+               [--leach-rate <per s>] [--solute-fade <per s>]
 master-control clu <log> [<disk>]
 ```
 

@@ -104,7 +104,9 @@ sacred 32 Hz:
 - **Food and smell** — glowing orbs placed at world start by the RNG of record (`src/food.rs`), eaten a
   bite per pharynx pump, and an odour field simulated in the Grid's air - a grid of 2 m cells over the floor,
   its risers walls odour does not pass (`src/air.rs`, `src/odour.rs`) - that each creature's two amphids read
-  as a fraction of receptors bound. See
+  as a fraction of receptors bound. Each orb also has a taste - a profile over sugar, salt, acid and bitter -
+  that it leaches into the floor beneath it, where it diffuses within its terrace and lingers after the orb
+  is eaten (`src/solutes.rs`); nothing tastes it yet. See
   [Food and Smell, Drawn](#food-and-smell-drawn) below.
 - **Heat** — the temperature of the Grid's air, in the same grid as the odour (`src/heat.rs`): the floor holds
   its thermal map (20 °C by default, the worm's cultivation temperature, and optionally the thermotaxis assay's
@@ -119,6 +121,7 @@ sacred 32 Hz:
 master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
   [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--ambient <°C>]
   [--floor-gradient <°C per cm>] [--floor-gradient-direction <degrees>] [--pillar-heat <K>] [--config <file>]
+  [--leach-rate <per s>] [--solute-fade <per s>]
 ```
 
 Then, from a tron-grid-lite build: `TronGridLite --window` to watch, or `TronGridLite --program
@@ -155,6 +158,16 @@ Every riser is a wall, so odour reaches a terrace from below only over its edge:
 steps an orb's odour reads 0.64 of the open side's (`odour.rs`'s `a_tall_riser_casts_an_odour_shadow`).
 
 ![Three maps of the floor coloured by the settled mean receptor reading at densities 0.1, 0.25 and 0.43, one sample per 2 m cell: each orb a peak, the field following the terraces](docs/figures/smell-map.svg)
+
+Taste is slower, and stays on the floor. Every orb leaches its taste profile into the floor's 2 m cell under
+it, the air's own columns, and each compound diffuses in the floor at its measured free-water rate, scaled to
+the Grid by the same factor as the odour (sucrose, sodium chloride and acetic acid read in a handbook table;
+the bitter one an assumption, labelled as such in `solutes.rs`). Salt spreads about 2.8 m in a minute, so
+food is ringed, not plumed. A riser is a wall in the floor too, and an eaten orb's taste fades: ten minutes
+after the last bite its cell holds 27% of what it held. The leach rate and the fade are chosen world settings,
+`--leach-rate` and `--solute-fade`, not measured ones.
+
+![Four panels of a 42 m window of the floor around one orb, coloured by the salt in each 2 m cell on three decades: after 1, 10 and 60 minutes of leaching the salt spreads within the orb's terrace and stops at every riser, drawn in cyan; ten minutes after the orb is eaten its cell holds 27% of its 60-minute level](docs/figures/taste.svg)
 
 ## Heat, Drawn
 

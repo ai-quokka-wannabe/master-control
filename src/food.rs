@@ -33,6 +33,7 @@ use crate::chain::Frame;
 use crate::ground::GRID_FLOOR_CONFIG;
 use crate::odour::RECEPTOR_TYPES;
 use crate::physics::{BODY_HALF_LENGTH, Body, CLIMB_LIMIT_METRES, SplitMix64, floor, food_seed};
+use crate::solutes::COMPOUNDS;
 
 /// An orb's radius, metres: the design's quarter metre, a little under half the worm's segment.
 pub const ORB_RADIUS: f32 = 0.25;
@@ -93,6 +94,15 @@ impl FoodSettings {
     }
 }
 
+/// The taste's own substream of the food's seed: its tag in the top nibble, so the profiles are
+/// a different stream from the food's own draws and from every creature's (physics.rs's
+/// `creature_seed` stays under two to the fifty-seven). Drawn after placement, one profile per
+/// orb in id order, so where an orb lies and what it smells of are the draws they always were.
+#[must_use]
+pub fn taste_seed(food_seed: u64) -> u64 {
+    food_seed ^ 0x7A57_E000_0000_0000
+}
+
 /// One orb of food, as the world holds it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Orb {
@@ -105,6 +115,10 @@ pub struct Orb {
     pub quantity: f32,
     /// Its odour: a non-negative weight per receptor type, the strongest exactly one (odour.rs).
     pub pattern: [f32; RECEPTOR_TYPES],
+    /// Its taste: a non-negative weight per water-soluble compound type, the strongest exactly
+    /// one, what it leaches into the floor (solutes.rs) - drawn from its own stream
+    /// ([`taste_seed`]), so it says nothing of the odour.
+    pub taste: [f32; COMPOUNDS],
     /// The tick its last bite was taken, once it is gone: its odour fades from then (odour.rs).
     pub gone_tick: Option<u64>,
 }
@@ -296,8 +310,9 @@ pub fn orb_count(density: f32) -> Result<usize, String> {
 
 /// Every orb at world start: [`orb_count`] of them, each drawn uniformly over the floor until it
 /// lands on open floor clear of every orb already placed (centres a diameter apart, so no two
-/// touch), resting on the floor, whole, with its odour drawn after its place. A pure function of
-/// the settings: the same settings place the same food, bit for bit.
+/// touch), resting on the floor, whole, with its odour drawn after its place; then every orb's
+/// taste, in id order, from [`taste_seed`]. A pure function of the settings: the same settings
+/// place the same food, bit for bit.
 pub fn place(settings: &FoodSettings) -> Result<Vec<Orb>, String> {
     let count = orb_count(settings.density)?;
     let mut draws = SplitMix64(settings.seed);
@@ -332,8 +347,13 @@ pub fn place(settings: &FoodSettings) -> Result<Vec<Orb>, String> {
             radius: ORB_RADIUS,
             quantity: 1.0,
             pattern,
+            taste: [0.0; COMPOUNDS],
             gone_tick: None,
         });
+    }
+    let mut tastes = SplitMix64(taste_seed(settings.seed));
+    for orb in &mut orbs {
+        orb.taste = crate::solutes::draw_profile(&mut tastes);
     }
     Ok(orbs)
 }
@@ -553,6 +573,51 @@ mod tests {
     }
 
     #[test]
+    fn every_orb_has_a_taste_from_its_own_stream_and_it_says_nothing_of_its_odour() {
+        // The profiles are the taste stream's draws in id order, non-negative, the strongest one.
+        let settings = FoodSettings::new(0.43, 0);
+        let orbs = place(&settings).expect("places");
+        let mut tastes = SplitMix64(taste_seed(settings.seed));
+        for orb in &orbs {
+            assert_eq!(orb.taste, crate::solutes::draw_profile(&mut tastes));
+            assert!(orb.taste.iter().all(|w| (0.0..=1.0).contains(w)));
+            assert!(orb.taste.contains(&1.0), "the strongest is one");
+        }
+        // Its own stream: the taste tag keeps it apart from the food's and every creature's.
+        assert_ne!(taste_seed(food_seed(0)), food_seed(0));
+        for creature in 0..4096u64 {
+            assert_ne!(taste_seed(food_seed(0)), creature_seed(0, creature));
+        }
+        // Independent of the odour: over many worlds' orbs, no compound's weight follows any
+        // receptor type's - every correlation is near zero.
+        let mut pairs: Vec<([f32; RECEPTOR_TYPES], [f32; crate::solutes::COMPOUNDS])> = Vec::new();
+        for master in 0..16u64 {
+            for orb in place(&FoodSettings::new(0.43, master)).expect("places") {
+                pairs.push((orb.pattern, orb.taste));
+            }
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let count = pairs.len() as f64;
+        for r in 0..RECEPTOR_TYPES {
+            for c in 0..crate::solutes::COMPOUNDS {
+                let (x, y): (Vec<f64>, Vec<f64>) = pairs
+                    .iter()
+                    .map(|(p, t)| (f64::from(p[r]), f64::from(t[c])))
+                    .unzip();
+                let mean = |v: &[f64]| v.iter().sum::<f64>() / count;
+                let (mx, my) = (mean(&x), mean(&y));
+                let cov: f64 = x.iter().zip(&y).map(|(a, b)| (a - mx) * (b - my)).sum();
+                let var = |v: &[f64], m: f64| v.iter().map(|a| (a - m) * (a - m)).sum::<f64>();
+                let correlation = cov / (var(&x, mx) * var(&y, my)).sqrt();
+                assert!(
+                    correlation.abs() < 0.15,
+                    "receptor {r} and compound {c}: {correlation} over {count} orbs"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_density_the_wire_cannot_carry_is_refused_in_words() {
         let too_many = orb_count(100.0).expect_err("thousands of orbs");
         assert!(too_many.contains("at most 64"), "{too_many}");
@@ -570,6 +635,7 @@ mod tests {
             radius: ORB_RADIUS,
             quantity: 1.0,
             pattern: [1.0; RECEPTOR_TYPES],
+            taste: [1.0; COMPOUNDS],
             gone_tick: None,
         }
     }

@@ -55,6 +55,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The floor's solutes: food has a taste, the floor carries it.** The world's half of the flagship's ruling on
+  taste (CHEMORECEPTION.md "Taste (ruled 2026-11-04)"); no sense reads it yet. Every orb carries a taste profile
+  over sugar, salt, acid and bitter, drawn from its own stream of the food's seed (`food::taste_seed`), so no
+  earlier draw moved and the chain golden replays unchanged, and taste says nothing of odour. `src/solutes.rs`
+  is a 2D field on the floor's 2 m cells, the air's columns: each present orb leaches its profile into the cell
+  under it, each compound diffuses within its terrace (a riser is a wall, the floor's edge sealed) by
+  Douglas-Rachford ADI, and fades; an eaten orb's trace lingers and fades. Diffusivities in free water at
+  25 degrees C, read: sucrose 0.5228e-9 and acetic acid 1.21e-9 m^2/s (Cussler 1997, Snell 1965, via the Case
+  Western transport table), salt 1.611e-9 by Nernst-Hartley from the same document's ionic conductances; bitter
+  0.659e-9 assumed, not measured (tryptophan's, standing in for caffeine). All scaled by the air's
+  `LENGTH_SCALE` squared: salt spreads 2.8 m in a minute. `--leach-rate` and `--solute-fade` (config keys
+  `leach-rate`, `solute-fade`; defaults 1 unit/s and 5e-4 /s) are chosen world settings. Outside the state
+  hash; 0.15 ms a tick. A new figure, `docs/figures/taste.svg`, shows the rings.
+
 - **Heat: the temperature field.** Step 2 of the flagship's `docs/THERMORECEPTION.md` (ruled 2026-11-04): the
   temperature is a second tenant of the Grid's air (`src/heat.rs`), by the same solver with the risers as walls -
   `Air` is now generic over its channels and takes a `Medium` (diffusivity, loss, the open edges' decay length, a

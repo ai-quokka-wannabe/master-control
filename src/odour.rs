@@ -645,6 +645,7 @@ mod tests {
             radius: ORB_RADIUS,
             quantity: 1.0,
             pattern,
+            taste: [1.0; crate::solutes::COMPOUNDS],
             gone_tick: None,
         }
     }
