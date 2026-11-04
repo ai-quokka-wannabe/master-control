@@ -69,6 +69,11 @@ pub struct Config {
     pub input_log: Option<std::path::PathBuf>,
     /// Ticks between hashes in the input log: 32 is once a second.
     pub hash_every: u32,
+    /// The run's master seed (`--seed`, zero by default): the root of every seeded draw - the
+    /// smell's counting noise here, the food's placement and taste through [`Config::food`]'s
+    /// seed, which the caller derives from it ([`crate::food::FoodSettings::new`]). In the input
+    /// log's header, so Clu draws the same.
+    pub master_seed: u64,
     /// How much food the world holds and which: written into the input log's header so Clu
     /// re-places the same orbs. Placed at world start, eaten by the mouths, told in every
     /// TICK_STATE.
@@ -77,12 +82,25 @@ pub struct Config {
     /// client in `WELCOME`, recorded in the Disk's header and the input log's.
     pub reflection_attenuation: f32,
     /// The floor's solutes' leach rate and fade (solutes.rs): world settings, outside the state
-    /// hash and not in the logs yet, because nothing tastes the floor.
+    /// hash, in the input log's header so Clu lays the same floor.
     pub solutes: crate::solutes::SoluteSettings,
-    /// The floor's thermal map and the pillars' heat: the world's temperature field (heat.rs).
-    /// Not yet in the input log's header - nothing reads the field yet, so Clu has nothing of
-    /// it to re-simulate (TODO.md).
+    /// The floor's thermal map and the pillars' heat: the world's temperature field (heat.rs),
+    /// in the input log's header so Clu warms the same air.
     pub heat: crate::heat::HeatSettings,
+}
+
+impl Config {
+    /// The settings the world opens with, as the input log's header carries them.
+    #[must_use]
+    pub fn launch(&self) -> crate::record::Launch {
+        crate::record::Launch {
+            master_seed: self.master_seed,
+            food: self.food,
+            reflection_attenuation: self.reflection_attenuation,
+            heat: self.heat,
+            solutes: self.solutes,
+        }
+    }
 }
 
 impl Default for Config {
@@ -98,7 +116,11 @@ impl Default for Config {
             disk_roll_bytes: 48 * 1024 * 1024,
             input_log: None,
             hash_every: 32,
-            food: crate::food::FoodSettings::new(crate::food::DEFAULT_DENSITY, crate::MASTER_SEED),
+            master_seed: crate::DEFAULT_MASTER_SEED,
+            food: crate::food::FoodSettings::new(
+                crate::food::DEFAULT_DENSITY,
+                crate::DEFAULT_MASTER_SEED,
+            ),
             reflection_attenuation: crate::DEFAULT_REFLECTION_ATTENUATION,
             solutes: crate::solutes::SoluteSettings::default(),
             heat: crate::heat::HeatSettings::default(),
@@ -205,18 +227,17 @@ impl Heartbeat {
 
         // The Disk opens with the world's own facts, as a WELCOME would state them; the roster
         // as it opens - the guest - is told to it first, exactly as to a late joiner.
-        // The food, placed once from the launch settings, and the smell's noise seeded from the
-        // same master seed (`crate::MASTER_SEED`: zero until Master Control draws one).
-        let orbs = crate::food::place(&config.food)?;
+        // The world opens from its launch settings - the food placed once, the smell's noise
+        // seeded from the master seed, the air warmed, the floor laid - as Clu opens it again
+        // from the input log's header.
+        let launch = config.launch();
+        let roster = launch.roster()?;
         log_info(&format!(
-            "the world holds {} orbs of food (density {} per 100 m^2).",
-            orbs.len(),
-            config.food.density
+            "the world holds {} orbs of food (density {} per 100 m^2, master seed {}).",
+            roster.food().len(),
+            config.food.density,
+            config.master_seed
         ));
-        let roster = Roster::with_the_guest()
-            .with_food(orbs, crate::MASTER_SEED)
-            .with_heat(&config.heat)
-            .with_solutes(config.solutes);
         let disk = match &config.disk {
             Some(path) => {
                 if let Some(stale) = Disk::stale_roll(path) {
@@ -263,8 +284,7 @@ impl Heartbeat {
                         path.display()
                     )
                 })?;
-                log.food(&config.food);
-                log.reflection(config.reflection_attenuation);
+                log.launch(&launch);
                 log_info(&format!("logging every intent to {}.", path.display()));
                 Some(log)
             }

@@ -13,7 +13,7 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
-//! `master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>] [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--ambient <°C>] [--floor-gradient <°C per cm>] [--floor-gradient-direction <degrees>] [--pillar-heat <K>] [--config <file>] [--leach-rate <per s>] [--solute-fade <per s>]` - the world server of the Grid;
+//! `master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>] [--food-density <orbs per 100 m^2>] [--seed <u64>] [--reflection-attenuation <0..1>] [--ambient <°C>] [--floor-gradient <°C per cm>] [--floor-gradient-direction <degrees>] [--pillar-heat <K>] [--config <file>] [--leach-rate <per s>] [--solute-fade <per s>]` - the world server of the Grid;
 //! `master-control clu <log> [<disk>]` - Clu, the re-simulation and the hash check.
 //!
 //! The command line keeps the flagship's ruled shape: where the world listens is the plain
@@ -24,6 +24,11 @@
 //! flags without their dashes (`food-density = 0.2`, `log = world.log`, `verbose = true`), `#`
 //! comments; every long flag but `--version` and `--config` may be written there (the port stays
 //! the one positional argument), and a flag on the command line wins.
+//!
+//! `--seed` is the run's master seed, a whole number from 0 to 2^64 - 1 (0 by default, so a world
+//! launched without one is the world every earlier life met): the root of every seeded draw - the
+//! food's placement and taste, the smell's counting noise. The input log's header carries it with
+//! every other launch setting, and Clu builds the world that ran from them.
 //!
 //! The world's temperature (heat.rs) takes four: `--ambient` in degrees Celsius (20 by default,
 //! the worm's standard cultivation temperature), `--floor-gradient` in degrees Celsius per
@@ -105,11 +110,11 @@ fn clu_main(arguments: Vec<String>) -> std::process::ExitCode {
     }
 }
 
-/// The run's master seed: the crate's one constant ([`master_control::MASTER_SEED`]).
-use master_control::MASTER_SEED;
+/// The run's master seed unless `--seed` says another ([`master_control::DEFAULT_MASTER_SEED`]).
+use master_control::DEFAULT_MASTER_SEED;
 
 /// The surface, said once for every refusal that names it.
-const SURFACE: &str = "[port], --verbose, --version, --disk <path>, --disk-roll <MiB>, --log <path>, --food-density <orbs per 100 m^2>, --reflection-attenuation <0..1>, --ambient <°C>, --floor-gradient <°C per cm>, --floor-gradient-direction <degrees>, --pillar-heat <K>, --config <file>, --leach-rate <per s>, --solute-fade <per s>";
+const SURFACE: &str = "[port], --verbose, --version, --disk <path>, --disk-roll <MiB>, --log <path>, --food-density <orbs per 100 m^2>, --seed <u64>, --reflection-attenuation <0..1>, --ambient <°C>, --floor-gradient <°C per cm>, --floor-gradient-direction <degrees>, --pillar-heat <K>, --config <file>, --leach-rate <per s>, --solute-fade <per s>";
 
 /// What the operator asked for, from the command line or from a config file: every setting
 /// unsaid until said, so the two can be laid over each other and the command line win.
@@ -121,6 +126,7 @@ struct Settings {
     disk_roll_mib: Option<u64>,
     log: Option<PathBuf>,
     food_density: Option<f32>,
+    seed: Option<u64>,
     reflection_attenuation: Option<f32>,
     leach_rate: Option<f64>,
     solute_fade: Option<f64>,
@@ -143,6 +149,7 @@ impl Settings {
             disk_roll_mib: self.disk_roll_mib.or(file.disk_roll_mib),
             log: self.log.or(file.log),
             food_density: self.food_density.or(file.food_density),
+            seed: self.seed.or(file.seed),
             reflection_attenuation: self.reflection_attenuation.or(file.reflection_attenuation),
             leach_rate: self.leach_rate.or(file.leach_rate),
             solute_fade: self.solute_fade.or(file.solute_fade),
@@ -189,6 +196,13 @@ fn food_density(word: Option<&str>) -> Result<f32, String> {
     master_control::food::orb_count(density)
         .map_err(|words| format!("--food-density: {words}."))?;
     Ok(density)
+}
+
+/// A master seed: a whole number from 0 to 2^64 - 1.
+fn seed(word: Option<&str>) -> Result<u64, String> {
+    word.and_then(|word| word.parse::<u64>().ok()).ok_or_else(|| {
+        "--seed needs the run's master seed, a whole number from 0 to 18446744073709551615 (0 by default).".to_string()
+    })
 }
 
 /// One of the world's temperature settings: a number, judged by heat.rs, or the words why not -
@@ -276,6 +290,7 @@ fn from_command_line(arguments: impl IntoIterator<Item = String>) -> Result<Sett
             "--disk-roll" => settings.disk_roll_mib = Some(disk_roll(value().as_deref())?),
             "--log" => settings.log = Some(log_path(value().as_deref())?),
             "--food-density" => settings.food_density = Some(food_density(value().as_deref())?),
+            "--seed" => settings.seed = Some(seed(value().as_deref())?),
             "--reflection-attenuation" => {
                 settings.reflection_attenuation = Some(reflection_attenuation(value().as_deref())?);
             }
@@ -365,6 +380,8 @@ fn from_config(text: &str) -> Result<Settings, String> {
             "log" => settings.log = Some(log_path(word).map_err(at)?),
             "food-density" if settings.food_density.is_some() => return Err(said_twice()),
             "food-density" => settings.food_density = Some(food_density(word).map_err(at)?),
+            "seed" if settings.seed.is_some() => return Err(said_twice()),
+            "seed" => settings.seed = Some(seed(word).map_err(at)?),
             "reflection-attenuation" if settings.reflection_attenuation.is_some() => {
                 return Err(said_twice());
             }
@@ -394,12 +411,50 @@ fn from_config(text: &str) -> Result<Settings, String> {
             }
             other => {
                 return Err(at(format!(
-                    "unknown key \"{other}\". A config sets the long flags without their dashes: verbose, disk, disk-roll, log, food-density, reflection-attenuation, ambient, floor-gradient, floor-gradient-direction, pillar-heat, leach-rate, solute-fade."
+                    "unknown key \"{other}\". A config sets the long flags without their dashes: verbose, disk, disk-roll, log, food-density, seed, reflection-attenuation, ambient, floor-gradient, floor-gradient-direction, pillar-heat, leach-rate, solute-fade."
                 )));
             }
         }
     }
     Ok(settings)
+}
+
+/// The world's configuration from what the operator asked for: every unsaid setting its
+/// default, the food's seed the master seed's food stream.
+fn world_config(settings: Settings) -> Config {
+    let defaults = Config::default();
+    let master_seed = settings.seed.unwrap_or(DEFAULT_MASTER_SEED);
+    Config {
+        verbose: settings.verbose.unwrap_or(defaults.verbose),
+        disk: settings.disk,
+        disk_roll_bytes: settings
+            .disk_roll_mib
+            .map_or(defaults.disk_roll_bytes, |mebibytes| {
+                mebibytes.saturating_mul(1024 * 1024)
+            }),
+        input_log: settings.log,
+        food: FoodSettings::new(
+            settings.food_density.unwrap_or(DEFAULT_DENSITY),
+            master_seed,
+        ),
+        master_seed,
+        reflection_attenuation: settings
+            .reflection_attenuation
+            .unwrap_or(defaults.reflection_attenuation),
+        heat: master_control::heat::HeatSettings {
+            ambient_celsius: settings.ambient.unwrap_or(defaults.heat.ambient_celsius),
+            gradient: settings.floor_gradient.unwrap_or(defaults.heat.gradient),
+            gradient_direction_degrees: settings
+                .floor_gradient_direction
+                .unwrap_or(defaults.heat.gradient_direction_degrees),
+            pillar_excess: settings.pillar_heat.unwrap_or(defaults.heat.pillar_excess),
+        },
+        solutes: master_control::solutes::SoluteSettings {
+            leach_rate: settings.leach_rate.unwrap_or(defaults.solutes.leach_rate),
+            fade_rate: settings.solute_fade.unwrap_or(defaults.solutes.fade_rate),
+        },
+        ..defaults
+    }
 }
 
 fn main() -> std::process::ExitCode {
@@ -455,38 +510,8 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
-    let defaults = Config::default();
-    let config = Config {
-        verbose: settings.verbose.unwrap_or(defaults.verbose),
-        disk: settings.disk,
-        disk_roll_bytes: settings
-            .disk_roll_mib
-            .map_or(defaults.disk_roll_bytes, |mebibytes| {
-                mebibytes.saturating_mul(1024 * 1024)
-            }),
-        input_log: settings.log,
-        food: FoodSettings::new(
-            settings.food_density.unwrap_or(DEFAULT_DENSITY),
-            MASTER_SEED,
-        ),
-        reflection_attenuation: settings
-            .reflection_attenuation
-            .unwrap_or(defaults.reflection_attenuation),
-        heat: master_control::heat::HeatSettings {
-            ambient_celsius: settings.ambient.unwrap_or(defaults.heat.ambient_celsius),
-            gradient: settings.floor_gradient.unwrap_or(defaults.heat.gradient),
-            gradient_direction_degrees: settings
-                .floor_gradient_direction
-                .unwrap_or(defaults.heat.gradient_direction_degrees),
-            pillar_excess: settings.pillar_heat.unwrap_or(defaults.heat.pillar_excess),
-        },
-        solutes: master_control::solutes::SoluteSettings {
-            leach_rate: settings.leach_rate.unwrap_or(defaults.solutes.leach_rate),
-            fade_rate: settings.solute_fade.unwrap_or(defaults.solutes.fade_rate),
-        },
-        ..defaults
-    };
     let port = settings.port.unwrap_or(DEFAULT_PORT);
+    let config = world_config(settings);
     let mut heartbeat = match Heartbeat::new(&wire, port, config) {
         Ok(heartbeat) => heartbeat,
         Err(refusal) => {
@@ -558,7 +583,7 @@ mod tests {
         assert!(
             from_command_line(words("--teleport"))
                 .expect_err("unknown")
-                .contains("--food-density <orbs per 100 m^2>, --reflection-attenuation <0..1>, --ambient <°C>, --floor-gradient <°C per cm>, --floor-gradient-direction <degrees>, --pillar-heat <K>, --config <file>"),
+                .contains("--food-density <orbs per 100 m^2>, --seed <u64>, --reflection-attenuation <0..1>, --ambient <°C>, --floor-gradient <°C per cm>, --floor-gradient-direction <degrees>, --pillar-heat <K>, --config <file>"),
             "the surface names the new flags"
         );
     }
@@ -725,6 +750,50 @@ solute-fade = 2
             .is_err(),
             "said twice"
         );
+    }
+
+    #[test]
+    fn the_seed_chooses_the_food_and_the_same_seed_the_same_food() {
+        let config = |line: &str| world_config(from_command_line(words(line)).expect(line));
+        let food = |line: &str| master_control::food::place(&config(line).food).expect("places");
+        assert_eq!(
+            config("--food-density 0.3").master_seed,
+            DEFAULT_MASTER_SEED,
+            "no seed, the default world's"
+        );
+        assert_eq!(config("--seed 7").master_seed, 7);
+        assert_eq!(
+            food("--food-density 0.3 --seed 7"),
+            food("--food-density 0.3 --seed 7"),
+            "the same seed, the same food"
+        );
+        assert_ne!(
+            food("--food-density 0.3 --seed 7"),
+            food("--food-density 0.3 --seed 8"),
+            "another seed, other food"
+        );
+        assert_eq!(
+            food("--food-density 0.3"),
+            food("--food-density 0.3 --seed 0"),
+            "the default is seed zero"
+        );
+        assert_eq!(config("--seed 18446744073709551615").master_seed, u64::MAX);
+        for (line, says) in [
+            ("--seed", "--seed needs the run's master seed"),
+            ("--seed -1", "a whole number from 0"),
+            ("--seed 0x10", "a whole number from 0"),
+            ("--seed 18446744073709551616", "a whole number from 0"),
+        ] {
+            let refusal = from_command_line(words(line)).expect_err(line);
+            assert!(refusal.contains(says), "{line}: {refusal}");
+        }
+        let file = from_config("seed = 42\n").expect("a config sets it");
+        assert_eq!(file.seed, Some(42));
+        assert!(from_config("seed = 1\nseed = 2\n").is_err(), "said twice");
+        let merged = from_command_line(words("--seed 3"))
+            .expect("parses")
+            .over(file);
+        assert_eq!(merged.seed, Some(3), "the command line wins");
     }
 
     #[test]

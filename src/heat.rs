@@ -236,6 +236,8 @@ pub fn pillar_blocks(
 pub struct HeatField {
     air: Air<1>,
     ambient_kelvin: f64,
+    /// The settings the field was laid out with, as the input log's header carries them.
+    settings: HeatSettings,
 }
 
 impl HeatField {
@@ -261,6 +263,7 @@ impl HeatField {
         HeatField {
             air,
             ambient_kelvin: settings.ambient_celsius + CELSIUS_ZERO,
+            settings: *settings,
         }
     }
 
@@ -280,6 +283,12 @@ impl HeatField {
     #[must_use]
     pub fn ambient_kelvin(&self) -> f64 {
         self.ambient_kelvin
+    }
+
+    /// The thermal map and the pillars' heat this field was laid out with.
+    #[must_use]
+    pub fn settings(&self) -> HeatSettings {
+        self.settings
     }
 
     /// The air itself, holding the excess over the ambient.

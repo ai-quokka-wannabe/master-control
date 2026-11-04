@@ -17,11 +17,12 @@
 //! integration tests can stand a whole world up on a port of the operating system's choosing;
 //! the binary in `main.rs` is a thin caller.
 
-/// The run's master seed, the one root every seeded thing in a world is drawn from - the food's
-/// placement and the smell's counting noise alike. The world draws none of its own yet: every
-/// world is seed zero, so two lives of one world meet the same food, until a flag to choose
-/// another is owed (TODO.md) - and with it a line in the input log's header, so Clu re-draws it.
-pub const MASTER_SEED: u64 = 0;
+/// The run's master seed unless `--seed` or `--config` says otherwise: the one root every seeded
+/// thing in a world is drawn from - the food's placement and taste and the smell's counting
+/// noise alike. Zero, so a world launched without a seed is the world every earlier life met.
+/// The seed a world ran with is the first launch line of its input log's header, and Clu
+/// re-draws from it.
+pub const DEFAULT_MASTER_SEED: u64 = 0;
 
 /// The fraction of radiance and of acoustic energy a surface returns at each specular bounce,
 /// the Grid's and every body's alike, unless `--reflection-attenuation` or `--config` says

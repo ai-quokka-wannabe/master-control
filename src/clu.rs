@@ -26,6 +26,7 @@
 
 use crate::link_dll::{LinkDll, Message};
 use crate::physics::{BodyBounds, state_hash, world_definition};
+use crate::record::Launch;
 use crate::roster::{Admission, Model, Roster};
 use crate::stager::Intent;
 use std::collections::BTreeMap;
@@ -88,9 +89,159 @@ enum Record {
         tick: u64,
         hash: u64,
     },
+    /// The run's master seed.
+    Seed(u64),
     Food(crate::food::FoodSettings),
     /// The reflection attenuation the world told its clients; the physics never reads it.
     Reflection(f32),
+    /// The floor's thermal map and the pillars' heat.
+    Heat(crate::heat::HeatSettings),
+    /// The floor's solutes' leach rate and fade.
+    Solutes(crate::solutes::SoluteSettings),
+}
+
+impl Record {
+    /// Whether this record is one of the header's launch settings rather than the life's.
+    fn is_launch(&self) -> bool {
+        matches!(
+            self,
+            Record::Seed(_)
+                | Record::Food(_)
+                | Record::Reflection(_)
+                | Record::Heat(_)
+                | Record::Solutes(_)
+        )
+    }
+
+    /// Whether this record is the header's statement of the wire, the world or the build, which
+    /// may come before the launch settings.
+    fn is_identity(&self) -> bool {
+        matches!(
+            self,
+            Record::Protocol { .. } | Record::Build(_) | Record::World(_)
+        )
+    }
+}
+
+/// One launch setting into its slot; one said twice is a log written by hand.
+fn once<T>(slot: &mut Option<T>, value: T, name: &str) -> Result<(), String> {
+    if slot.is_some() {
+        return Err(format!("the header says its {name} line twice"));
+    }
+    *slot = Some(value);
+    Ok(())
+}
+
+/// The header's launch settings as they are read, each said once, none yet assumed.
+#[derive(Default)]
+struct Header {
+    seed: Option<u64>,
+    food: Option<crate::food::FoodSettings>,
+    reflection: Option<f32>,
+    heat: Option<crate::heat::HeatSettings>,
+    solutes: Option<crate::solutes::SoluteSettings>,
+}
+
+impl Header {
+    /// Take one launch record.
+    fn take(&mut self, record: Record) -> Result<(), String> {
+        match record {
+            Record::Seed(seed) => once(&mut self.seed, seed, "seed"),
+            Record::Food(food) => once(&mut self.food, food, "food"),
+            Record::Reflection(value) => once(&mut self.reflection, value, "reflection"),
+            Record::Heat(heat) => once(&mut self.heat, heat, "heat"),
+            Record::Solutes(solutes) => once(&mut self.solutes, solutes, "solutes"),
+            _ => Ok(()),
+        }
+    }
+
+    /// The whole launch, or the words naming the first setting the header lacks. The input log
+    /// is a 0.0.0 format with no backwards compatibility: a log short of a setting is from
+    /// another build, and re-simulating it with a guessed default would be another world.
+    fn finish(self) -> Result<Launch, String> {
+        let missing = |line: &str, what: &str| {
+            format!(
+                "the log's header has no {line} line ({what}) - Clu builds the world from every launch setting and guesses none; a log without it is from another build, re-simulate it with the build that made it"
+            )
+        };
+        let master_seed = self
+            .seed
+            .ok_or_else(|| missing("seed", "the master seed"))?;
+        let food = self
+            .food
+            .ok_or_else(|| missing("food", "the food's density and seed"))?;
+        let reflection_attenuation = self
+            .reflection
+            .ok_or_else(|| missing("reflection", "the reflection attenuation"))?;
+        let heat = self.heat.ok_or_else(|| {
+            missing(
+                "heat",
+                "the ambient, the floor's gradient and its direction, the pillars' heat",
+            )
+        })?;
+        let solutes = self
+            .solutes
+            .ok_or_else(|| missing("solutes", "the leach rate and the solute fade"))?;
+        // The food's seed is the master seed's food stream, always; another is a header edited
+        // by hand, whose food and whose noise would come from two different roots.
+        let owed = crate::physics::food_seed(master_seed);
+        if food.seed != owed {
+            return Err(format!(
+                "the food line's seed {:016X} is not master seed {master_seed:016X}'s food stream {owed:016X} - the header was edited by hand",
+                food.seed
+            ));
+        }
+        Ok(Launch {
+            master_seed,
+            food,
+            reflection_attenuation,
+            heat,
+            solutes,
+        })
+    }
+}
+
+/// The launch settings an input log's header carries - what Clu builds its world from
+/// ([`Launch::roster`]) - or the words why the header cannot launch one.
+///
+/// # Errors
+/// When a setting is missing, said twice, or one no world could have been launched with.
+pub fn launch(text: &str) -> Result<Launch, String> {
+    let mut header = Header::default();
+    for (line_number, line) in text.lines().enumerate() {
+        match parse_line(line) {
+            Ok(None) => {}
+            Ok(Some(record)) if record.is_identity() => {}
+            Ok(Some(record)) if record.is_launch() => header
+                .take(record)
+                .map_err(|words| format!("line {}: {words}", line_number + 1))?,
+            Ok(Some(_)) => break,
+            Err(words) => return Err(format!("line {}: {words}", line_number + 1)),
+        }
+    }
+    header.finish()
+}
+
+/// The world a log's launch settings open: the food placed again from the same settings, eaten
+/// by the same mouths, the smell's noise from the same master seed, the same air warmed the
+/// same way and the same floor - so the re-simulated letters are the logged life's. Light and
+/// sound are the Grid's: the physics never reads the reflection attenuation, so it is only read
+/// back whole.
+fn open(launch: &Launch) -> Result<Roster, String> {
+    launch
+        .roster()
+        .map_err(|words| format!("the log's food cannot be placed: {words}"))
+}
+
+/// Exactly `count` doubles as their bits after the record's name, or none.
+fn doubles(words: &[&str], count: usize) -> Option<Vec<f64>> {
+    if words.len() != count + 1 {
+        return None;
+    }
+    words[1..]
+        .iter()
+        .map(|word| u64::from_str_radix(word, 16).ok().map(f64::from_bits))
+        .collect()
 }
 
 /// The servo bounds of a rez line: after the vertices, the count and the spacing, `which` is
@@ -249,6 +400,42 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                 .map(|value| Some(Record::Reflection(value)))
                 .map_err(|words| format!("reflection record: {words}"))
         }
+        "seed" => {
+            let (Some(seed), None) = (words.get(1), words.get(2)) else {
+                return Err(format!("malformed seed record: {line}"));
+            };
+            u64::from_str_radix(seed, 16)
+                .map(|seed| Some(Record::Seed(seed)))
+                .map_err(|_| format!("malformed seed record: {line}"))
+        }
+        "heat" => {
+            // Four doubles as their bits, judged as the flags judge them: a thermal map no world
+            // could have been launched with is a log someone wrote by hand.
+            let values =
+                doubles(&words, 4).ok_or_else(|| format!("malformed heat record: {line}"))?;
+            let judged = |what: &str, value: f64| {
+                crate::heat::finite(what, value).map_err(|words| format!("heat record: {words}"))
+            };
+            Ok(Some(Record::Heat(crate::heat::HeatSettings {
+                ambient_celsius: crate::heat::ambient(values[0])
+                    .map_err(|words| format!("heat record: {words}"))?,
+                gradient: judged("a floor gradient", values[1])?,
+                gradient_direction_degrees: judged("a gradient's direction", values[2])?,
+                pillar_excess: judged("a pillar's heat", values[3])?,
+            })))
+        }
+        "solutes" => {
+            let values =
+                doubles(&words, 2).ok_or_else(|| format!("malformed solutes record: {line}"))?;
+            let judged = |what: &str, value: f64| {
+                crate::solutes::rate(what, value)
+                    .map_err(|words| format!("solutes record: {words}"))
+            };
+            Ok(Some(Record::Solutes(crate::solutes::SoluteSettings {
+                leach_rate: judged("leach-rate", values[0])?,
+                fade_rate: judged("solute-fade", values[1])?,
+            })))
+        }
         "derez" => Ok(Some(Record::Derez {
             creature_id: narrow(2)?,
         })),
@@ -334,6 +521,9 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
     let mut last_tick: u64 = 0;
     let mut ended = false;
     let mut other_build: Option<String> = None;
+    // The header's launch settings, until the first record of the life: then the world opens
+    // from them, and from then on a launch setting is a log rearranged.
+    let mut header = Some(Header::default());
 
     let step = |roster: &mut Roster, tick: u64, intents: &BTreeMap<u32, Intent>| {
         let _ = roster.step(tick, |creature_id| {
@@ -371,6 +561,21 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
                 "line {}: a record after the world's end line - the log was appended to",
                 line_number + 1
             ));
+        }
+        let at = |words: String| format!("line {}: {words}", line_number + 1);
+        if record.is_launch() {
+            let Some(header) = header.as_mut() else {
+                return Err(at(
+                    "a launch setting after the life began - the log was rearranged".to_string(),
+                ));
+            };
+            header.take(record).map_err(at)?;
+            continue;
+        }
+        if !record.is_identity()
+            && let Some(launch) = header.take()
+        {
+            roster = open(&launch.finish().map_err(at)?).map_err(at)?;
         }
         if let Some(tick) = record_tick {
             if tick < last_tick {
@@ -455,19 +660,12 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
             Record::Claim { creature_id } => {
                 roster.claim(creature_id, 0);
             }
-            // The food the world launched with, placed again from the same settings (parse_line
-            // already refused a line the world could not have launched with): the same orbs,
-            // eaten by the same mouths, so the re-simulated letters match the logged life's.
-            Record::Food(settings) => {
-                let orbs = crate::food::place(&settings)
-                    .map_err(|words| format!("the log's food cannot be placed: {words}"))?;
-                // The smell's noise from the same master seed the world used - the crate's one
-                // constant until the log's header records a drawn one.
-                roster = std::mem::take(&mut roster).with_food(orbs, crate::MASTER_SEED);
-            }
-            // Light and sound are the Grid's: the world's physics never reads the attenuation, so a
-            // re-simulation has nothing to do with it but to have read it back whole.
-            Record::Reflection(_) => {}
+            // The launch settings were taken above, before the life opened.
+            Record::Seed(_)
+            | Record::Food(_)
+            | Record::Reflection(_)
+            | Record::Heat(_)
+            | Record::Solutes(_) => {}
             Record::Applied {
                 tick,
                 creature_id,
@@ -511,6 +709,10 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
                 hashes_agreed += 1;
             }
         }
+    }
+    // A log that is all header still owes every launch setting.
+    if let Some(header) = header {
+        header.finish()?;
     }
     if let Some(tick) = pending_tick {
         step(&mut roster, tick, &pending);
@@ -803,10 +1005,7 @@ mod tests {
         let path = &scratch.0;
         std::fs::write(
             path,
-            "# master-control input log
-food 3DCCCCCD 0123456789ABCDEF
-end 0
-",
+            format!("# master-control input log\n{DEFAULT_LAUNCH}end 0\n"),
         )
         .expect("write");
         assert!(
@@ -818,31 +1017,197 @@ end 0
         );
         std::fs::write(
             path,
-            "# master-control input log
-food 3DCCCCCD
-end 0
-",
+            format!(
+                "# master-control input log\n{}end 0\n",
+                DEFAULT_LAUNCH.replace("food 3DCCCCCD 6E3A79B97F4A7C15", "food 3DCCCCCD")
+            ),
         )
         .expect("write");
         let refusal = check(path, None, &wire).expect_err("malformed food");
         assert!(
-            refusal.contains("line 2") && refusal.contains("food"),
+            refusal.contains("line 3") && refusal.contains("food"),
             "{refusal}"
         );
         // Nothing may follow the end line, whatever the record: a rez appended after it is a
         // log someone added to.
         std::fs::write(
             path,
-            "# master-control input log
-end 0
-derez 1 100
-",
+            format!("# master-control input log\n{DEFAULT_LAUNCH}end 0\nderez 1 100\n"),
         )
         .expect("write");
         let refusal = check(path, None, &wire).expect_err("appended");
         assert!(
-            refusal.contains("line 3") && refusal.contains("after the world's end line"),
+            refusal.contains("line 8") && refusal.contains("after the world's end line"),
             "{refusal}"
         );
+    }
+
+    /// The default world's launch lines, as the heartbeat writes them.
+    const DEFAULT_LAUNCH: &str = "seed 0000000000000000
+food 3DCCCCCD 6E3A79B97F4A7C15
+reflection 3F666666
+heat 4034000000000000 0000000000000000 0000000000000000 4024000000000000
+solutes 3FF0000000000000 3F40624DD2F1A9FC
+";
+
+    /// A launch away from every default, the food's seed its master seed's stream.
+    fn unusual_launch() -> Launch {
+        let master_seed = 0x0123_4567_89AB_CDEF;
+        Launch {
+            master_seed,
+            food: crate::food::FoodSettings::new(0.3, master_seed),
+            reflection_attenuation: 0.5,
+            heat: crate::heat::HeatSettings {
+                ambient_celsius: 25.0,
+                gradient: 0.5,
+                gradient_direction_degrees: 90.0,
+                pillar_excess: 4.0,
+            },
+            solutes: crate::solutes::SoluteSettings {
+                leach_rate: 2.0,
+                fade_rate: 0.001,
+            },
+        }
+    }
+
+    /// A log as the world writes one, its header with this launch, then `life`.
+    fn written(scratch: &crate::scratch::Scratch, launch: &Launch, life: &str) -> String {
+        let mut log =
+            crate::record::InputLog::create(&scratch.0, 14, &[0; 32], 0, 0, 0, 32).expect("create");
+        log.launch(launch);
+        log.flush();
+        drop(log);
+        // The wire and the world this test made up are not this build's: Clu would refuse them
+        // before it read the launch, so the header keeps only its own lines.
+        let mut text: String = std::fs::read_to_string(&scratch.0)
+            .expect("read")
+            .lines()
+            .filter(|line| !line.starts_with("protocol ") && !line.starts_with("world "))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        text.push_str(life);
+        std::fs::write(&scratch.0, &text).expect("write");
+        text
+    }
+
+    #[test]
+    fn the_default_launch_lines_are_the_default_worlds() {
+        let defaults = crate::heartbeat::Config::default().launch();
+        assert_eq!(launch(DEFAULT_LAUNCH), Ok(defaults));
+    }
+
+    #[test]
+    fn a_header_round_trips_every_launch_setting_away_from_the_defaults() {
+        let scratch = crate::scratch::Scratch::new("master-control-clu-launch-round-trip.log");
+        let unusual = unusual_launch();
+        let text = written(&scratch, &unusual, "end 0\n");
+        assert_eq!(
+            launch(&text),
+            Ok(unusual),
+            "every setting back, bit for bit"
+        );
+        let wire = LinkDll::beside_executable().expect("wire");
+        assert!(
+            matches!(
+                check(&scratch.0, None, &wire),
+                Ok(Verdict::Agreed { ended: true, .. })
+            ),
+            "the log replays"
+        );
+    }
+
+    #[test]
+    fn clu_rebuilds_the_heat_and_the_solutes_the_log_was_recorded_with() {
+        let scratch = crate::scratch::Scratch::new("master-control-clu-launch-rebuild.log");
+        let unusual = unusual_launch();
+        let text = written(&scratch, &unusual, "end 0\n");
+        let roster = open(&launch(&text).expect("launches")).expect("opens");
+        assert_eq!(
+            roster.heat().map(crate::heat::HeatField::settings),
+            Some(unusual.heat),
+            "the air warmed as the world's was"
+        );
+        assert_eq!(
+            roster.solutes().map(crate::solutes::Floor::settings),
+            Some(unusual.solutes),
+            "the floor laid as the world's was"
+        );
+        assert_eq!(
+            roster.food(),
+            crate::food::place(&unusual.food)
+                .expect("places")
+                .as_slice(),
+            "the same food from the same seed"
+        );
+        assert_ne!(
+            unusual.heat,
+            crate::heat::HeatSettings::default(),
+            "not the defaults"
+        );
+        assert_ne!(
+            unusual.solutes,
+            crate::solutes::SoluteSettings::default(),
+            "not the defaults"
+        );
+    }
+
+    #[test]
+    fn clu_refuses_a_header_missing_any_launch_setting() {
+        let wire = LinkDll::beside_executable().expect("wire");
+        let scratch = crate::scratch::Scratch::new("master-control-clu-launch-missing.log");
+        for missing in ["seed", "food", "reflection", "heat", "solutes"] {
+            let header: String = DEFAULT_LAUNCH
+                .lines()
+                .filter(|line| !line.starts_with(&format!("{missing} ")))
+                .map(|line| format!("{line}\n"))
+                .collect();
+            let says = format!("no {missing} line");
+            let refusal = launch(&header).expect_err(missing);
+            assert!(refusal.contains(&says), "{missing}: {refusal}");
+            for life in ["end 0\n", ""] {
+                std::fs::write(
+                    &scratch.0,
+                    format!("# master-control input log\n{header}{life}"),
+                )
+                .expect("write");
+                let refusal = check(&scratch.0, None, &wire).expect_err(missing);
+                assert!(
+                    refusal.contains(&says) && refusal.contains("another build"),
+                    "{missing} {life:?}: {refusal}"
+                );
+            }
+        }
+        for (text, says) in [
+            (
+                format!("{DEFAULT_LAUNCH}seed 0000000000000001\n"),
+                "seed line twice",
+            ),
+            (
+                DEFAULT_LAUNCH.replace("seed 0000000000000000", "seed 0000000000000001"),
+                "the header was edited by hand",
+            ),
+            (
+                DEFAULT_LAUNCH.replace("heat 4034000000000000", "heat C090000000000000"),
+                "heat record",
+            ),
+            (
+                DEFAULT_LAUNCH.replace("solutes 3FF0000000000000", "solutes BFF0000000000000"),
+                "solutes record",
+            ),
+            (
+                DEFAULT_LAUNCH.replace("solutes 3FF0000000000000 ", "solutes "),
+                "malformed solutes record",
+            ),
+        ] {
+            let refusal = launch(&text).expect_err(says);
+            assert!(refusal.contains(says), "{says}: {refusal}");
+        }
+        std::fs::write(
+            &scratch.0,
+            format!("{DEFAULT_LAUNCH}claim 1 100\nseed 0000000000000000\n"),
+        )
+        .expect("write");
+        let refusal = check(&scratch.0, None, &wire).expect_err("late");
+        assert!(refusal.contains("after the life began"), "{refusal}");
     }
 }

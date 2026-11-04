@@ -590,6 +590,15 @@ impl Floor {
         &self.field
     }
 
+    /// The leach rate and the fade this floor was laid out with.
+    #[must_use]
+    pub fn settings(&self) -> SoluteSettings {
+        SoluteSettings {
+            leach_rate: self.leach_rate,
+            fade_rate: self.fade_rate,
+        }
+    }
+
     /// Each cell's level, metres, row by row in z.
     #[must_use]
     pub fn levels(&self) -> &[f64] {
