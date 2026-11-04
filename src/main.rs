@@ -13,7 +13,7 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
-//! `master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>] [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--config <file>]` - the world server of the Grid;
+//! `master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>] [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--ambient <°C>] [--floor-gradient <°C per cm>] [--floor-gradient-direction <degrees>] [--pillar-heat <K>] [--config <file>]` - the world server of the Grid;
 //! `master-control clu <log> [<disk>]` - Clu, the re-simulation and the hash check.
 //!
 //! The command line keeps the flagship's ruled shape: where the world listens is the plain
@@ -24,6 +24,13 @@
 //! flags without their dashes (`food-density = 0.2`, `log = world.log`, `verbose = true`), `#`
 //! comments; every long flag but `--version` and `--config` may be written there (the port stays
 //! the one positional argument), and a flag on the command line wins.
+//!
+//! The world's temperature (heat.rs) takes four: `--ambient` in degrees Celsius (20 by default,
+//! the worm's standard cultivation temperature), `--floor-gradient` in degrees Celsius per
+//! centimetre of the worm's world - 44.8 m of the Grid's - (0, a level floor, by default;
+//! `--floor-gradient 0.5` is the classical thermotaxis assay's), `--floor-gradient-direction` in
+//! degrees from +x towards +z (0 by default), and `--pillar-heat`, the kelvin the energy pillars
+//! are held above the ambient (10 by default, a chosen setting: a pillar is fictional).
 
 use master_control::food::{DEFAULT_DENSITY, FoodSettings};
 use master_control::heartbeat::{Config, Heartbeat};
@@ -102,7 +109,7 @@ fn clu_main(arguments: Vec<String>) -> std::process::ExitCode {
 use master_control::MASTER_SEED;
 
 /// The surface, said once for every refusal that names it.
-const SURFACE: &str = "[port], --verbose, --version, --disk <path>, --disk-roll <MiB>, --log <path>, --food-density <orbs per 100 m^2>, --reflection-attenuation <0..1>, --config <file>";
+const SURFACE: &str = "[port], --verbose, --version, --disk <path>, --disk-roll <MiB>, --log <path>, --food-density <orbs per 100 m^2>, --reflection-attenuation <0..1>, --ambient <°C>, --floor-gradient <°C per cm>, --floor-gradient-direction <degrees>, --pillar-heat <K>, --config <file>";
 
 /// What the operator asked for, from the command line or from a config file: every setting
 /// unsaid until said, so the two can be laid over each other and the command line win.
@@ -115,6 +122,10 @@ struct Settings {
     log: Option<PathBuf>,
     food_density: Option<f32>,
     reflection_attenuation: Option<f32>,
+    ambient: Option<f64>,
+    floor_gradient: Option<f64>,
+    floor_gradient_direction: Option<f64>,
+    pillar_heat: Option<f64>,
     config: Option<PathBuf>,
     version: bool,
 }
@@ -131,6 +142,12 @@ impl Settings {
             log: self.log.or(file.log),
             food_density: self.food_density.or(file.food_density),
             reflection_attenuation: self.reflection_attenuation.or(file.reflection_attenuation),
+            ambient: self.ambient.or(file.ambient),
+            floor_gradient: self.floor_gradient.or(file.floor_gradient),
+            floor_gradient_direction: self
+                .floor_gradient_direction
+                .or(file.floor_gradient_direction),
+            pillar_heat: self.pillar_heat.or(file.pillar_heat),
             config: self.config,
             version: self.version,
         }
@@ -170,6 +187,56 @@ fn food_density(word: Option<&str>) -> Result<f32, String> {
     Ok(density)
 }
 
+/// One of the world's temperature settings: a number, judged by heat.rs, or the words why not -
+/// `flag` names it, `needs` says what it is.
+fn heat_setting(
+    flag: &str,
+    needs: &str,
+    word: Option<&str>,
+    judge: impl Fn(f64) -> Result<f64, String>,
+) -> Result<f64, String> {
+    let value = word
+        .and_then(|word| word.parse::<f64>().ok())
+        .ok_or_else(|| format!("{flag} needs {needs}."))?;
+    judge(value).map_err(|words| format!("{flag}: {words}."))
+}
+
+fn ambient(word: Option<&str>) -> Result<f64, String> {
+    heat_setting(
+        "--ambient",
+        "a temperature in degrees Celsius (20, the worm's cultivation temperature, by default)",
+        word,
+        master_control::heat::ambient,
+    )
+}
+
+fn floor_gradient(word: Option<&str>) -> Result<f64, String> {
+    heat_setting(
+        "--floor-gradient",
+        "degrees Celsius per centimetre of the worm's world, 44.8 m of the Grid's (0.5 is the thermotaxis assay's)",
+        word,
+        |value| master_control::heat::finite("a floor gradient", value),
+    )
+}
+
+fn floor_gradient_direction(word: Option<&str>) -> Result<f64, String> {
+    heat_setting(
+        "--floor-gradient-direction",
+        "the degrees from +x towards +z the floor warms towards",
+        word,
+        |value| master_control::heat::finite("a gradient's direction", value),
+    )
+}
+
+fn pillar_heat(word: Option<&str>) -> Result<f64, String> {
+    heat_setting(
+        "--pillar-heat",
+        "the kelvin the energy pillars are held above the ambient",
+        word,
+        |value| master_control::heat::finite("a pillar's heat", value),
+    )
+}
+
 /// A reflection attenuation: the fraction of radiance and acoustic energy a surface returns per
 /// bounce, from 0 to 1, which every client is told in `WELCOME`.
 fn reflection_attenuation(word: Option<&str>) -> Result<f32, String> {
@@ -198,6 +265,15 @@ fn from_command_line(arguments: impl IntoIterator<Item = String>) -> Result<Sett
             "--reflection-attenuation" => {
                 settings.reflection_attenuation = Some(reflection_attenuation(value().as_deref())?);
             }
+            "--ambient" => settings.ambient = Some(ambient(value().as_deref())?),
+            "--floor-gradient" => {
+                settings.floor_gradient = Some(floor_gradient(value().as_deref())?);
+            }
+            "--floor-gradient-direction" => {
+                settings.floor_gradient_direction =
+                    Some(floor_gradient_direction(value().as_deref())?);
+            }
+            "--pillar-heat" => settings.pillar_heat = Some(pillar_heat(value().as_deref())?),
             "--config" => {
                 settings.config = Some(
                     value()
@@ -275,9 +351,22 @@ fn from_config(text: &str) -> Result<Settings, String> {
             "reflection-attenuation" => {
                 settings.reflection_attenuation = Some(reflection_attenuation(word).map_err(at)?);
             }
+            "ambient" if settings.ambient.is_some() => return Err(said_twice()),
+            "ambient" => settings.ambient = Some(ambient(word).map_err(at)?),
+            "floor-gradient" if settings.floor_gradient.is_some() => return Err(said_twice()),
+            "floor-gradient" => settings.floor_gradient = Some(floor_gradient(word).map_err(at)?),
+            "floor-gradient-direction" if settings.floor_gradient_direction.is_some() => {
+                return Err(said_twice());
+            }
+            "floor-gradient-direction" => {
+                settings.floor_gradient_direction =
+                    Some(floor_gradient_direction(word).map_err(at)?);
+            }
+            "pillar-heat" if settings.pillar_heat.is_some() => return Err(said_twice()),
+            "pillar-heat" => settings.pillar_heat = Some(pillar_heat(word).map_err(at)?),
             other => {
                 return Err(at(format!(
-                    "unknown key \"{other}\". A config sets the long flags without their dashes: verbose, disk, disk-roll, log, food-density, reflection-attenuation."
+                    "unknown key \"{other}\". A config sets the long flags without their dashes: verbose, disk, disk-roll, log, food-density, reflection-attenuation, ambient, floor-gradient, floor-gradient-direction, pillar-heat."
                 )));
             }
         }
@@ -355,6 +444,14 @@ fn main() -> std::process::ExitCode {
         reflection_attenuation: settings
             .reflection_attenuation
             .unwrap_or(defaults.reflection_attenuation),
+        heat: master_control::heat::HeatSettings {
+            ambient_celsius: settings.ambient.unwrap_or(defaults.heat.ambient_celsius),
+            gradient: settings.floor_gradient.unwrap_or(defaults.heat.gradient),
+            gradient_direction_degrees: settings
+                .floor_gradient_direction
+                .unwrap_or(defaults.heat.gradient_direction_degrees),
+            pillar_excess: settings.pillar_heat.unwrap_or(defaults.heat.pillar_excess),
+        },
         ..defaults
     };
     let port = settings.port.unwrap_or(DEFAULT_PORT);
@@ -429,7 +526,7 @@ mod tests {
         assert!(
             from_command_line(words("--teleport"))
                 .expect_err("unknown")
-                .contains("--food-density <orbs per 100 m^2>, --reflection-attenuation <0..1>, --config <file>"),
+                .contains("--food-density <orbs per 100 m^2>, --reflection-attenuation <0..1>, --ambient <°C>, --floor-gradient <°C per cm>, --floor-gradient-direction <degrees>, --pillar-heat <K>, --config <file>"),
             "the surface names the new flags"
         );
     }
@@ -474,6 +571,59 @@ reflection-attenuation = 0.3
             .is_err(),
             "said twice is refused"
         );
+    }
+
+    #[test]
+    fn the_thermal_map_is_four_flags_and_keys_refused_in_words_when_it_cannot_be() {
+        let settings = from_command_line(words(
+            "--ambient 25 --floor-gradient 0.5 --floor-gradient-direction 90 --pillar-heat 4",
+        ))
+        .expect("parses");
+        assert_eq!(settings.ambient, Some(25.0));
+        assert_eq!(settings.floor_gradient, Some(0.5));
+        assert_eq!(settings.floor_gradient_direction, Some(90.0));
+        assert_eq!(settings.pillar_heat, Some(4.0));
+        for (line, says) in [
+            (
+                "--ambient",
+                "--ambient needs a temperature in degrees Celsius",
+            ),
+            ("--ambient warm", "--ambient needs a temperature"),
+            ("--ambient -300", "above absolute zero"),
+            ("--ambient NaN", "above absolute zero"),
+            ("--floor-gradient steep", "degrees Celsius per centimetre"),
+            ("--floor-gradient inf", "a finite number"),
+            ("--floor-gradient-direction north", "the degrees from +x"),
+            ("--pillar-heat", "the kelvin the energy pillars"),
+            ("--pillar-heat NaN", "a finite number"),
+        ] {
+            let refusal = from_command_line(words(line)).expect_err(line);
+            assert!(refusal.contains(says), "{line}: {refusal}");
+        }
+        let file = from_config(
+            "ambient = 15
+floor-gradient = 0.5
+pillar-heat = 0
+",
+        )
+        .expect("a config sets them");
+        assert_eq!(file.ambient, Some(15.0));
+        assert_eq!(file.floor_gradient, Some(0.5));
+        assert_eq!(file.pillar_heat, Some(0.0));
+        assert!(
+            from_config(
+                "ambient = 15
+ambient = 16
+"
+            )
+            .is_err(),
+            "said twice is refused"
+        );
+        let merged = from_command_line(words("--ambient 22"))
+            .expect("parses")
+            .over(file);
+        assert_eq!(merged.ambient, Some(22.0), "the command line wins");
+        assert_eq!(merged.floor_gradient, Some(0.5), "the file fills the rest");
     }
 
     #[test]

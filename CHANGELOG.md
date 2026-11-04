@@ -55,6 +55,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Heat: the temperature field.** Step 2 of the flagship's `docs/THERMORECEPTION.md` (ruled 2026-11-04): the
+  temperature is a second tenant of the Grid's air (`src/heat.rs`), by the same solver with the risers as walls -
+  `Air` is now generic over its channels and takes a `Medium` (diffusivity, loss, the open edges' decay length, a
+  floor that is a wall or a reservoir), and gains held cells; the odour holds nothing and steps the same bits as
+  before. Air's thermal diffusivity at 300 K (22.5e-6 m^2/s, Incropera Table A.4) is scaled as the odour's, to
+  451.6 m^2/s. The floor holds its thermal map, under four new flags and config keys: `--ambient` (20 °C by
+  default, the worm's cultivation temperature after Brenner 1974), `--floor-gradient` in °C per centimetre of the
+  worm's world (0 by default; 0.5 is the thermotaxis assay's) and `--floor-gradient-direction`, and `--pillar-heat`,
+  the kelvin the six energy pillars are held above the ambient (10 by default - a chosen setting, since a pillar
+  has no physical counterpart). The top and sides relax to the ambient. The heartbeat's world steps it every
+  tick, outside the state hash, and the chain golden replays unchanged; it adds 0.80 ms a tick in release to the
+  odour's 1.46. `docs/figures/heat-map.svg` draws the settled field. Bodies as sources and the thermoreceptors are
+  next.
+
 - **The air: odour on a grid, risers as walls.** The flagship's ruling of 2026-11-04 (tron-grid-lite#186): Master
   Control owns the air. `src/air.rs` is a numerical diffusion field on 64 x 64 columns of 2 m over the floor, in 12
   layers - a terrace step (5/6 m) thick to a step above the highest terrace, then doubling to 110 m - solid below the
