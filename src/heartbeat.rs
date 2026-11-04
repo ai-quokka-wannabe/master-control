@@ -73,6 +73,9 @@ pub struct Config {
     /// re-places the same orbs. Placed at world start, eaten by the mouths, told in every
     /// TICK_STATE.
     pub food: crate::food::FoodSettings,
+    /// The fraction of radiance and acoustic energy a surface returns per bounce: told to every
+    /// client in `WELCOME`, recorded in the Disk's header and the input log's.
+    pub reflection_attenuation: f32,
 }
 
 impl Default for Config {
@@ -89,6 +92,7 @@ impl Default for Config {
             input_log: None,
             hash_every: 32,
             food: crate::food::FoodSettings::new(crate::food::DEFAULT_DENSITY, crate::MASTER_SEED),
+            reflection_attenuation: crate::DEFAULT_REFLECTION_ATTENUATION,
         }
     }
 }
@@ -210,7 +214,14 @@ impl Heartbeat {
                         path.display()
                     ));
                 }
-                let connection = open_disk(wire, path, world_fingerprint, 0, &roster)?;
+                let connection = open_disk(
+                    wire,
+                    path,
+                    world_fingerprint,
+                    0,
+                    config.reflection_attenuation,
+                    &roster,
+                )?;
                 log_info(&format!("recording the world to {}.", path.display()));
                 Some(Disk {
                     connection,
@@ -241,6 +252,7 @@ impl Heartbeat {
                     )
                 })?;
                 log.food(&config.food);
+                log.reflection(config.reflection_attenuation);
                 log_info(&format!("logging every intent to {}.", path.display()));
                 Some(log)
             }
@@ -330,6 +342,8 @@ impl Heartbeat {
                 #[allow(clippy::cast_possible_truncation)]
                 client_id: client_id as u32,
                 world_fingerprint: self.world_fingerprint,
+                reflection_attenuation: self.config.reflection_attenuation,
+                reserved0: [0; 4],
             };
             // The late joiner is told every body before its first tick, verbatim - the same
             // REZ the first citizen heard, so an hour's lateness costs nothing but the hour.
@@ -820,6 +834,7 @@ impl Heartbeat {
             &next_path,
             self.world_fingerprint,
             tick,
+            self.config.reflection_attenuation,
             &self.roster,
         ) {
             Ok(connection) => {
@@ -858,6 +873,7 @@ fn open_disk(
     path: &std::path::Path,
     world_fingerprint: u64,
     start_tick: u64,
+    reflection_attenuation: f32,
     roster: &Roster,
 ) -> Result<Connection, String> {
     let start_unix_seconds = std::time::SystemTime::now()
@@ -869,6 +885,7 @@ fn open_disk(
         world_fingerprint,
         start_tick,
         TICK_SECONDS,
+        reflection_attenuation,
         start_unix_seconds,
     )?;
     for model in roster.models() {

@@ -23,6 +23,28 @@
 /// another is owed (TODO.md) - and with it a line in the input log's header, so Clu re-draws it.
 pub const MASTER_SEED: u64 = 0;
 
+/// The fraction of radiance and of acoustic energy a surface returns at each specular bounce,
+/// the Grid's and every body's alike, unless `--reflection-attenuation` or `--config` says
+/// otherwise (tron-grid-lite `docs/TOPOLOGY.md` § The protocol, protocol v13). About what a
+/// polished aluminium mirror returns of visible light; one number cannot also be a hard wall's
+/// acoustic return (about 0.98), and it errs towards walls being perceived. The world never
+/// uses it - light and sound are the Grid's - but it owns it: `WELCOME` tells every client.
+pub const DEFAULT_REFLECTION_ATTENUATION: f32 = 0.9;
+
+/// A reflection attenuation the wire can carry: finite and in [0, 1], or the words why not.
+///
+/// # Errors
+/// When `value` is NaN, infinite, negative or above one.
+pub fn reflection_attenuation(value: f32) -> Result<f32, String> {
+    if value.is_finite() && (0.0..=1.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err(format!(
+            "a reflection attenuation is the fraction a surface returns per bounce, from 0 to 1, not {value}"
+        ))
+    }
+}
+
 /// The build's provenance, stamped by build.rs: what sources this binary was compiled from.
 pub mod build_info {
     include!(concat!(env!("OUT_DIR"), "/build_info.rs"));

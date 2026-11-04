@@ -100,6 +100,15 @@ impl InputLog {
     /// The food the world was launched with, the last header line: the density as its bits and
     /// the food's seed, everything placement needs, so a re-simulation re-places the same orbs.
     /// A log without the line is from before food, and holds none.
+    /// The world's reflection attenuation, a header line after the food: the bits of the
+    /// fraction a surface returns per bounce, which every client was told in `WELCOME`. The
+    /// world's physics never reads it, so Clu re-simulates without it; it is recorded so a life
+    /// can be described exactly. A log without the line is from before protocol v13.
+    pub fn reflection(&mut self, attenuation: f32) {
+        let _ = writeln!(self.file, "reflection {}", bits(attenuation));
+        let _ = self.file.flush();
+    }
+
     pub fn food(&mut self, settings: &crate::food::FoodSettings) {
         let _ = writeln!(
             self.file,
@@ -293,6 +302,19 @@ mod tests {
             "applied 102 7 coasted 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000\n"
         ));
         assert!(text.contains("hash 128 00000000DEADBEEF\n"));
+    }
+
+    #[test]
+    fn the_header_carries_the_reflection_attenuation_as_bits() {
+        let scratch = Scratch::new("master-control-input-log-reflection-test.txt");
+        let path = &scratch.0;
+        let mut log = InputLog::create(path, 13, &[0; 32], 0, 0, 0, 32).expect("create");
+        log.reflection(0.9);
+        let text = std::fs::read_to_string(path).expect("read");
+        assert!(
+            text.lines().any(|line| line == "reflection 3F666666"),
+            "the attenuation as its bits"
+        );
     }
 
     #[test]

@@ -30,11 +30,13 @@
 //! is required on every platform.
 //!
 //! `tests/data/chain_life.log`: rc-worm's chain of eight (204 vertices, 212 triangles), driven
-//! from its panel on the owner's desk on 2026-10-29 under the world whose risers have a top - a
-//! scripted User at the panel: keys posted for straight while the wave swells, a weave left and
-//! right and a brake, the call button pressed through UI Automation - 1,182 ticks and 36
-//! hashes, at protocol 12, and Master Control asked to stop the proper way (Ctrl+Break), so
-//! the log ends with its end line. The first such life was the owner's own, on 2026-08-27.
+//! from its panel on the owner's desk on 2026-11-04 at protocol 13 - a scripted User at the
+//! panel through the live-world skill: the sliders set for straight while the wave swells, the
+//! call button pressed five times through UI Automation, a weave left and right, and a brake -
+//! 1,730 ticks and 54 hashes, every intent accepted on its tick (none refused stale), the header
+//! carrying the food and the world's reflection attenuation (0.9), and Master Control asked to
+//! stop the proper way (Ctrl+Break), so the log ends with its end line. The first such life was
+//! the owner's own, on 2026-08-27.
 
 use master_control::clu::{Verdict, check};
 use master_control::link_dll::LinkDll;
