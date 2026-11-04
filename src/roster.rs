@@ -201,6 +201,10 @@ pub struct Roster {
     /// World state, but outside the state hash: odour never moves a body, and the field is a
     /// pure function of the food and the ticks its orbs were emptied on (odour.rs).
     odour: Option<crate::odour::Field>,
+    /// The air's temperature, stepped with the odour every tick; none unless the caller gives
+    /// the world its thermal map. World state outside the state hash, as the odour is: nothing
+    /// moves by it yet, and it is a pure function of the launch settings and the tick (heat.rs).
+    heat: Option<crate::heat::HeatField>,
     /// The run's master seed, for the senses' counting noise (the RNG-of-record rule).
     master_seed: u64,
 }
@@ -229,6 +233,19 @@ impl Roster {
         self.food = orbs;
         self.master_seed = master_seed;
         self
+    }
+
+    /// The world's temperature, from the launch settings' thermal map and pillar heat.
+    #[must_use]
+    pub fn with_heat(mut self, settings: &crate::heat::HeatSettings) -> Roster {
+        self.heat = Some(crate::heat::HeatField::new(settings));
+        self
+    }
+
+    /// The air's temperature, if the world has one.
+    #[must_use]
+    pub fn heat(&self) -> Option<&crate::heat::HeatField> {
+        self.heat.as_ref()
     }
 
     /// Every orb the world holds, gone ones included (their odour lingers).
@@ -491,6 +508,9 @@ impl Roster {
         // the noses below read this tick's field. An orb emptied last tick emits no more.
         if let Some(odour) = &mut self.odour {
             odour.step(&self.food);
+        }
+        if let Some(heat) = &mut self.heat {
+            heat.step();
         }
         for (id, resident) in &mut self.residents {
             let intent = sanitise_and_clamp(intent_for(*id), &resident.body.bounds);

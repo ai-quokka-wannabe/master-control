@@ -106,6 +106,10 @@ sacred 32 Hz:
   its risers walls odour does not pass (`src/air.rs`, `src/odour.rs`) - that each creature's two amphids read
   as a fraction of receptors bound. See
   [Food and Smell, Drawn](#food-and-smell-drawn) below.
+- **Heat** — the temperature of the Grid's air, in the same grid as the odour (`src/heat.rs`): the floor holds
+  its thermal map (20 °C by default, the worm's cultivation temperature, and optionally the thermotaxis assay's
+  gradient), the six energy pillars are held warm, and the risers are walls heat does not pass. Nothing reads it
+  yet: bodies as sources and the thermoreceptors come next. See [Heat, Drawn](#heat-drawn).
 
 [TODO.md](TODO.md) carries each etape's decisions and what is still owed.
 
@@ -113,7 +117,8 @@ sacred 32 Hz:
 
 ```text
 master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
-  [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--config <file>]
+  [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--ambient <°C>]
+  [--floor-gradient <°C per cm>] [--floor-gradient-direction <degrees>] [--pillar-heat <K>] [--config <file>]
 ```
 
 Then, from a tron-grid-lite build: `TronGridLite --window` to watch, or `TronGridLite --program
@@ -150,6 +155,18 @@ Every riser is a wall, so odour reaches a terrace from below only over its edge:
 steps an orb's odour reads 0.64 of the open side's (`odour.rs`'s `a_tall_riser_casts_an_odour_shadow`).
 
 ![Three maps of the floor coloured by the settled mean receptor reading at densities 0.1, 0.25 and 0.43, one sample per 2 m cell: each orb a peak, the field following the terraces](docs/figures/smell-map.svg)
+
+## Heat, Drawn
+
+The temperature lives in the same air, by the same solver: air's thermal diffusivity (22.5e-6 m^2/s at 300 K)
+scaled as the odour's, about 450 m^2/s on the Grid. The floor is the reservoir, as the agar is in the worm's world,
+and holds the air near it to its own temperature; the open air above and around is at the ambient. The energy
+pillars are held 10 K warm - a chosen setting, since a pillar has no real counterpart - so at a worm's nose the
+air is about 0.25 K warm a body length out from one and 0.03 K three body lengths out, three times the 0.01 °C
+the worm's AFD neurons resolve. With `--floor-gradient 0.5` the floor carries the classical thermotaxis assay's
+0.5 °C per centimetre - 44.8 m of the Grid's - and the air follows it.
+
+![Two maps of the floor coloured by the settled temperature at nose height: left the default world, a level floor at 20 °C with six warm halos a few body lengths across at the pillars; right the same with the assay's gradient along x, blue at the low edge to orange at the high, the pillars' halos on top](docs/figures/heat-map.svg)
 
 ## The Doctrine
 

@@ -62,6 +62,7 @@ pub mod clu;
 pub mod food;
 pub mod ground;
 pub mod heartbeat;
+pub mod heat;
 pub mod hull;
 pub mod link_dll;
 pub mod odour;

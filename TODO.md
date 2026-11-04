@@ -1,18 +1,41 @@
 # TODO
 
-The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` an
+The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` and the
+`grid` library) and the wire carries a tick (link protocol v3 then; v12 today). The blueprint is the flagship's
+[docs/TOPOLOGY.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/TOPOLOGY.md)
+— its § Master Control's mechanics and § One tick, across the wire sections carry every
+mechanism below with its citation; this file only stages the server-side etapes so they are not
+forgotten.
 
 **Done (2026-11-04), the air.** The flagship's ruling of the day (tron-grid-lite#186): Master Control owns the air.
 `src/air.rs` is a numerical diffusion field on a grid of 2 m columns over the floor cut at its terraces, risers
 as walls, open at its sides and top, stepped by Douglas-Gunn ADI (`theta = 1`) every tick in the roster's step,
 so the heartbeat and Clu step it alike; `odour.rs` emits each orb into it and reads the amphids from it. The
 closed form stays as the open-floor reference (within 8%). Outside the state hash; 1.47 ms a tick. Owed next: the
-organ declaration on the wire, then the smoke in the spectator window (the ruling's order).d the
-`grid` library) and the wire carries a tick (link protocol v3 then; v12 today). The blueprint is the flagship's
-[docs/TOPOLOGY.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/TOPOLOGY.md)
-— its § Master Control's mechanics and § One tick, across the wire sections carry every
-mechanism below with its citation; this file only stages the server-side etapes so they are not
-forgotten.
+organ declaration on the wire, then the smoke in the spectator window (the ruling's order).
+
+**Done (2026-11-04), heat: the temperature field** - step 2 of the flagship's
+[docs/THERMORECEPTION.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/THERMORECEPTION.md)
+§ The build, in order. `src/heat.rs` is the excess over the ambient in an air of its own over the same grid
+(`Air<1>`, the solver shared through `air::Medium` and held cells): air's thermal diffusivity at 300 K (22.5e-6
+m^2/s, Incropera Table A.4) scaled as the odour's, 451.6 m^2/s; the floor a reservoir holding its thermal map
+(`--ambient`, 20 °C by default after Brenner 1974; `--floor-gradient` in °C per cm and
+`--floor-gradient-direction`, off by default, 0.5 the assay's); the six energy pillars held `--pillar-heat` warm
+(10 K by default, a chosen setting); the top and sides open to the ambient. Stepped in every roster step the
+heartbeat runs, outside the state hash; the chain golden replays unchanged. 0.80 ms a tick more, 2.26 ms in all.
+
+**Owed for heat**, in the design's order:
+
+- **Bodies as heat sources** (step 3): each body's temperature by heat balance from its declared metabolism, and
+  each body a source in the field.
+- **The thermoreceptors** (step 4): the readings in the letter, with the noses' declaration bump. When a reading
+  first leaves the world, the thermal map and the pillar heat join the input log's header (and Clu builds the field
+  from them) - today Clu builds no field, since nothing it checks reads one.
+- **The pillars are mirrored by hand** from the flagship's `pillarPlacements` (`heat::PILLARS`); a world
+  definition on the wire would end the copy.
+- **The cost**: odour and heat together take 2.26 ms a tick in release, past the 1-2 ms the air was budgeted.
+  A shared line walk for both fields (factors per field, one pass over the lines) is the first thing to try when
+  the budget bites.
 
 ## Etape 1 — the heartbeat
 
