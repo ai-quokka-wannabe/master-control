@@ -15,8 +15,8 @@
 
 //! The documentation's figures, drawn from the world's own code: `cargo run --example figures`
 //! writes `docs/figures/*.svg`. Nothing here models anything - the orbs come from
-//! `food::place`, the floor from `physics::floor`, every reading from `odour`'s own functions -
-//! so a figure that changes is a world that changed.
+//! `food::place`, the floor from `physics::floor`, every reading from `odour`'s and `heat`'s own
+//! functions - so a figure that changes is a world that changed.
 //!
 //! The output is deterministic, byte for byte: the world's arithmetic is IEEE basic operations
 //! and its own `exp` and `erfc`, every number is printed with a fixed number of decimals, and
@@ -25,6 +25,7 @@
 
 use master_control::food::{self, DEFAULT_DENSITY, FoodSettings, ORB_RADIUS, Orb};
 use master_control::ground::GRID_FLOOR_CONFIG;
+use master_control::heat::{ASSAY_GRADIENT, HeatField, HeatSettings, PILLARS};
 use master_control::odour::{
     BODY_LENGTH, DECAY_LENGTH, Field, RECEPTOR_TYPES, bound_fraction, open_air_reference,
 };
@@ -85,6 +86,7 @@ fn main() {
         ("smell.svg", smell(&worlds, &maps)),
         ("smell-map.svg", smell_map(&worlds, &maps)),
         ("taste.svg", taste(&worlds[0].1)),
+        ("heat-map.svg", heat_map()),
     ];
     for (name, svg) in figures {
         std::fs::write(out.join(name), svg).expect("the figure can be written");
@@ -183,6 +185,220 @@ impl Svg {
         self.0.push_str("</svg>\n");
         self.0
     }
+}
+
+/// How long the heat map's field is stepped before it is drawn: a minute and a half of ticks,
+/// some three times the time heat takes to cross the floor (heat.rs), so what is left to settle
+/// is far under a pixel's colour.
+const HEAT_SETTLED_TICK: u64 = 32 * 90;
+
+/// The excess over the ambient the heat map's colours span either way, kelvin: the assay
+/// gradient's reach at the floor's edges, so the pillars' cells, held ten kelvin warm, clip.
+const HEAT_SPAN: f64 = 0.75;
+
+/// Colour bands each side of the ambient: the map reads as isotherms, a band every
+/// `HEAT_SPAN / HEAT_BANDS` kelvin.
+const HEAT_BANDS: f64 = 15.0;
+
+/// A temperature excess as the heat map colours it: cool blue below the ambient, the floor's dark
+/// at it, orange to white above, in [`HEAT_BANDS`] bands a side, clipped at [`HEAT_SPAN`].
+fn heat_colour(excess: f64) -> String {
+    let t = ((excess / HEAT_SPAN).clamp(-1.0, 1.0) * HEAT_BANDS).round() / HEAT_BANDS;
+    let ambient = [14.0, 22.0, 36.0];
+    if t < 0.0 {
+        mix(ambient, [40.0, 120.0, 255.0], -t)
+    } else if t < 0.6 {
+        mix(ambient, [255.0, 158.0, 27.0], t / 0.6)
+    } else {
+        mix([255.0, 158.0, 27.0], [255.0, 245.0, 225.0], (t - 0.6) / 0.4)
+    }
+}
+
+/// The settled excess over the ambient at a worm's nose over the centre of every column, row by
+/// row, for these settings.
+fn heat_samples(settings: &HeatSettings) -> Vec<Vec<f64>> {
+    let mut field = HeatField::new(settings);
+    for _ in 0..HEAT_SETTLED_TICK {
+        field.step();
+    }
+    let cells = GRID_FLOOR_CONFIG.cells;
+    let size = f64::from(GRID_FLOOR_CONFIG.cell_size);
+    let low = floor_extent().0;
+    (0..cells)
+        .map(|j| {
+            (0..cells)
+                .map(|i| {
+                    let x = low + (f64::from(i) + 0.5) * size;
+                    let z = low + (f64::from(j) + 0.5) * size;
+                    #[allow(clippy::cast_possible_truncation)]
+                    let ground = f64::from(floor(x as f32, z as f32));
+                    field.temperature_at([x, ground + f64::from(BODY_HALF_HEIGHT), z])
+                        - field.ambient_kelvin()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The heat map: the settled temperature at nose height over the floor, the default world's and
+/// the thermotaxis assay's.
+fn heat_map() -> String {
+    let (size, gap, margin, top) = (420.0, 32.0, 24.0, 64.0);
+    let width = 2.0 * margin + 2.0 * size + gap;
+    let height = top + size + 136.0;
+    let mut svg = Svg::new(
+        width,
+        height,
+        "Heat over the whole floor",
+        "The settled temperature at a worm's nose over the floor, from the world's air on its grid (heat.rs, air.rs): \
+         the floor holds its thermal map, the six energy pillars are held warm, risers are walls and the open air is at the ambient. \
+         Left the default world (a level floor at 20 degrees Celsius), right the thermotaxis assay's gradient of 0.5 degrees Celsius per centimetre along x.",
+    );
+    svg.text(
+        margin,
+        30.0,
+        20.0,
+        TEXT,
+        "start",
+        "Heat over the whole floor: the pillars and the floor's gradient",
+    );
+    svg.text(
+        margin,
+        50.0,
+        13.0,
+        DIM,
+        "start",
+        &format!(
+            "Settled field ({} s in), excess over the ambient at nose height, one sample per {} m column; pillars held {} K warm (a chosen setting)",
+            HEAT_SETTLED_TICK / 32,
+            n(f64::from(GRID_FLOOR_CONFIG.cell_size)),
+            n(HeatSettings::default().pillar_excess)
+        ),
+    );
+    let worlds = [
+        (
+            HeatSettings::default(),
+            "default: level floor at 20 °C".to_string(),
+        ),
+        (
+            HeatSettings {
+                gradient: ASSAY_GRADIENT,
+                ..HeatSettings::default()
+            },
+            format!(
+                "--floor-gradient {}: the assay's {} °C per cm (44.8 m), warmer to +x",
+                n(ASSAY_GRADIENT),
+                n(ASSAY_GRADIENT)
+            ),
+        ),
+    ];
+    let levels = cell_levels();
+    let cell_world = f64::from(GRID_FLOOR_CONFIG.cell_size);
+    for (index, (settings, heading)) in worlds.iter().enumerate() {
+        #[allow(clippy::cast_precision_loss)]
+        let panel = Panel {
+            left: margin + index as f64 * (size + gap),
+            top,
+            size,
+        };
+        let cell = cell_world * panel.scale();
+        let samples = heat_samples(settings);
+        svg.0.push_str("<g shape-rendering=\"crispEdges\">\n");
+        for (j, row) in samples.iter().enumerate() {
+            let mut i = 0;
+            while i < row.len() {
+                let colour = heat_colour(row[i]);
+                let mut end = i + 1;
+                while end < row.len() && heat_colour(row[end]) == colour {
+                    end += 1;
+                }
+                #[allow(clippy::cast_precision_loss)]
+                svg.rect(
+                    panel.left + i as f64 * cell,
+                    panel.top + j as f64 * cell,
+                    (end - i) as f64 * cell,
+                    cell,
+                    &colour,
+                );
+                i = end;
+            }
+        }
+        svg.0.push_str("</g>\n");
+        // The risers, faint, over the field: the floor's own outline without its tint.
+        let mut outline = Svg(String::new());
+        draw_floor(&mut outline, &panel, &levels);
+        if let Some(path) = outline.0.lines().find(|line| line.starts_with("<path")) {
+            svg.0.push_str(path);
+            svg.0.push('\n');
+        }
+        for pillar in PILLARS {
+            let (x, y) = panel.at(pillar.x - pillar.half_width, pillar.z - pillar.half_width);
+            let side = 2.0 * pillar.half_width * panel.scale();
+            let _ = writeln!(
+                svg.0,
+                r#"<rect x="{}" y="{}" width="{}" height="{}" fill="none" stroke="{MAGENTA}" stroke-width="1.5"/>"#,
+                n(x - 2.0),
+                n(y - 2.0),
+                n(side + 4.0),
+                n(side + 4.0)
+            );
+        }
+        panel.frame(&mut svg);
+        svg.text(
+            panel.left + 0.5 * size,
+            top + size + 22.0,
+            13.0,
+            if index == 0 { ORANGE } else { TEXT },
+            "middle",
+            heading,
+        );
+    }
+    // The legend: the colour ramp across the span.
+    let (legend_left, legend_top, legend_width) = (margin, top + size + 48.0, 360.0);
+    for step in 0..60 {
+        let excess = HEAT_SPAN * (f64::from(step) / 30.0 - 1.0);
+        svg.rect(
+            legend_left + f64::from(step) / 60.0 * legend_width,
+            legend_top,
+            legend_width / 60.0 + 0.3,
+            12.0,
+            &heat_colour(excess + HEAT_SPAN / 60.0),
+        );
+    }
+    for (excess, label, anchor) in [
+        (-HEAT_SPAN, format!("-{} K", n(HEAT_SPAN)), "start"),
+        (0.0, "ambient".to_string(), "middle"),
+        (HEAT_SPAN, format!("+{} K or more", n(HEAT_SPAN)), "end"),
+    ] {
+        let x = legend_left + (excess / HEAT_SPAN + 1.0) * 0.5 * legend_width;
+        svg.line((x, legend_top + 12.0), (x, legend_top + 17.0), DIM, 1.0, "");
+        svg.text(x, legend_top + 30.0, 11.0, DIM, anchor, &label);
+    }
+    svg.text(
+        legend_left + legend_width + 24.0,
+        legend_top + 10.0,
+        12.0,
+        DIM,
+        "start",
+        "Magenta squares: the energy pillars. The floor holds the air near it",
+    );
+    svg.text(
+        legend_left + legend_width + 24.0,
+        legend_top + 26.0,
+        12.0,
+        DIM,
+        "start",
+        "to its own temperature; a pillar's warmth reaches a worm's nose",
+    );
+    svg.text(
+        legend_left + legend_width + 24.0,
+        legend_top + 42.0,
+        12.0,
+        DIM,
+        "start",
+        "a few body lengths off (THERMORECEPTION.md).",
+    );
+    svg.finish()
 }
 
 /// A colour between two, `t` in [0, 1], as `#rrggbb`.

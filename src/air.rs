@@ -15,7 +15,11 @@
 
 //! The Grid's air: a diffusion field on a grid of cells over the floor, in which the risers are
 //! walls - the world's half of the flagship's CHEMORECEPTION.md "The air, the noses and the
-//! smoke" (ruled 2026-11-04). Odour is its first tenant (odour.rs); heat is meant to reuse it.
+//! smoke" (ruled 2026-11-04). Odour is its first tenant (odour.rs), eight channels in one air;
+//! the temperature its second (heat.rs), one channel in an air of its own over the same grid,
+//! because its diffusivity is not the odour's and the lines' factors are the diffusivity's. What
+//! differs between the two is a [`Medium`]: the diffusivity, the loss, the open edges' decay
+//! length, and whether the floor is a wall or a reservoir.
 //!
 //! **The grid.** One column per cell of the floor (2 m, 64 x 64 over the 128 m floor), cut into
 //! layers from the lowest floor upwards. The layers are [`FINE_LAYER`] thick - one terrace step,
@@ -32,6 +36,15 @@
 //! settled field leave as it would into open air (exact for a plane front; a point source's own
 //! spreading drains a little faster, so the edges hold slightly more than open air would). With
 //! no loss the decay length is infinite and the edges close: the box is sealed, and conserves.
+//!
+//! **Held cells.** A field may also be held: a cell coupled, at a rate per second, to a value it
+//! is pulled towards - what it is given goes in with the sources, what it gives back sits in its
+//! vertical line's diagonal, so the step stays implicit. A held floor is one hold under each
+//! column's lowest air cell, across its bottom face half a cell from its centre, at the floor's
+//! value there ([`Air::set_floor`]): a Dirichlet reservoir under the air, the risers still walls.
+//! A [`HeldBlock`] holds every cell of the columns it stands in, stiffly ([`HOLD_RATE`]): a
+//! standing source, such as a warm pillar. The odour holds nothing, so its arithmetic is what it
+//! was, bit for bit.
 //!
 //! **The scheme.** Finite volumes, `du/dt = D lap u - k u + s`, stepped by Douglas and Gunn's
 //! alternating-direction implicit method in its delta form with `theta = 1` (Douglas-Rachford):
@@ -52,7 +65,9 @@
 //! measured 1.47 ms in release on the owner's desk (an i9-14900HX, one core), inside the 1-2 ms
 //! the world's step leaves a creature host. The coarser top was chosen over a finer one for that
 //! budget: with two fine layers over the highest terrace, layers growing by 1.5 and the air 30 m
-//! high it had 43,855 cells and cost 1.96 ms, and held the open-floor closed form no closer.
+//! high it had 43,855 cells and cost 1.96 ms, and held the open-floor closed form no closer. The
+//! temperature's one channel over the same cells costs another 0.80 ms on the same desk: a
+//! line's walk is most of a sweep's cost, whatever the channels it carries.
 
 use crate::ground::{GridFloorConfig, grid_mesh_height};
 
@@ -148,41 +163,41 @@ impl Lines {
     /// adds its part for each cell as the elimination reaches it - and is left holding the
     /// solution; or, given `field`, the solution is added to the field and `work` left at zero
     /// for the next step. The lines of one axis share no cell, so each is solved alone.
-    fn solve(
+    fn solve<const N: usize>(
         &self,
         group: usize,
-        work: &mut [Cell],
-        extra: &impl Fn(usize, &mut Cell),
-        mut field: Option<&mut [Cell]>,
+        work: &mut [[f64; N]],
+        extra: &impl Fn(usize, &mut [f64; N]),
+        mut field: Option<&mut [[f64; N]]>,
     ) {
         let (first, last) = self.groups[group];
         for &(start, length) in &self.spans[first..last] {
             let line = &self.entries[start..start + length];
             // Forward: the eliminated right-hand side, in place.
-            let mut previous = [0.0; CHANNELS];
+            let mut previous = [0.0; N];
             for entry in line {
                 let slot = &mut work[entry.cell as usize];
                 extra(entry.cell as usize, slot);
-                for c in 0..CHANNELS {
+                for c in 0..N {
                     slot[c] = (slot[c] + entry.lower * previous[c]) * entry.pivot;
                 }
                 previous = *slot;
             }
             // Back: each cell plus its modified coupling to the one after.
-            let mut next = [0.0; CHANNELS];
+            let mut next = [0.0; N];
             for entry in line.iter().rev() {
                 let (cell, modified) = (entry.cell, entry.modified);
                 let slot = &mut work[cell as usize];
-                for c in 0..CHANNELS {
+                for c in 0..N {
                     next[c] = slot[c] + modified * next[c];
                 }
                 match field.as_deref_mut() {
                     Some(field) => {
                         let value = &mut field[cell as usize];
-                        for c in 0..CHANNELS {
+                        for c in 0..N {
                             value[c] += next[c];
                         }
-                        *slot = [0.0; CHANNELS];
+                        *slot = [0.0; N];
                     }
                     None => *slot = next,
                 }
@@ -204,9 +219,75 @@ struct Stencil {
     out: f64,
 }
 
-/// The air over one floor: its grid, its walls, its constants and the field it holds.
+/// What fills the air and how its boundaries treat it: the constants one field is stepped with.
+/// Odour and heat share the grid and the scheme, and differ only here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Medium {
+    /// The diffusivity, m^2/s.
+    pub diffusivity: f64,
+    /// The first-order loss rate, per second.
+    pub loss_rate: f64,
+    /// The open edges' decay length, metres: outside the grid the field is taken to fall as
+    /// `exp(-s / L)` with distance `s`. Infinite seals the edges.
+    pub open_decay: f64,
+    /// Whether the floor is a reservoir under the air rather than a wall: each column's lowest
+    /// air cell then exchanges across its bottom face with the floor's own value there
+    /// ([`Air::set_floor`]), half a cell from its centre. The risers stay walls either way.
+    pub floor_held: bool,
+}
+
+impl Medium {
+    /// A field that is lost at a first-order rate, over a floor that is a wall, its open edges at
+    /// the decay length `sqrt(D / k)` - sealed without loss: the odour's.
+    #[must_use]
+    pub fn lossy(diffusivity: f64, loss_rate: f64) -> Medium {
+        let open_decay = if loss_rate > 0.0 {
+            (diffusivity / loss_rate).sqrt()
+        } else {
+            f64::INFINITY
+        };
+        Medium {
+            diffusivity,
+            loss_rate,
+            open_decay,
+            floor_held: false,
+        }
+    }
+}
+
+/// How hard a held cell is held to its value, per second: so stiff that a cell of the fine air,
+/// whose conductances to its neighbours sum to under two thousand per second for heat, sits
+/// within two parts in a thousand of its value against all of them pulling. Any stiffer changes
+/// nothing a reading could tell; the step stays implicit, so it costs no stability.
+pub const HOLD_RATE: f64 = 1e6;
+
+/// A block of the air held at a value: every air cell of every column its footprint overlaps,
+/// from the column's floor up to the cells whose centres lie below its top. How a standing
+/// source is laid into the grid - a pillar narrower than a column is the columns it stands in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HeldBlock<const N: usize> {
+    /// The footprint's low corner, (x, z), metres.
+    pub low: [f64; 2],
+    /// The footprint's high corner, (x, z), metres.
+    pub high: [f64; 2],
+    /// Its top, metres.
+    pub top: f64,
+    /// The value its cells are held at.
+    pub value: [f64; N],
+}
+
+/// One held cell: the cell, its coupling to the held value per second, and the value.
+#[derive(Clone, Copy, Debug)]
+struct Hold<const N: usize> {
+    cell: u32,
+    rate: f64,
+    value: [f64; N],
+}
+
+/// The air over one floor: its grid, its walls, its constants and the field it holds, a channel
+/// per `N` - the odour's eight by default, the temperature's one.
 #[derive(Clone, Debug)]
-pub struct Air {
+pub struct Air<const N: usize = CHANNELS> {
     /// Columns per side, and their size, metres.
     columns: usize,
     column_size: f64,
@@ -224,32 +305,43 @@ pub struct Air {
     lines: [Lines; 3],
     /// Each cell's volume, cubic metres.
     volume: Vec<f64>,
+    /// Every held cell: the floor's under each column first, when the floor is held, in column
+    /// order; then the held blocks', block by block.
+    holds: Vec<Hold<N>>,
+    /// How many of the holds are the floor's.
+    floor_holds: usize,
     /// The step, seconds.
     dt: f64,
     /// The field, and the step's working storage (the change over a step).
-    field: Vec<Cell>,
-    work: Vec<Cell>,
+    field: Vec<[f64; N]>,
+    work: Vec<[f64; N]>,
 }
 
-impl Air {
-    /// Still, empty air over a floor, with a diffusivity (m^2/s) and a first-order loss rate (per
-    /// second), stepped every `dt` seconds.
-    #[must_use]
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-    pub fn new(floor: &GridFloorConfig, diffusivity: f64, loss_rate: f64, dt: f64) -> Air {
-        let columns = floor.cells.max(1) as usize;
-        let column_size = f64::from(floor.cell_size);
-        let half = 0.5 * columns as f64 * column_size;
-        // The floor under each column's centre: the drawn floor's own level for the cell.
-        let mut heights = Vec::with_capacity(columns * columns);
-        for j in 0..columns {
-            for i in 0..columns {
-                let x = -half + (i as f64 + 0.5) * column_size;
-                let z = -half + (j as f64 + 0.5) * column_size;
-                let height = grid_mesh_height(x as f32, z as f32, floor);
-                heights.push(f64::from(height));
-            }
+/// A floor's columns as the air sees it: how many to a side, their size, and the drawn floor's
+/// level under each column's centre, row by row in z.
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+fn columns_of(floor: &GridFloorConfig) -> (usize, f64, Vec<f64>) {
+    let columns = floor.cells.max(1) as usize;
+    let column_size = f64::from(floor.cell_size);
+    let half = 0.5 * columns as f64 * column_size;
+    let mut heights = Vec::with_capacity(columns * columns);
+    for j in 0..columns {
+        for i in 0..columns {
+            let x = -half + (i as f64 + 0.5) * column_size;
+            let z = -half + (j as f64 + 0.5) * column_size;
+            let height = grid_mesh_height(x as f32, z as f32, floor);
+            heights.push(f64::from(height));
         }
+    }
+    (columns, column_size, heights)
+}
+
+impl Air<CHANNELS> {
+    /// Still, empty air over a floor, with a diffusivity (m^2/s) and a first-order loss rate (per
+    /// second), stepped every `dt` seconds: the odour's ([`Medium::lossy`]).
+    #[must_use]
+    pub fn new(floor: &GridFloorConfig, diffusivity: f64, loss_rate: f64, dt: f64) -> Air {
+        let (columns, column_size, heights) = columns_of(floor);
         Air::over(columns, column_size, &heights, diffusivity, loss_rate, dt)
     }
 
@@ -260,11 +352,6 @@ impl Air {
     /// # Panics
     /// When `heights` does not hold a height for every column.
     #[must_use]
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::cast_possible_truncation,
-        clippy::too_many_lines
-    )]
     pub fn over(
         columns: usize,
         column_size: f64,
@@ -273,6 +360,55 @@ impl Air {
         loss_rate: f64,
         dt: f64,
     ) -> Air {
+        Air::laid_out(
+            columns,
+            column_size,
+            heights,
+            &Medium::lossy(diffusivity, loss_rate),
+            &[],
+            dt,
+        )
+    }
+}
+
+impl<const N: usize> Air<N> {
+    /// Still air of any medium over the world's floor, with blocks of it held.
+    #[must_use]
+    pub fn on(
+        floor: &GridFloorConfig,
+        medium: &Medium,
+        blocks: &[HeldBlock<N>],
+        dt: f64,
+    ) -> Air<N> {
+        let (columns, column_size, heights) = columns_of(floor);
+        Air::laid_out(columns, column_size, &heights, medium, blocks, dt)
+    }
+
+    /// Still air of any medium over any floor ([`Air::over`]'s), with blocks of it held: the one
+    /// door every other constructor goes through.
+    ///
+    /// # Panics
+    /// When `heights` does not hold a height for every column.
+    #[must_use]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::too_many_lines
+    )]
+    pub fn laid_out(
+        columns: usize,
+        column_size: f64,
+        heights: &[f64],
+        medium: &Medium,
+        blocks: &[HeldBlock<N>],
+        dt: f64,
+    ) -> Air<N> {
+        let Medium {
+            diffusivity,
+            loss_rate,
+            open_decay: decay,
+            floor_held,
+        } = *medium;
         assert_eq!(
             heights.len(),
             columns * columns,
@@ -321,12 +457,7 @@ impl Air {
         };
 
         // The open edges' conductance per unit volume, by the far-field condition: a face half a
-        // cell from the centre, then a decay length of open air - none without loss, sealed.
-        let decay = if loss_rate > 0.0 {
-            (diffusivity / loss_rate).sqrt()
-        } else {
-            f64::INFINITY
-        };
+        // cell from the centre, then a decay length of open air - none for an infinite one, sealed.
         let open = |size: f64| {
             if decay.is_finite() {
                 diffusivity / (size * (decay + 0.5 * size))
@@ -337,6 +468,53 @@ impl Air {
         let horizontal = diffusivity / (column_size * column_size);
         let edge = open(column_size);
         let third_of_loss = loss_rate / 3.0;
+
+        // The held cells: the floor's under each column's lowest air cell, across its bottom face
+        // half a cell from its centre; then every block's. Each cell's couplings to its holds,
+        // per second, go into its vertical line, as the floor's bottom face is that line's.
+        let mut holds: Vec<Hold<N>> = Vec::new();
+        if floor_held {
+            for (column, &first) in first_air.iter().enumerate() {
+                if first < layers {
+                    holds.push(Hold {
+                        cell: start[column] as u32,
+                        rate: 2.0 * diffusivity / (thick(first) * thick(first)),
+                        value: [0.0; N],
+                    });
+                }
+            }
+        }
+        let floor_holds = holds.len();
+        for block in blocks {
+            for j in 0..columns {
+                for i in 0..columns {
+                    let left = origin[0] + i as f64 * column_size;
+                    let near = origin[1] + j as f64 * column_size;
+                    let overlaps = block.low[0] < left + column_size
+                        && block.high[0] > left
+                        && block.low[1] < near + column_size
+                        && block.high[1] > near;
+                    if !overlaps {
+                        continue;
+                    }
+                    let first = first_air[j * columns + i];
+                    for k in first..layers {
+                        if k > first && centre(k) >= block.top {
+                            break;
+                        }
+                        holds.push(Hold {
+                            cell: index(i, j, k),
+                            rate: HOLD_RATE,
+                            value: block.value,
+                        });
+                    }
+                }
+            }
+        }
+        let mut held = vec![0.0; total];
+        for hold in &holds {
+            held[hold.cell as usize] += hold.rate;
+        }
 
         let mut stencils = Vec::with_capacity(total);
         let mut volume = Vec::with_capacity(total);
@@ -395,7 +573,7 @@ impl Air {
                         diffusivity / (thick(k) * (centre(k + 1) - centre(k)))
                     };
                     let top = if k + 1 == layers { open(thick(k)) } else { 0.0 };
-                    let along_v = below + above + top;
+                    let along_v = below + above + top + held[cell as usize];
                     stencils.push(Stencil {
                         neighbours,
                         below,
@@ -482,11 +660,31 @@ impl Air {
             horizontal,
             lines,
             volume,
+            holds,
+            floor_holds,
             dt,
             // One cell more than the air holds: the zero every missing neighbour reads.
-            field: vec![[0.0; CHANNELS]; total + 1],
-            work: vec![[0.0; CHANNELS]; total],
+            field: vec![[0.0; N]; total + 1],
+            work: vec![[0.0; N]; total],
         }
+    }
+
+    /// Sets the floor's value under every column, from the point at the centre of the column's
+    /// floor - its lowest air cell's bottom face. Nothing for a floor that is a wall.
+    pub fn set_floor(&mut self, value: impl Fn([f64; 3]) -> [f64; N]) {
+        for n in 0..self.floor_holds {
+            let cell = self.holds[n].cell as usize;
+            let [x, _, z] = self.centre_of(cell);
+            let column = self.start.partition_point(|&s| s <= cell) - 1;
+            let floor = self.bounds[self.first_air[column]];
+            self.holds[n].value = value([x, floor, z]);
+        }
+    }
+
+    /// How many cells are held, the floor's included.
+    #[must_use]
+    pub fn held_cells(&self) -> usize {
+        self.holds.len()
     }
 
     /// How many air cells the grid holds.
@@ -566,7 +764,7 @@ impl Air {
     /// the air only and never across a wall - a corner counts only when every cell between it and
     /// the point's own is air - with the weights of the corners left renormalised to one.
     #[must_use]
-    pub fn at(&self, point: [f64; 3]) -> Cell {
+    pub fn at(&self, point: [f64; 3]) -> [f64; N] {
         let (i, tx) = self.column_of(point[0], 0);
         let (j, tz) = self.column_of(point[2], 1);
         let layers = self.layers();
@@ -574,7 +772,7 @@ impl Air {
             .layer_of(point[1])
             .max(self.first_air[j * self.columns + i]);
         if k >= layers {
-            return [0.0; CHANNELS];
+            return [0.0; N];
         }
         // The neighbour on the point's side along each axis, and how far towards it.
         let towards = |column: usize, within: f64, count: usize| -> (Option<usize>, f64) {
@@ -607,7 +805,7 @@ impl Air {
                 *slot = self.index(ci, cj, ck);
             }
         }
-        let mut sum = [0.0; CHANNELS];
+        let mut sum = [0.0; N];
         let mut weights = 0.0;
         for bits in 0..8usize {
             // Connected: every corner whose bits are a subset of this one's is air.
@@ -637,12 +835,19 @@ impl Air {
 
     /// One step: every source emits into its cell at its rate per channel (units per second) -
     /// in the order given - and the field diffuses, decays and leaves by the open edges.
-    pub fn step(&mut self, sources: &[(usize, Cell)]) {
-        // The working storage starts every step at zero; the sources go in first.
+    pub fn step(&mut self, sources: &[(usize, [f64; N])]) {
+        // The working storage starts every step at zero; the sources go in first, then what
+        // every held cell is given by its hold (what it gives back is in its stencil).
         for &(cell, rate) in sources {
             let scale = self.dt / self.volume[cell];
             for (slot, r) in self.work[cell].iter_mut().zip(rate) {
                 *slot += scale * r;
+            }
+        }
+        for hold in &self.holds {
+            let scale = self.dt * hold.rate;
+            for (slot, v) in self.work[hold.cell as usize].iter_mut().zip(hold.value) {
+                *slot += scale * v;
             }
         }
         // The change over the step: its explicit part, dt A u, added cell by cell as the sweep up
@@ -660,19 +865,19 @@ impl Air {
             ..
         } = self;
         let (dt, horizontal) = (*dt, *horizontal);
-        let explicit = |cell: usize, change: &mut Cell| {
+        let explicit = |cell: usize, change: &mut [f64; N]| {
             let stencil = &stencils[cell];
             let here = &field[cell];
             // A missing neighbour is the field's last cell, outside every line and always zero.
             let [w, e, s, n, b, a] = stencil.neighbours.map(|cell| &field[cell as usize]);
-            for c in 0..CHANNELS {
+            for c in 0..N {
                 let sides = w[c] + e[c] + s[c] + n[c];
                 change[c] += dt
                     * (horizontal * sides + stencil.below * b[c] + stencil.above * a[c]
                         - stencil.out * here[c]);
             }
         };
-        let nothing = |_: usize, _: &mut Cell| {};
+        let nothing = |_: usize, _: &mut [f64; N]| {};
         for row in 0..v.groups.len() {
             v.solve(row, work, &explicit, None);
             x.solve(row, work, &nothing, None);
@@ -682,14 +887,14 @@ impl Air {
 
     /// The whole field, cell by cell.
     #[must_use]
-    pub fn field(&self) -> &[Cell] {
+    pub fn field(&self) -> &[[f64; N]] {
         &self.field[..self.volume.len()]
     }
 
     /// The amount of each channel the air holds: concentration times volume, summed in cell order.
     #[must_use]
-    pub fn total(&self) -> Cell {
-        let mut sum = [0.0; CHANNELS];
+    pub fn total(&self) -> [f64; N] {
+        let mut sum = [0.0; N];
         for (cell, volume) in self.field.iter().zip(&self.volume) {
             for (slot, value) in sum.iter_mut().zip(cell) {
                 *slot += value * volume;
@@ -716,14 +921,14 @@ impl Air {
 
     /// Sets one cell's every channel: a test's initial condition.
     #[cfg(test)]
-    pub(crate) fn set(&mut self, cell: usize, value: Cell) {
+    pub(crate) fn set(&mut self, cell: usize, value: [f64; N]) {
         self.field[cell] = value;
     }
 
     /// Takes another air's field over the same grid: how the tests settle a field with a cycle of
     /// step sizes, each of which leaves the same steady state.
     #[cfg(test)]
-    pub(crate) fn take_field(&mut self, other: &Air) {
+    pub(crate) fn take_field(&mut self, other: &Air<N>) {
         assert_eq!(self.field.len(), other.field.len(), "the same grid");
         self.field.copy_from_slice(&other.field);
     }

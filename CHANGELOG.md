@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The rotation sense in the letter (protocol v14).** The flagship's ruling of 2026-11-04 (its `docs/PERCEPTION.md`
+  § Imperfection at the body's own senses): the Grid no longer derives `angular_velocity` from the rows' yaw rate,
+  the world composes it. `external/link` moves to v14 (link#59) and the mirror to client ABI 12: the letter gains
+  `angular_velocity` after `specific_force`, loses `reserved1` and is 168 bytes. It is composed beside the force, at
+  the head and in the same body frame, right-handed, from the yaw and pitch the head actually turned through over
+  the tick; roll is held at zero by the model. Exact - its noise comes later, with sourced figures - and in the
+  bodies' hash. The chain golden is re-recorded at protocol 14: 1,075 ticks, 33 hashes, every intent on its tick.
 - **A deep audit: honest warnings, a sturdier Clu, comments that agree with the code.** Asked for by the owner:
   every issue, even a cosmetic one, and every warning an executable prints. Clu's note that a log came from
   another build while the two agreed is now `[INFO]`, not `[WARN]` - agreement is not a problem - and a full or
@@ -61,6 +68,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LENGTH_SCALE` squared: salt spreads 2.8 m in a minute. `--leach-rate` and `--solute-fade` (config keys
   `leach-rate`, `solute-fade`; defaults 1 unit/s and 5e-4 /s) are chosen world settings. Outside the state
   hash; 0.15 ms a tick. A new figure, `docs/figures/taste.svg`, shows the rings.
+
+- **Heat: the temperature field.** Step 2 of the flagship's `docs/THERMORECEPTION.md` (ruled 2026-11-04): the
+  temperature is a second tenant of the Grid's air (`src/heat.rs`), by the same solver with the risers as walls -
+  `Air` is now generic over its channels and takes a `Medium` (diffusivity, loss, the open edges' decay length, a
+  floor that is a wall or a reservoir), and gains held cells; the odour holds nothing and steps the same bits as
+  before. Air's thermal diffusivity at 300 K (22.5e-6 m^2/s, Incropera Table A.4) is scaled as the odour's, to
+  451.6 m^2/s. The floor holds its thermal map, under four new flags and config keys: `--ambient` (20 °C by
+  default, the worm's cultivation temperature after Brenner 1974), `--floor-gradient` in °C per centimetre of the
+  worm's world (0 by default; 0.5 is the thermotaxis assay's) and `--floor-gradient-direction`, and `--pillar-heat`,
+  the kelvin the six energy pillars are held above the ambient (10 by default - a chosen setting, since a pillar
+  has no physical counterpart). The top and sides relax to the ambient. The heartbeat's world steps it every
+  tick, outside the state hash, and the chain golden replays unchanged; it adds 0.80 ms a tick in release to the
+  odour's 1.46. `docs/figures/heat-map.svg` draws the settled field. Bodies as sources and the thermoreceptors are
+  next.
+
 - **The air: odour on a grid, risers as walls.** The flagship's ruling of 2026-11-04 (tron-grid-lite#186): Master
   Control owns the air. `src/air.rs` is a numerical diffusion field on 64 x 64 columns of 2 m over the floor, in 12
   layers - a terrace step (5/6 m) thick to a step above the highest terrace, then doubling to 110 m - solid below the

@@ -204,6 +204,10 @@ pub struct Roster {
     /// The floor's solutes the food leaches, stepped after the air every tick; none without
     /// food. Outside the state hash, like the odour: nothing tastes them yet (solutes.rs).
     solutes: Option<crate::solutes::Floor>,
+    /// The air's temperature, stepped with the odour every tick; none unless the caller gives
+    /// the world its thermal map. World state outside the state hash, as the odour is: nothing
+    /// moves by it yet, and it is a pure function of the launch settings and the tick (heat.rs).
+    heat: Option<crate::heat::HeatField>,
     /// The run's master seed, for the senses' counting noise (the RNG-of-record rule).
     master_seed: u64,
 }
@@ -249,6 +253,19 @@ impl Roster {
     #[must_use]
     pub fn solutes(&self) -> Option<&crate::solutes::Floor> {
         self.solutes.as_ref()
+    }
+
+    /// The world's temperature, from the launch settings' thermal map and pillar heat.
+    #[must_use]
+    pub fn with_heat(mut self, settings: &crate::heat::HeatSettings) -> Roster {
+        self.heat = Some(crate::heat::HeatField::new(settings));
+        self
+    }
+
+    /// The air's temperature, if the world has one.
+    #[must_use]
+    pub fn heat(&self) -> Option<&crate::heat::HeatField> {
+        self.heat.as_ref()
     }
 
     /// Every orb the world holds, gone ones included (their odour lingers).
@@ -512,6 +529,9 @@ impl Roster {
         if let Some(odour) = &mut self.odour {
             odour.step(&self.food);
         }
+        if let Some(heat) = &mut self.heat {
+            heat.step();
+        }
         if let Some(solutes) = &mut self.solutes {
             solutes.step(&self.food);
         }
@@ -672,6 +692,8 @@ impl Roster {
                     grounded: u8::from(body.grounded),
                     reserved0: [0; 3],
                     specific_force: body.specific_force,
+                    // And what the canals read, composed beside it (protocol v14).
+                    angular_velocity: body.angular_velocity,
                     // The servos' own readings - a body of one segment reports seven zeros.
                     joint_angles: body.chain.joint_angles(),
                     // And the load each holds with - what the letter alone can carry.
@@ -692,7 +714,6 @@ impl Roster {
                         }
                         flat
                     },
-                    reserved1: [0; 4],
                 };
                 letters.push(Letter {
                     owner,
@@ -1514,7 +1535,6 @@ mod tests {
             [0.0; 4],
             "a chain of four has three joints"
         );
-        assert_eq!(letter.header.reserved1, [0; 4]);
         assert!(
             letter.header.joint_torques[..3]
                 .iter()

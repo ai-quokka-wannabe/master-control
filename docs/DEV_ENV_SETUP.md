@@ -147,7 +147,9 @@ stop signal).
 
 ```text
 master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
-               [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--config <file>]
+               [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--ambient <°C>]
+               [--floor-gradient <°C per cm>] [--floor-gradient-direction <degrees>] [--pillar-heat <K>]
+               [--config <file>]
                [--leach-rate <per s>] [--solute-fade <per s>]
 master-control clu <log> [<disk>]
 ```
@@ -167,6 +169,13 @@ master-control clu <log> [<disk>]
   never reads it: Master Control owns it and tells every client in `WELCOME` (link v13), the
   Disk's header carries it so a replay perceives the same world, and the log's header records it.
   Lower it and walls come back dimmer and quieter; it is a hyperparameter a training run may set.
+- `--ambient`, `--floor-gradient`, `--floor-gradient-direction` and `--pillar-heat` shape the world's
+  temperature field (`src/heat.rs`): the ambient in °C (20 by default, the worm's cultivation temperature;
+  refused at or below absolute zero); a linear floor gradient in °C per centimetre of the worm's world - 44.8 m
+  of the Grid's - (0, a level floor, by default; `0.5` is the classical thermotaxis assay's), warming towards
+  the direction's degrees from +x towards +z (0 by default); and the kelvin the energy pillars are held above
+  the ambient (10 by default, a chosen setting: a pillar is fictional). Nothing reads the field yet, so the
+  log's header does not carry them.
 - `--config <file>` reads `key = value` lines - the long flags without their dashes, `#` for a
   comment - and a flag on the command line wins over the file:
 
@@ -174,6 +183,7 @@ master-control clu <log> [<disk>]
   # world.conf
   food-density = 0.2
   reflection-attenuation = 0.8
+  floor-gradient = 0.5
   log = world.log
   verbose = true
   ```

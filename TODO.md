@@ -1,28 +1,7 @@
 # TODO
 
-The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` an
-
-**Done (2026-11-04), the floor's solutes.** The world's half of taste (CHEMORECEPTION.md "Taste (ruled
-2026-11-04)"): every orb carries a taste profile over sugar, salt, acid and bitter, drawn from its own stream of
-the food's seed (`food::taste_seed`), so no earlier draw moved and the chain golden replays unchanged.
-`src/solutes.rs` is a 2D field on the floor's 2 m cells, Douglas-Rachford ADI, risers as walls, the floor's
-edge sealed, stepped after the air in the roster's step; outside the state hash; 0.15 ms a tick. Free-water
-diffusivities read (sucrose, acetic acid; salt by Nernst-Hartley from read conductances), bitter assumed
-(tryptophan's), all scaled by the air's `LENGTH_SCALE` squared. Owed:
-
-- **Taste organs**, declared with the body in the organs bump: an organ reads `Floor::at` under it, or the orb
-  it is inside. Then the leach rate and fade go into the input log's header (Clu re-steps the field with the
-  defaults today, harmless while nothing reads it).
-- **Caffeine's own diffusivity** (Price, Trickett and Harris 1989), to replace the bitter assumption; and Rard
-  and Miller 1979 for salt, read at the primary.
-
-**Done (2026-11-04), the air.** The flagship's ruling of the day (tron-grid-lite#186): Master Control owns the air.
-`src/air.rs` is a numerical diffusion field on a grid of 2 m columns over the floor cut at its terraces, risers
-as walls, open at its sides and top, stepped by Douglas-Gunn ADI (`theta = 1`) every tick in the roster's step,
-so the heartbeat and Clu step it alike; `odour.rs` emits each orb into it and reads the amphids from it. The
-closed form stays as the open-floor reference (within 8%). Outside the state hash; 1.47 ms a tick. Owed next: the
-organ declaration on the wire, then the smoke in the spectator window (the ruling's order).d the
-`grid` library) and the wire carries a tick (link protocol v3 then; v12 today). The blueprint is the flagship's
+The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` and the
+`grid` library) and the wire carries a tick (link protocol v3 then; v14 today). The blueprint is the flagship's
 [docs/TOPOLOGY.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/TOPOLOGY.md)
 — its § Master Control's mechanics and § One tick, across the wire sections carry every
 mechanism below with its citation; this file only stages the server-side etapes so they are not
@@ -160,7 +139,7 @@ in the log's `food` line), but every world is seed zero; the flag and the header
 The owner's observation (2026-08-22), ruled in `TOPOLOGY.md` § Master Control's mechanics: the
 Grid and every creature are triangles and squares only, so contacts are closed-form and the
 capsule-against-height-function body in `src/physics.rs` is a placeholder that `REZ` retires.
-Gated on the `REZ` payload (Link protocol v4, now v12) and on Etape 2's roster of record.
+Gated on the `REZ` payload (Link protocol v4, now v14) and on Etape 2's roster of record.
 
 - **World collision geometry** = planar faces with adjacency, derived from the same
   world-definition source as the mesh and the reflectors — never from a triangle soup. **A
@@ -470,6 +449,21 @@ to every hosted ear, the scraping body's own included, as energy in the ear's bi
 arrival to range; rc-worm's panel shows a dragging worm's own spikes lighting both ears'
 earliest bins.
 
+## The body's own senses
+
+The ruling is the flagship's
+[docs/PERCEPTION.md § Imperfection at the body's own senses](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/PERCEPTION.md)
+(2026-11-04): every body sense is composed by the world, in the letter, and carries noise.
+
+**Done (2026-11-04), the rotation sense in the letter.** Link v14: the letter's `angular_velocity`, radians per
+second in the body frame the specific force is told in (x right, y up, z backwards), right-handed. The world
+composes it at the head from the yaw and pitch it actually turned through over the tick, carried into that frame;
+roll is held at zero by the model, so nothing turns about the forward axis of its own. Exact, as every body sense
+still is. The Grid copies it instead of deriving it from the rows' yaw rate.
+
+**Still owed:** the noise, per tick, per body and per channel from the RNG of record, with each organ's precision
+declared with the organ and read out of a source - never invented.
+
 ## Food and smell
 
 **The owner's ask (2026-10-29)**, designed in the flagship's
@@ -492,6 +486,50 @@ letter with its `intake` and its two amphids' `odour`, and hands the present orb
 Clu places the same orbs again from the log's `food` line. A test holds the mouth, the pumps, the smell and
 the pew, each red when its wiring was switched off. The bodies' hash does not cover food yet (intake moves
 nothing), so the golden holds; the Grid draws the orbs and hands the senses on next (Program ABI 11).
+
+**Done (2026-11-04), the air.** The flagship's ruling of the day (tron-grid-lite#186): Master Control owns the air.
+`src/air.rs` is a numerical diffusion field on a grid of 2 m columns over the floor cut at its terraces, risers
+as walls, open at its sides and top, stepped by Douglas-Gunn ADI (`theta = 1`) every tick in the roster's step,
+so the heartbeat and Clu step it alike; `odour.rs` emits each orb into it and reads the amphids from it. The
+closed form stays as the open-floor reference (within 8%). Outside the state hash; 1.47 ms a tick. Owed next: the
+organ declaration on the wire, then the smoke in the spectator window (the ruling's order).
+
+**Done (2026-11-04), the floor's solutes.** The world's half of taste (CHEMORECEPTION.md "Taste (ruled
+2026-11-04)"): every orb carries a taste profile over sugar, salt, acid and bitter, drawn from its own stream of
+the food's seed (`food::taste_seed`), so no earlier draw moved and the chain golden replays unchanged.
+`src/solutes.rs` is a 2D field on the floor's 2 m cells, Douglas-Rachford ADI, risers as walls, the floor's
+edge sealed, stepped after the air in the roster's step; outside the state hash; 0.15 ms a tick. Free-water
+diffusivities read (sucrose, acetic acid; salt by Nernst-Hartley from read conductances), bitter assumed
+(tryptophan's), all scaled by the air's `LENGTH_SCALE` squared. Owed:
+
+- **Taste organs**, declared with the body in the organs bump: an organ reads `Floor::at` under it, or the orb
+  it is inside. Then the leach rate and fade go into the input log's header (Clu re-steps the field with the
+  defaults today, harmless while nothing reads it).
+- **Caffeine's own diffusivity** (Price, Trickett and Harris 1989), to replace the bitter assumption; and Rard
+  and Miller 1979 for salt, read at the primary.
+
+**Done (2026-11-04), heat: the temperature field** - step 2 of the flagship's
+[docs/THERMORECEPTION.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/THERMORECEPTION.md)
+§ The build, in order. `src/heat.rs` is the excess over the ambient in an air of its own over the same grid
+(`Air<1>`, the solver shared through `air::Medium` and held cells): air's thermal diffusivity at 300 K (22.5e-6
+m^2/s, Incropera Table A.4) scaled as the odour's, 451.6 m^2/s; the floor a reservoir holding its thermal map
+(`--ambient`, 20 °C by default after Brenner 1974; `--floor-gradient` in °C per cm and
+`--floor-gradient-direction`, off by default, 0.5 the assay's); the six energy pillars held `--pillar-heat` warm
+(10 K by default, a chosen setting); the top and sides open to the ambient. Stepped in every roster step the
+heartbeat runs, outside the state hash; the chain golden replays unchanged. 0.80 ms a tick more, 2.26 ms in all.
+
+**Owed for heat**, in the design's order:
+
+- **Bodies as heat sources** (step 3): each body's temperature by heat balance from its declared metabolism, and
+  each body a source in the field.
+- **The thermoreceptors** (step 4): the readings in the letter, with the noses' declaration bump. When a reading
+  first leaves the world, the thermal map and the pillar heat join the input log's header (and Clu builds the field
+  from them) - today Clu builds no field, since nothing it checks reads one.
+- **The pillars are mirrored by hand** from the flagship's `pillarPlacements` (`heat::PILLARS`); a world
+  definition on the wire would end the copy.
+- **The cost**: odour and heat together take 2.26 ms a tick in release, past the 1-2 ms the air was budgeted.
+  A shared line walk for both fields (factors per field, one pass over the lines) is the first thing to try when
+  the budget bites.
 
 **Still owed:**
 
