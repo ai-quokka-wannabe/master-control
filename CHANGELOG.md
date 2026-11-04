@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The air: odour on a grid, risers as walls.** The flagship's ruling of 2026-11-04 (tron-grid-lite#186): Master
+  Control owns the air. `src/air.rs` is a numerical diffusion field on 64 x 64 columns of 2 m over the floor, in 12
+  layers - a terrace step (5/6 m) thick to a step above the highest terrace, then doubling to 110 m - solid below the
+  local floor, every air-solid face a wall, the sides and top open to the far field. Douglas-Gunn ADI (`theta = 1`),
+  unconditionally stable, f64 in a fixed order: 1.47 ms a tick in release on the owner's desk. Each orb emits into the
+  cell holding its centre while it has food and stops when it is gone; `sense` samples the field at each amphid,
+  trilinear over the air and never across a wall, with the receptor population and the counting noise as they were.
+  The field steps in every roster step, so the heartbeat and Clu step it alike; it stays outside the state hash
+  (odour moves no body) and the chain golden replays unchanged. On an open floor the settled field is within 8% of
+  the closed form from 4 m to 40 m; 16 m behind a riser of five steps it reads 0.64 of the open side. The figures are
+  regenerated, and the dev profile now optimises at level 1, since unoptimised the air outran the tick.
+
 - **The world owns its reflection attenuation (protocol v13).** One number, the fraction of radiance and acoustic
   energy a surface - the Grid's or a body's - returns at each bounce, so a creature can tell a wall from open space
   (tron-grid-lite#177, ruled in its `docs/TOPOLOGY.md`). `--reflection-attenuation` and the config key

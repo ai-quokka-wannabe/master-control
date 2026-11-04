@@ -56,6 +56,7 @@ pub mod build_info {
     }
 }
 
+pub mod air;
 pub mod chain;
 pub mod clu;
 pub mod food;

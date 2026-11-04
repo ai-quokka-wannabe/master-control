@@ -16,14 +16,21 @@
 //! Smell: the odour field every orb of food sets up, and what two amphids at the nose read of
 //! it - the world's half of the flagship's CHEMORECEPTION.md, which is the authority here.
 //!
-//! The field is written down, not simulated. Each orb is a continuous point source switched on
-//! at world start, emitting at [`EMISSION`] into still air over a floor that reflects odour,
-//! losing it at a first-order rate [`LOSS_RATE`]; the concentration at distance `r` after time
-//! `t` is the classical closed form ([`point_source`]), and the floor is a mirror image of the
-//! source below it. An orb eaten to nothing is that source plus an equal negative one switched
-//! on at its gone tick, so its odour lingers and fades as real odour does. No grid, no state:
-//! the field at a tick is a pure function of the orbs and the tick, computed with the world's
-//! own `exp` and `erfc` (trig.rs), so Clu re-simulates the same readings bit for bit.
+//! The field is simulated, in the Grid's air ([`crate::air`]): a grid of 2 m columns over the
+//! floor, cut at its terraces, in which the floor and every riser are walls odour does not pass -
+//! so it fills a hollow, rounds a corner and is shadowed behind a terrace. [`DIFFUSIVITY`] and
+//! [`LOSS_RATE`] are the air's own constants, the same for every body that breathes it. Each orb
+//! emits [`EMISSION`] into the cell that holds its centre while it has food in it, and stops when
+//! it is gone, so its odour lingers and fades by the physics ([`Field`]). The field is world
+//! state, stepped once a tick with the bodies in the heartbeat and in Clu's re-simulation alike,
+//! in f64 by a fixed order of IEEE arithmetic, so Clu re-simulates the same readings bit for bit.
+//! It stays outside the state hash: odour never moves a body, and the field is a pure function of
+//! the food and of the ticks its orbs were emptied on, which the hashed bodies' mouths decide.
+//!
+//! The classical closed form ([`point_source`], [`steady_source`], [`open_air_reference`]) - a
+//! continuous point source in still, open air over a floor that mirrors it - is no longer the
+//! live field; it stays as the reference the grid is held against on an open floor (within 8%
+//! from two cells out to most of a decay length) and as what [`EMISSION`] is calibrated by.
 //!
 //! The receptors read the field as a nose does: each amphid reports, per receptor type, the
 //! fraction of its receptors bound - the mean of `c / (c + K)` over a population of affinities
@@ -33,8 +40,10 @@
 //! receptor. No direction, no distance, no label: a reading is never a concentration, and a
 //! Program that wants the food must move and compare.
 
+use crate::air::{Air, Cell};
 use crate::chain::Frame;
 use crate::food::{Orb, mouth};
+use crate::ground::{GRID_FLOOR_CONFIG, GridFloorConfig};
 use crate::physics::{BODY_CIRCUMRADIUS_FOR_INERTIA, Body, SplitMix64, TICK_SECONDS};
 use crate::trig::{erfc, exp};
 
@@ -128,64 +137,80 @@ pub fn steady_source(q: f64, d: f64, k: f64, r: f64) -> f64 {
     q * exp(-r * (k / d).sqrt()) / (4.0 * std::f64::consts::PI * d * r)
 }
 
-/// The world's own source: [`point_source`] with the world's constants. Distances under the
-/// orb's radius are read at the radius - a ball emitting from its surface holds the surface's
-/// level inside it - so a nose in the food reads the food, not a singularity.
-fn orb_source(r: f64, t: f64, radius: f64) -> f64 {
-    point_source(EMISSION, DIFFUSIVITY, LOSS_RATE, r.max(radius), t)
-}
-
-fn distance(a: [f32; 3], b: [f64; 3]) -> f64 {
-    let d = [
-        f64::from(a[0]) - b[0],
-        f64::from(a[1]) - b[1],
-        f64::from(a[2]) - b[2],
-    ];
-    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
-}
-
-/// The seconds since world start at a tick: exact, both factors being exact in binary.
-#[allow(clippy::cast_precision_loss)]
-fn seconds(tick: u64) -> f64 {
-    tick as f64 * COUNTING_TIME
-}
-
-/// One orb's odour at a point and tick, before its pattern weights it: the source and its mirror
-/// image below the floor (the orb rests a radius above it, so the image is a diameter below the
-/// centre), on since world start, and - for a gone orb - less the same pair switched on at its
-/// gone tick. Never negative: once the two cancel, rounding is all that is left of them.
+/// The open-air reference for one whole orb on a flat floor, settled: [`steady_source`] from its
+/// centre and from its mirror image a diameter below (the floor reflects), with distances under
+/// the orb's radius read at the radius. What the numerical field is held against, and what
+/// [`EMISSION`] is calibrated by - never the live field.
 #[must_use]
-pub fn orb_concentration(orb: &Orb, point: [f32; 3], tick: u64) -> f64 {
-    let radius = f64::from(orb.radius);
-    let source = [
-        f64::from(orb.centre[0]),
-        f64::from(orb.centre[1]),
-        f64::from(orb.centre[2]),
-    ];
-    let image = [source[0], source[1] - 2.0 * radius, source[2]];
-    let (r, r_image) = (distance(point, source), distance(point, image));
-    let pair = |t: f64| orb_source(r, t, radius) + orb_source(r_image, t, radius);
-    let now = seconds(tick);
-    let on = pair(now);
-    let off = match orb.gone_tick {
-        Some(gone) if gone < tick => pair(now - seconds(gone)),
-        _ => 0.0,
+pub fn open_air_reference(centre: [f64; 3], radius: f64, point: [f64; 3]) -> f64 {
+    let distance = |from: [f64; 3]| {
+        let d = [point[0] - from[0], point[1] - from[1], point[2] - from[2]];
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(radius)
     };
-    (on - off).max(0.0)
+    let image = [centre[0], centre[1] - 2.0 * radius, centre[2]];
+    steady_source(EMISSION, DIFFUSIVITY, LOSS_RATE, distance(centre))
+        + steady_source(EMISSION, DIFFUSIVITY, LOSS_RATE, distance(image))
 }
 
-/// The concentration each receptor type meets at a point and tick: every orb's odour weighted by
-/// its pattern, summed in id order - mixtures add.
-#[must_use]
-pub fn concentrations(orbs: &[Orb], point: [f32; 3], tick: u64) -> [f64; RECEPTOR_TYPES] {
-    let mut sum = [0.0; RECEPTOR_TYPES];
-    for orb in orbs {
-        let c = orb_concentration(orb, point, tick);
-        for (slot, weight) in sum.iter_mut().zip(orb.pattern) {
-            *slot += f64::from(weight) * c;
-        }
+/// The world's odour: the Grid's air ([`crate::air`]) carrying one channel per receptor type,
+/// over the world's floor, with [`DIFFUSIVITY`] and [`LOSS_RATE`] as the air's own constants.
+/// Each orb emits [`EMISSION`], weighted by its pattern, into the cell that holds its centre for
+/// as long as it has food in it, and stops when it is gone - so its odour lingers and fades by
+/// the physics. Mixtures add, because diffusion is linear.
+#[derive(Clone, Debug)]
+pub struct Field {
+    air: Air,
+    /// The air cell each orb emits into, in the orbs' order.
+    orb_cells: Vec<usize>,
+}
+
+impl Field {
+    /// The world's air over the world's floor, stepped every tick, for these orbs.
+    #[must_use]
+    pub fn new(orbs: &[Orb]) -> Field {
+        Field::over(&GRID_FLOOR_CONFIG, orbs, f64::from(TICK_SECONDS))
     }
-    sum
+
+    /// The same air over any floor and with any step - the tests' and the figures' door.
+    #[must_use]
+    pub fn over(floor: &GridFloorConfig, orbs: &[Orb], dt: f64) -> Field {
+        Field::in_air(Air::new(floor, DIFFUSIVITY, LOSS_RATE, dt), orbs)
+    }
+
+    /// The odour of these orbs in air already laid out - over a floor built by hand
+    /// ([`Air::over`]); the air's constants should be the Grid's, [`DIFFUSIVITY`] and
+    /// [`LOSS_RATE`].
+    #[must_use]
+    pub fn in_air(air: Air, orbs: &[Orb]) -> Field {
+        let orb_cells = orbs
+            .iter()
+            .map(|orb| air.cell_at(orb.centre.map(f64::from)))
+            .collect();
+        Field { air, orb_cells }
+    }
+
+    /// One step of the air: every orb with food in it emits, in the orbs' order.
+    pub fn step(&mut self, orbs: &[Orb]) {
+        let sources: Vec<(usize, Cell)> = orbs
+            .iter()
+            .zip(&self.orb_cells)
+            .filter(|(orb, _)| orb.present())
+            .map(|(orb, &cell)| (cell, orb.pattern.map(|w| EMISSION * f64::from(w))))
+            .collect();
+        self.air.step(&sources);
+    }
+
+    /// The concentration each receptor type meets at a point, molecules per cubic metre.
+    #[must_use]
+    pub fn at(&self, point: [f32; 3]) -> [f64; RECEPTOR_TYPES] {
+        self.air.at(point.map(f64::from))
+    }
+
+    /// The air itself.
+    #[must_use]
+    pub fn air(&self) -> &Air {
+        &self.air
+    }
 }
 
 /// An orb's odour pattern, from the RNG of record: a uniform weight per receptor type, scaled so
@@ -335,16 +360,20 @@ pub fn reading_seed(creature_seed: u64, tick: u64, amphid: usize, receptor: usiz
 
 /// What a creature's two amphids read at a tick: per amphid, left then right, the bound fraction
 /// of each receptor type, from the concentration it counted there. The letter's `odour[2][8]`.
+/// A world without food has no field, and reads nothing.
 #[must_use]
 pub fn sense(
-    orbs: &[Orb],
+    field: Option<&Field>,
     body: &Body,
     creature_seed: u64,
     tick: u64,
 ) -> [[f32; RECEPTOR_TYPES]; AMPHIDS] {
     let mut readings = [[0.0; RECEPTOR_TYPES]; AMPHIDS];
+    let Some(field) = field else {
+        return readings;
+    };
     for (amphid, (point, row)) in amphids(body).iter().zip(readings.iter_mut()).enumerate() {
-        let field = concentrations(orbs, *point, tick);
+        let field = field.at(*point);
         for (receptor, (reading, c)) in row.iter_mut().zip(field).enumerate() {
             let mut draws = SplitMix64(reading_seed(creature_seed, tick, amphid, receptor));
             *reading = bound_fraction(counted(c, &mut draws));
@@ -497,75 +526,8 @@ mod tests {
         assert!((DECAY_LENGTH - (DIFFUSIVITY / LOSS_RATE).sqrt()).abs() < 1e-9);
     }
 
-    fn whole_orb(gone_tick: Option<u64>) -> Orb {
-        Orb {
-            id: 0,
-            centre: [0.0, ORB_RADIUS, 0.0],
-            radius: ORB_RADIUS,
-            quantity: if gone_tick.is_some() { 0.0 } else { 1.0 },
-            pattern: [1.0, 0.5, 0.0, 0.25, 1.0, 1.0, 1.0, 1.0],
-            gone_tick,
-        }
-    }
-
     #[test]
-    fn the_floor_is_a_mirror_and_a_gone_orb_lingers_then_fades() {
-        let orb = whole_orb(None);
-        let point = [10.0f32, 0.05, 0.0];
-        let tick = 320;
-        let t = 10.0;
-        let r = distance(point, [0.0, 0.25, 0.0]);
-        let r_image = distance(point, [0.0, -0.25, 0.0]);
-        let expected = orb_source(r, t, 0.25) + orb_source(r_image, t, 0.25);
-        assert_eq!(
-            orb_concentration(&orb, point, tick),
-            expected,
-            "source plus image"
-        );
-        let lone = orb_source(r, t, 0.25);
-        assert!(
-            (expected / lone - 2.0).abs() < 0.01,
-            "near the floor the image doubles it"
-        );
-
-        // Gone at tick 320: the same until then, lingering just after, fading to nothing.
-        let gone = whole_orb(Some(tick));
-        for at in [0, 100, tick] {
-            assert_eq!(
-                orb_concentration(&gone, point, at),
-                orb_concentration(&orb, point, at)
-            );
-        }
-        let just_after = orb_concentration(&gone, point, tick + 1);
-        assert!(
-            just_after > 0.9 * expected,
-            "the trace lingers: {just_after:e} vs {expected:e}"
-        );
-        let mut previous = just_after;
-        for at in (tick + 2)..(tick + 32 * 60) {
-            let now = orb_concentration(&gone, point, at);
-            assert!(
-                now <= previous,
-                "a gone orb's trace never grows back, tick {at}"
-            );
-            previous = now;
-        }
-        assert!(
-            previous < 1e-3 * expected,
-            "a minute later it is all but gone: {previous:e}"
-        );
-    }
-
-    #[test]
-    fn mixtures_add_and_every_type_sees_its_weight() {
-        let orbs = [whole_orb(None), whole_orb(None)];
-        let point = [5.0f32, 0.05, 2.0];
-        let one = orb_concentration(&orbs[0], point, 64);
-        let field = concentrations(&orbs, point, 64);
-        for (c, weight) in field.iter().zip(orbs[0].pattern) {
-            assert_eq!(*c, 2.0 * f64::from(weight) * one);
-        }
-        assert_eq!(concentrations(&[], point, 64), [0.0; RECEPTOR_TYPES]);
+    fn odour_patterns_are_fingerprints_with_a_strongest_note() {
         let mut draws = SplitMix64(9);
         for _ in 0..100 {
             let pattern = draw_pattern(&mut draws);
@@ -575,32 +537,6 @@ mod tests {
                 "the strongest note is at full strength"
             );
         }
-    }
-
-    #[test]
-    fn an_orb_is_smellable_from_a_few_body_lengths_to_a_few_tens() {
-        let orb = whole_orb(None);
-        let settled = 32 * 600;
-        let reading = |lengths: f32| {
-            #[allow(clippy::cast_possible_truncation)]
-            let x = lengths * BODY_LENGTH as f32;
-            bound_fraction(orb_concentration(&orb, [x, 0.25, 0.0], settled))
-        };
-        assert!(
-            (reading(10.0) - 0.5).abs() < 0.01,
-            "half bound at a decay length: {}",
-            reading(10.0)
-        );
-        // The receptor population reads roughly the logarithm across five decades: a body length
-        // in, about three quarters; thirty body lengths out, about a quarter (#76).
-        assert!(reading(1.0) > 0.7 && reading(1.0) < 0.8, "{}", reading(1.0));
-        assert!(reading(3.0) > 0.6 && reading(3.0) < 0.7, "{}", reading(3.0));
-        assert!(
-            reading(30.0) > 0.15 && reading(30.0) < 0.35,
-            "{}",
-            reading(30.0)
-        );
-        assert!(reading(1.0) > reading(3.0) && reading(3.0) > reading(10.0));
     }
 
     #[test]
@@ -615,15 +551,15 @@ mod tests {
         );
         assert!((left[2] - nose[2]).abs() < 1e-6 && (right[2] - nose[2]).abs() < 1e-6);
 
-        // An orb off to the right: the right amphid reads more, every reading in [0, 1].
-        let mut orb = whole_orb(None);
-        orb.centre = [20.0, ORB_RADIUS, 0.0];
-        let orbs = [orb];
+        // An orb off to the right, its odour settled over a flat floor: the right amphid reads
+        // more, every reading in [0, 1].
+        let orbs = [orb_at(21.0, 1.0, [1.0, 0.5, 0.0, 0.25, 1.0, 1.0, 1.0, 1.0])];
+        let field = settled_over(&flat(32), &orbs);
         let seed = crate::physics::creature_seed(0, 7);
-        let readings = sense(&orbs, &body, seed, 640);
+        let readings = sense(Some(&field), &body, seed, 640);
         assert_eq!(
             readings,
-            sense(&orbs, &body, seed, 640),
+            sense(Some(&field), &body, seed, 640),
             "the same tick reads the same bits"
         );
         for row in &readings {
@@ -635,16 +571,229 @@ mod tests {
             "a type the orb does not smell of reads nothing"
         );
         assert_eq!(
-            sense(&[], &body, seed, 640),
+            sense(None, &body, seed, 640),
             [[0.0; RECEPTOR_TYPES]; AMPHIDS],
             "no food, no odour"
         );
-        // A nose inside the food reads near the top of the population's five decades - not yet
-        // pinned at one, so even at the meal more food still reads as more - and never blows up.
-        let mut meal = whole_orb(None);
-        meal.centre = [nose[0], nose[1], nose[2]];
-        let fed = sense(&[meal], &body, seed, 640);
-        assert!(fed[0][0] > 0.9 && fed[0][0] <= 1.0, "{fed:?}");
+        // A nose in the cell the food emits into reads near the top of the population's five
+        // decades - not pinned at one, so even at the meal more food still reads as more.
+        let meal = [orb_at(nose[0], nose[2], [1.0; RECEPTOR_TYPES])];
+        let fed_field = settled_over(&flat(32), &meal);
+        let fed = sense(Some(&fed_field), &body, seed, 640);
+        assert!(fed[0][0] > 0.8 && fed[0][0] < 1.0, "{fed:?}");
+    }
+
+    /// The world's floor with its relief flattened: open floor everywhere, at height zero.
+    fn flat(cells: u32) -> GridFloorConfig {
+        GridFloorConfig {
+            cells,
+            relief_amplitude: 0.0,
+            ..GRID_FLOOR_CONFIG
+        }
+    }
+
+    /// The step sizes a field is settled with, seconds, down to the tick. The settled field is the
+    /// discrete operator's own steady state whatever the step (air.rs), and an alternating-
+    /// direction step damps best the modes whose rate is near its reciprocal, so a cycle through
+    /// these reaches in a few hundred steps what the tick alone reaches in ten thousand.
+    const SETTLING_STEPS: [f64; 6] = [32.0, 8.0, 2.0, 0.5, 0.125, 0.031_25];
+
+    /// The settled odour of these orbs in the air `make` lays out for a step size: twenty cycles
+    /// through [`SETTLING_STEPS`], each step carrying the field the last one left.
+    fn settled(make: impl Fn(f64) -> Air, orbs: &[Orb]) -> Field {
+        let mut fields: Vec<Field> = SETTLING_STEPS
+            .iter()
+            .map(|&dt| Field::in_air(make(dt), orbs))
+            .collect();
+        let mut last = 0;
+        for _ in 0..20 {
+            for n in 0..fields.len() {
+                if n != last {
+                    let (from, to) = if last < n {
+                        let (low, high) = fields.split_at_mut(n);
+                        (&low[last], &mut high[0])
+                    } else {
+                        let (low, high) = fields.split_at_mut(last);
+                        (&high[0], &mut low[n])
+                    };
+                    to.air.take_field(&from.air);
+                }
+                fields[n].step(orbs);
+                last = n;
+            }
+        }
+        // The cycle ends on the tick, the air the field is returned in; eight seconds of ticks
+        // then clear what the long steps leave beside the source, where the three directions'
+        // sweeps do not commute and the cycle damps slowest.
+        let mut live = fields.swap_remove(last);
+        for _ in 0..256 {
+            live.step(orbs);
+        }
+        live
+    }
+
+    /// The settled odour over a floor built from the world's floor's settings.
+    fn settled_over(floor: &GridFloorConfig, orbs: &[Orb]) -> Field {
+        settled(|dt| Air::new(floor, DIFFUSIVITY, LOSS_RATE, dt), orbs)
+    }
+
+    /// An orb resting on a flat floor at height zero, at a column's centre.
+    fn orb_at(x: f32, z: f32, pattern: [f32; RECEPTOR_TYPES]) -> Orb {
+        Orb {
+            id: 0,
+            centre: [x, ORB_RADIUS, z],
+            radius: ORB_RADIUS,
+            quantity: 1.0,
+            pattern,
+            gone_tick: None,
+        }
+    }
+
+    /// The first channel's concentration at a point.
+    fn first(field: &Field, point: [f64; 3]) -> f64 {
+        field.air().at(point)[0]
+    }
+
+    #[test]
+    fn on_an_open_floor_the_settled_field_is_the_closed_form_beyond_two_cells() {
+        // The orb at a column's centre in the middle of the world-sized flat floor, settled; the
+        // field read at nose height along a row and a diagonal, against the open-air closed form
+        // with the floor's mirror image.
+        let orbs = [orb_at(1.0, 1.0, [1.0; RECEPTOR_TYPES])];
+        let mut field = settled_over(&flat(64), &orbs);
+        // Settled: a further tick moves no reading by more than a part in a million.
+        let before: Vec<f64> = field.air().field().iter().map(|cell| cell[0]).collect();
+        field.step(&orbs);
+        for (now, then) in field.air().field().iter().zip(&before) {
+            assert!(
+                (now[0] - then).abs() <= 1e-6 * then,
+                "{:e} vs {then:e}",
+                now[0]
+            );
+        }
+        let centre = [1.0, f64::from(ORB_RADIUS), 1.0];
+        let nose = f64::from(crate::physics::BODY_HALF_HEIGHT);
+        let diagonal = std::f64::consts::FRAC_1_SQRT_2;
+        for metres in [4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0, 40.0] {
+            for (dx, dz) in [(1.0, 0.0), (0.0, -1.0), (diagonal, diagonal)] {
+                let point = [1.0 + metres * dx, nose, 1.0 + metres * dz];
+                let ratio = first(&field, point) / open_air_reference(centre, 0.25, point);
+                // Within 8% from two cells out to most of a decay length: the source smeared
+                // over its cell closest in, the open edges holding a little odour back farthest
+                // out (air.rs).
+                assert!(
+                    (ratio - 1.0).abs() < 0.08,
+                    "{metres} m along ({dx}, {dz}): {ratio} of the closed form"
+                );
+            }
+        }
+        // And the receptors read it as the closed form was calibrated: half bound at a decay
+        // length, about three quarters a body length in, monotone between.
+        let reading = |lengths: f64| {
+            let point = [1.0 + lengths * BODY_LENGTH, nose, 1.0];
+            f64::from(bound_fraction(first(&field, point)))
+        };
+        assert!((reading(10.0) - 0.5).abs() < 0.02, "{}", reading(10.0));
+        assert!(reading(1.0) > 0.7 && reading(1.0) < 0.8, "{}", reading(1.0));
+        assert!(reading(1.0) > reading(3.0) && reading(3.0) > reading(10.0));
+    }
+
+    #[test]
+    fn a_tall_riser_casts_an_odour_shadow() {
+        // A flat floor with one wall across it, five terrace steps tall (the world's tallest
+        // riser) and two cells thick, 5 m from an orb: the reading 16 m beyond the wall against
+        // the reading 16 m out on the open side, both at nose height.
+        let wall = |i: usize, j: usize| (35..37).contains(&i) && (12..52).contains(&j);
+        let heights: Vec<f64> = (0..64 * 64)
+            .map(|column| {
+                if wall(column % 64, column / 64) {
+                    5.0 * crate::air::FINE_LAYER
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let orbs = [orb_at(1.0, 1.0, [1.0; RECEPTOR_TYPES])];
+        let field = settled(
+            |dt| Air::over(64, 2.0, &heights, DIFFUSIVITY, LOSS_RATE, dt),
+            &orbs,
+        );
+        let nose = f64::from(crate::physics::BODY_HALF_HEIGHT);
+        // The wall's columns are x from 6 to 10 m; the orb is at x = 1.
+        let behind = first(&field, [1.0 + 16.0, nose, 1.0]);
+        let open = first(&field, [1.0 - 16.0, nose, 1.0]);
+        let shadow = behind / open;
+        assert!(shadow < 0.8, "behind the wall {shadow} of the open side");
+        // In front of the wall the odour it turns back piles up.
+        let front = first(&field, [1.0 + 4.0, nose, 1.0]);
+        let mirror = first(&field, [1.0 - 4.0, nose, 1.0]);
+        assert!(front > mirror, "{front:e} vs {mirror:e}");
+        // Far around the wall's end, the odour has gone round the corner.
+        let round = first(&field, [1.0 + 16.0, nose, 1.0 + 60.0]);
+        assert!(round > 0.0);
+    }
+
+    #[test]
+    fn a_gone_orb_stops_emitting_and_its_odour_lingers_then_fades() {
+        // The live tick over a small flat floor: an orb emits for a minute, then is gone.
+        let mut orbs = [orb_at(1.0, 1.0, [1.0; RECEPTOR_TYPES])];
+        let mut field = Field::over(&flat(16), &orbs, f64::from(TICK_SECONDS));
+        let point = [1.0 + 10.0, f64::from(crate::physics::BODY_HALF_HEIGHT), 1.0];
+        for _ in 0..32 * 60 {
+            field.step(&orbs);
+        }
+        let fed = first(&field, point);
+        orbs[0].quantity = 0.0;
+        orbs[0].gone_tick = Some(32 * 60);
+        field.step(&orbs);
+        let just_after = first(&field, point);
+        assert!(
+            just_after > 0.9 * fed,
+            "the trace lingers: {just_after:e} vs {fed:e}"
+        );
+        let mut previous = just_after;
+        for tick in 0..32 * 60 {
+            field.step(&orbs);
+            let now = first(&field, point);
+            assert!(
+                now <= previous,
+                "a gone orb's trace never grows back, tick {tick}"
+            );
+            previous = now;
+        }
+        assert!(
+            previous < 1e-3 * fed,
+            "a minute later it is all but gone: {previous:e}"
+        );
+        assert!(previous >= 0.0, "and never below nothing");
+    }
+
+    #[test]
+    fn mixtures_add_and_every_type_sees_its_weight() {
+        // Two orbs in one place make exactly twice one orb's odour - doubling is exact in binary
+        // and every step is linear - and each receptor type carries the orb's weight for it.
+        let pattern = [1.0, 0.5, 0.0, 0.25, 1.0, 1.0, 1.0, 1.0];
+        let one = [orb_at(1.0, 1.0, pattern)];
+        let two = [one[0], one[0]];
+        let (mut single, mut double) = (
+            Field::over(&flat(16), &one, f64::from(TICK_SECONDS)),
+            Field::over(&flat(16), &two, f64::from(TICK_SECONDS)),
+        );
+        for _ in 0..64 {
+            single.step(&one);
+            double.step(&two);
+        }
+        for (a, b) in single.air().field().iter().zip(double.air().field()) {
+            for (x, y) in a.iter().zip(b) {
+                assert_eq!((2.0 * x).to_bits(), y.to_bits());
+            }
+        }
+        let at = single.at([5.0, 0.05, 2.0]);
+        assert_eq!(
+            at[2], 0.0,
+            "a type the orb does not smell of carries nothing"
+        );
+        assert!((at[1] / at[0] - 0.5).abs() < 1e-12 && (at[3] / at[0] - 0.25).abs() < 1e-12);
     }
 
     #[test]

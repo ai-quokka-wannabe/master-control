@@ -197,6 +197,10 @@ pub struct Roster {
     /// The world's food: placed at world start, eaten by the mouths, gone with a pew. An eaten
     /// orb stays here, gone, because its odour lingers (CHEMORECEPTION.md).
     food: Vec<crate::food::Orb>,
+    /// The air the food's odour fills, stepped with the bodies every tick; none without food.
+    /// World state, but outside the state hash: odour never moves a body, and the field is a
+    /// pure function of the food and the ticks its orbs were emptied on (odour.rs).
+    odour: Option<crate::odour::Field>,
     /// The run's master seed, for the senses' counting noise (the RNG-of-record rule).
     master_seed: u64,
 }
@@ -221,6 +225,7 @@ impl Roster {
     /// the senses' noise derives from.
     #[must_use]
     pub fn with_food(mut self, orbs: Vec<crate::food::Orb>, master_seed: u64) -> Roster {
+        self.odour = (!orbs.is_empty()).then(|| crate::odour::Field::new(&orbs));
         self.food = orbs;
         self.master_seed = master_seed;
         self
@@ -482,6 +487,11 @@ impl Roster {
         // Every body steps alone against the world first; then every pair that could touch
         // is judged, in id order - the pairs are replayed state too - and stood apart.
         let mut previous_voices: BTreeMap<u32, f32> = BTreeMap::new();
+        // The air first: one step of the odour, every orb that still has food in it emitting, so
+        // the noses below read this tick's field. An orb emptied last tick emits no more.
+        if let Some(odour) = &mut self.odour {
+            odour.step(&self.food);
+        }
         for (id, resident) in &mut self.residents {
             let intent = sanitise_and_clamp(intent_for(*id), &resident.body.bounds);
             previous_voices.insert(*id, resident.body.vocalisation);
@@ -533,6 +543,7 @@ impl Roster {
             }
         }
         let food = &mut self.food;
+        let odour = self.odour.as_ref();
         let master_seed = self.master_seed;
         for (id, resident) in &mut self.residents {
             let previous_voice = previous_voices[id];
@@ -647,7 +658,7 @@ impl Roster {
                     intake: feeding.intake,
                     odour: {
                         let readings = crate::odour::sense(
-                            food,
+                            odour,
                             body,
                             crate::physics::creature_seed(master_seed, u64::from(*id)),
                             tick,

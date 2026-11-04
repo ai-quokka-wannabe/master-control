@@ -102,8 +102,9 @@ sacred 32 Hz:
   every intent judged and applied and a periodic state hash, and **Clu** (`master-control clu
   <log> [<disk>]`) re-simulates a log and names the first bit that lies.
 - **Food and smell** — glowing orbs placed at world start by the RNG of record (`src/food.rs`), eaten a
-  bite per pharynx pump, and an odour field written down in closed form rather than simulated
-  (`src/odour.rs`) that each creature's two amphids read as a fraction of receptors bound. See
+  bite per pharynx pump, and an odour field simulated in the Grid's air - a grid of 2 m cells over the floor,
+  its risers walls odour does not pass (`src/air.rs`, `src/odour.rs`) - that each creature's two amphids read
+  as a fraction of receptors bound. See
   [Food and Smell, Drawn](#food-and-smell-drawn) below.
 
 [TODO.md](TODO.md) carries each etape's decisions and what is still owed.
@@ -126,26 +127,29 @@ stands the whole ecosystem up around it.
 
 ## Food and Smell, Drawn
 
-Every figure here is drawn by the world's own code - `food::place`, `physics::floor` and the functions
-of `odour.rs` - so a figure that changes is a world that changed. After touching food, smell or the
-floor, regenerate them and commit what moved; the output is byte-identical from run to run:
+Every figure here is drawn by the world's own code - `food::place`, `physics::floor`, the air of `air.rs`
+and the functions of `odour.rs` - so a figure that changes is a world that changed. After touching food,
+smell or the floor, regenerate them and commit what moved; the output is byte-identical from run to run:
 
 ```text
 cargo run --example figures    # writes docs/figures/*.svg from examples/figures.rs
 ```
 
-Alone, one orb's odour is a usable gradient: its settled reading is 0.96 a body length (4.48 m) away and
-0.5, half-saturation, at the decay length (44.8 m). Once eaten, its trace lingers for a moment, then
-fades over some ten seconds.
+The odour is simulated, not written down: the world's air on a grid of 2 m columns over the floor, cut
+at its terraces, stepped every tick by an implicit alternating-direction scheme in which every riser is a
+wall. On an open floor the settled field agrees with the open-air closed form to within 8% from two
+cells out to 40 m. Alone, one orb's odour is a usable gradient: its settled reading is 0.77 a body length
+(4.48 m) away and 0.51 at the decay length (44.8 m). Once eaten, its trace lingers for a moment, then fades
+over some ten seconds.
 
-![Left: one orb's settled receptor reading against distance, falling from 1 at the orb to 0.5 at 44.8 m, with magenta lines at the lowest reading found anywhere on the floor at each density: 0.44, 0.8 and 0.91. Right: the reading after the orb is eaten at 1, 3 and 10 body lengths, fading to near zero within about 20 seconds](docs/figures/smell.svg)
+![Left: one orb's settled receptor reading against distance on the air's grid, beside the open-air closed form, with magenta lines at the lowest reading found anywhere on the floor at each density: 0.49, 0.63 and 0.71. Right: the reading after the orb is eaten at 1, 3 and 10 body lengths, fading to near zero within about 20 seconds](docs/figures/smell.svg)
 
-**A known open problem, shown honestly:** every orb smells at once and the readings add. At the default
-density the floor never reads below 0.44 and 43% of all readings are already 0.9 or more; at 0.25 that
-is 97%, and at the most the wire carries (0.43, 64 orbs) every reading on the floor is 0.91 or more - the
-receptors saturate everywhere and the gradient towards any one orb all but vanishes.
+With every orb smelling at once the readings add, and the receptors' five decades of affinity keep each
+orb a peak: at the default density the floor reads from 0.49 (median 0.68) and no reading is saturated.
+Every riser is a wall, so odour reaches a terrace from below only over its edge: 16 m behind a riser of five
+steps an orb's odour reads 0.64 of the open side's (`odour.rs`'s `a_tall_riser_casts_an_odour_shadow`).
 
-![Three maps of the floor coloured by the settled mean receptor reading at densities 0.1, 0.25 and 0.43: the default shows cyan-to-magenta gradients around each orb, the denser two are almost uniformly pale, which is saturated](docs/figures/smell-map.svg)
+![Three maps of the floor coloured by the settled mean receptor reading at densities 0.1, 0.25 and 0.43, one sample per 2 m cell: each orb a peak, the field following the terraces](docs/figures/smell-map.svg)
 
 ## The Doctrine
 
