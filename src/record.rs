@@ -397,8 +397,7 @@ mod tests {
         ] {
             assert!(
                 text.lines().any(|written| written == line),
-                "{line} in the header:
-{text}"
+                "{line} missing from the header"
             );
         }
     }
