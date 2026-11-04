@@ -26,7 +26,8 @@
 //! own `exp` and `erfc` (trig.rs), so Clu re-simulates the same readings bit for bit.
 //!
 //! The receptors read the field as a nose does: each amphid reports, per receptor type, the
-//! fraction of its receptors bound, `c / (c + K)`, from a concentration it has *counted* -
+//! fraction of its receptors bound - the mean of `c / (c + K)` over a population of affinities
+//! spread across five decades ([`bound_fraction`]) - from a concentration it has *counted* -
 //! Berg and Purcell's floor on chemoreception, a relative error falling as one over the root of
 //! the molecules that arrive, drawn from the RNG of record per tick, creature, amphid and
 //! receptor. No direction, no distance, no label: a reading is never a concentration, and a
@@ -86,9 +87,9 @@ pub const COUNTING_TIME: f64 = TICK_SECONDS as f64;
 
 /// An orb's emission, molecules per second: chosen so a whole orb's settled odour, its mirror
 /// image included, binds exactly half the receptors of its strongest type at one decay length -
-/// ten body lengths. Then a body length away a reading is about 0.96, three body lengths 0.88,
-/// thirty body lengths 0.04: smellable from a few body lengths to a few tens, and saturated only
-/// at the meal.
+/// ten body lengths - the receptor population's centre, so the reading there is a half. A body
+/// length away it reads about 0.76, thirty body lengths about 0.25: smellable from the meal to a
+/// few tens of body lengths, and saturated only at the meal.
 pub const EMISSION: f64 =
     HALF_SATURATION * 4.0 * std::f64::consts::PI * DIFFUSIVITY * DECAY_LENGTH * std::f64::consts::E
         / 2.0;
@@ -271,11 +272,50 @@ pub fn counted(c: f64, draws: &mut SplitMix64) -> f64 {
     (c * (1.0 + relative * normal(draws))).max(0.0)
 }
 
-/// The fraction of receptors bound at a (counted) concentration, `c / (c + K)`, in [0, 1].
+/// How many affinity classes one receptor type's population holds: four to a decade across
+/// [`AFFINITY_DECADES`], ends included.
+pub const AFFINITY_CLASSES: usize = 21;
+
+/// How many decades of concentration a receptor type's affinities span, centred on
+/// [`HALF_SATURATION`]: five, the 100,000-fold range over which the real worm follows a point
+/// source of diacetyl (Bargmann, Hartwieg and Horvitz 1993; as cited by Larsch et al. 2015). The
+/// worm reaches that range partly with receptors of different affinity - ODR-10 in AWA for low
+/// concentrations, another receptor in ASH for high ones - and partly by adapting, which is the
+/// Program's computation and not the sense's (CHEMORECEPTION.md). One affinity alone spans about
+/// two decades between a tenth bound and nine tenths, and with every orb's odour summed it sat on
+/// the flat top almost everywhere on the floor (#76).
+pub const AFFINITY_DECADES: f64 = 5.0;
+
+/// A quarter of a decade, `10^(1/4)`, as a literal: the step between neighbouring affinity
+/// classes. Products of it are IEEE multiplications, so every machine builds the same table.
+const QUARTER_DECADE: f64 = 1.778_279_410_038_922_8;
+
+/// The affinities of one receptor type's population, molecules per cubic metre: [`HALF_SATURATION`]
+/// times `10^(n / 4)` for n from -10 to +10 - log-uniform over [`AFFINITY_DECADES`], centred, so a
+/// concentration of [`HALF_SATURATION`] still binds exactly half of the population's receptors.
+#[must_use]
+pub fn affinities() -> [f64; AFFINITY_CLASSES] {
+    let centre = AFFINITY_CLASSES / 2;
+    let mut table = [HALF_SATURATION; AFFINITY_CLASSES];
+    for step in 1..=centre {
+        table[centre + step] = table[centre + step - 1] * QUARTER_DECADE;
+        table[centre - step] = table[centre - step + 1] / QUARTER_DECADE;
+    }
+    table
+}
+
+/// The fraction of a receptor type's receptors bound at a (counted) concentration, in [0, 1]:
+/// the mean of `c / (c + K)` over the population's affinities ([`affinities`]). It saturates at
+/// both ends as real binding does, and between them it follows roughly the logarithm of the
+/// concentration across five decades - a reading is still never a concentration.
 #[must_use]
 pub fn bound_fraction(c: f64) -> f32 {
-    #[allow(clippy::cast_possible_truncation)]
-    let fraction = (c / (c + HALF_SATURATION)) as f32;
+    let mut sum = 0.0;
+    for affinity in affinities() {
+        sum += c / (c + affinity);
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    let fraction = (sum / AFFINITY_CLASSES as f64) as f32;
     fraction.clamp(0.0, 1.0)
 }
 
@@ -347,6 +387,50 @@ mod tests {
             sum += weight * f(low + f64::from(i) * h);
         }
         q * sum * h / 3.0
+    }
+
+    #[test]
+    fn the_receptor_population_spans_five_decades_centred_on_k_and_climbs_steadily() {
+        let table = affinities();
+        assert_eq!(
+            table[AFFINITY_CLASSES / 2].to_bits(),
+            HALF_SATURATION.to_bits(),
+            "centred on K"
+        );
+        let span = (table[AFFINITY_CLASSES - 1] / table[0]).log10();
+        assert!(
+            (span - AFFINITY_DECADES).abs() < 1e-9,
+            "five decades, not {span}"
+        );
+        for pair in table.windows(2) {
+            assert!(pair[1] > pair[0], "affinities rise");
+        }
+        // Symmetric in log concentration about K: c and K^2 / c read to one.
+        for decades in [0.5f64, 1.0, 2.0, 3.0] {
+            let factor = 10f64.powf(decades);
+            let low = f64::from(bound_fraction(HALF_SATURATION / factor));
+            let high = f64::from(bound_fraction(HALF_SATURATION * factor));
+            assert!((low + high - 1.0).abs() < 1e-5, "{decades}: {low} + {high}");
+        }
+        // Monotone, and a decade near K moves the reading by a usable step - the property the
+        // summed field lost when one affinity saturated (#76).
+        let mut previous = f64::from(bound_fraction(HALF_SATURATION / 1e3));
+        for step in -11..=12 {
+            let c = HALF_SATURATION * 10f64.powf(f64::from(step) / 4.0);
+            let reading = f64::from(bound_fraction(c));
+            assert!(reading > previous, "rises at 10^({step}/4) K");
+            previous = reading;
+        }
+        let per_decade = f64::from(bound_fraction(HALF_SATURATION * 10.0))
+            - f64::from(bound_fraction(HALF_SATURATION));
+        assert!(
+            per_decade > 0.15,
+            "a decade near K moves the reading by {per_decade}"
+        );
+        assert!(
+            bound_fraction(HALF_SATURATION * 1e6) > 0.999,
+            "it still saturates past the range"
+        );
     }
 
     #[test]
@@ -507,10 +591,12 @@ mod tests {
             "half bound at a decay length: {}",
             reading(10.0)
         );
-        assert!(reading(1.0) > 0.9 && reading(1.0) < 1.0, "{}", reading(1.0));
-        assert!(reading(3.0) > 0.8, "{}", reading(3.0));
+        // The receptor population reads roughly the logarithm across five decades: a body length
+        // in, about three quarters; thirty body lengths out, about a quarter (#76).
+        assert!(reading(1.0) > 0.7 && reading(1.0) < 0.8, "{}", reading(1.0));
+        assert!(reading(3.0) > 0.6 && reading(3.0) < 0.7, "{}", reading(3.0));
         assert!(
-            reading(30.0) > 0.01 && reading(30.0) < 0.1,
+            reading(30.0) > 0.15 && reading(30.0) < 0.35,
             "{}",
             reading(30.0)
         );
@@ -553,11 +639,12 @@ mod tests {
             [[0.0; RECEPTOR_TYPES]; AMPHIDS],
             "no food, no odour"
         );
-        // A nose inside the food saturates, it does not blow up.
+        // A nose inside the food reads near the top of the population's five decades - not yet
+        // pinned at one, so even at the meal more food still reads as more - and never blows up.
         let mut meal = whole_orb(None);
         meal.centre = [nose[0], nose[1], nose[2]];
         let fed = sense(&[meal], &body, seed, 640);
-        assert!(fed[0][0] > 0.99 && fed[0][0] <= 1.0, "{fed:?}");
+        assert!(fed[0][0] > 0.9 && fed[0][0] <= 1.0, "{fed:?}");
     }
 
     #[test]
@@ -596,7 +683,10 @@ mod tests {
         assert_ne!(seed(1, 0, 0), seed(1, 0, 1));
         assert_eq!(counted(0.0, &mut SplitMix64(1)), 0.0);
         assert_eq!(bound_fraction(0.0), 0.0);
-        assert_eq!(bound_fraction(HALF_SATURATION), 0.5);
+        assert!(
+            (bound_fraction(HALF_SATURATION) - 0.5).abs() < 1e-6,
+            "the population's centre"
+        );
         assert!(bound_fraction(1e30) <= 1.0);
     }
 }

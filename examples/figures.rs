@@ -636,7 +636,7 @@ fn smell(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
         13.0,
         DIM,
         "start",
-        "bound_fraction(c) = c / (c + K): 0 is no odour, 1 is every receptor bound. Noise-free means; the counting noise is under 1% here.",
+        "bound_fraction(c): the mean of c / (c + K) over 21 affinities spread across five decades about K - 0 is no odour, 1 is every receptor bound. Noise-free means.",
     );
 
     // Left: against distance, on a log axis built from exact decades so no logarithm is needed.
@@ -883,7 +883,7 @@ fn smell(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
         TEXT,
         "start",
         &format!(
-            "The open issue, made visible: alone, one orb reads {} at a body length and {} at a decay length - a usable gradient.",
+            "Alone, one orb reads {} at a body length and {} at a decay length: a gradient a body can climb.",
             n(lone_reading(&orb, BODY_LENGTH, SETTLED_TICK)),
             n(lone_reading(&orb, DECAY_LENGTH, SETTLED_TICK))
         ),
@@ -895,7 +895,7 @@ fn smell(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
         TEXT,
         "start",
         &format!(
-            "But every orb smells at once: at the default density the floor never reads below {} (median {}); {}% of readings are {} or more.",
+            "With every orb summed at the default density the floor reads from {} (median {}), and {}% of readings are {} or more - none saturated.",
             n(default_map.lowest()),
             n(default_map.median()),
             n(default_map.saturated_percent().round()),
@@ -941,7 +941,7 @@ fn smell_map(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
         20.0,
         TEXT,
         "start",
-        "Smell over the whole floor: where the receptors saturate",
+        "Smell over the whole floor: every orb its own peak",
     );
     svg.text(
         margin,
@@ -1042,7 +1042,7 @@ fn smell_map(worlds: &[(f32, Vec<Orb>)], maps: &[SmellMap]) -> String {
         12.0,
         DIM,
         "start",
-        "Open issue: with every orb summed, the field saturates at high density and the gradient to any one orb nearly vanishes.",
+        "Five decades of receptor affinity (#76): with every orb summed, each orb still stands out as a peak a body can climb to, even at the densest setting.",
     );
     svg.finish()
 }
