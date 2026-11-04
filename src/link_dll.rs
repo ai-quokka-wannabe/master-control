@@ -37,7 +37,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -119,6 +119,10 @@ pub struct Proprioception {
     pub grounded: u8,
     pub reserved0: [u8; 3],
     pub specific_force: [f32; 3],
+    /// What the semicircular canals read: the body's angular velocity, radians per second in
+    /// the body frame (x right, y up, z backwards), right-handed; zero at rest, finite always
+    /// (protocol v14).
+    pub angular_velocity: [f32; 3],
     /// The angle each servo holds this tick, radians, joint `k` between segments `k` and
     /// `k + 1` in the sign the targets ask in, within a turn; `segment_count - 1`
     /// meaningful, the rest zero. What the joint did, not what it was asked.
@@ -133,8 +137,6 @@ pub struct Proprioception {
     /// What the two amphids smell: bound fractions in [0, 1], left amphid 0..8, right 8..16
     /// (protocol v12).
     pub odour: [f32; ODOUR_READINGS],
-    /// Always zero: the four bytes that round the letter to its alignment.
-    pub reserved1: [u8; 4],
 }
 
 /// `LNK_AMPHIDS * LNK_ODOUR_RECEPTORS`: the letter's odour readings, left amphid first.
@@ -338,7 +340,7 @@ const _: () = assert!(size_of::<RezVertex>() == 12);
 const _: () = assert!(size_of::<RezTriangle>() == 16);
 const _: () = assert!(size_of::<RezMaterial>() == 32);
 const _: () = assert!(size_of::<Contact>() == 52);
-const _: () = assert!(size_of::<Proprioception>() == 160);
+const _: () = assert!(size_of::<Proprioception>() == 168);
 const _: () = assert!(size_of::<FoodState>() == 24);
 const _: () = assert!(size_of::<CreatureState>() == 188);
 const _: () = assert!(size_of::<TickStateHeader>() == 16);
@@ -352,7 +354,7 @@ const _: () = assert!(size_of::<Refused>() == 16);
 // ---------------------------------------------------------------------------------------------
 
 /// `LNK_CLIENT_ABI_VERSION` this binding was written against; the export refuses any other.
-pub const CLIENT_ABI_VERSION: u32 = 11;
+pub const CLIENT_ABI_VERSION: u32 = 12;
 
 pub type LnkStatus = i32;
 
