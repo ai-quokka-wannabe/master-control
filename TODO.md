@@ -129,10 +129,10 @@ ends, the Disk closes with `BYE`, the citizens are hung up on, the exit is 0. A 
 ends the process at once - the way out of a wedged world stays the operator's. Tested with the
 real signal against the real binary; Clu is content with what it leaves.
 
-**Still owed, deliberately:** the master seed in the log's header - once a world can draw one
-other than zero. The food and the smell's counting noise draw from it now (the food's seed is
-in the log's `food` line), but every world is seed zero; the flag and the header field are
-[Food and smell](#food-and-smell)'s "A master seed worth the name".
+**Done (2026-11-04), the master seed in the log's header**: `--seed <u64>` (and the `seed` config
+key, 0 by default) sets the run's master seed, and the header's `seed` line carries it with every
+other launch setting; Clu re-draws the food and the smell's noise from it
+([Food and smell](#food-and-smell)'s "A master seed worth the name").
 
 ## Etape 5 — contacts, exact
 
@@ -503,8 +503,8 @@ diffusivities read (sucrose, acetic acid; salt by Nernst-Hartley from read condu
 (tryptophan's), all scaled by the air's `LENGTH_SCALE` squared. Owed:
 
 - **Taste organs**, declared with the body in the organs bump: an organ reads `Floor::at` under it, or the orb
-  it is inside. Then the leach rate and fade go into the input log's header (Clu re-steps the field with the
-  defaults today, harmless while nothing reads it).
+  it is inside. The leach rate and fade are in the input log's header already (the `solutes` line, with the
+  master seed), so Clu lays the floor that ran.
 - **Caffeine's own diffusivity** (Price, Trickett and Harris 1989), to replace the bitter assumption; and Rard
   and Miller 1979 for salt, read at the primary.
 
@@ -522,9 +522,9 @@ heartbeat runs, outside the state hash; the chain golden replays unchanged. 0.80
 
 - **Bodies as heat sources** (step 3): each body's temperature by heat balance from its declared metabolism, and
   each body a source in the field.
-- **The thermoreceptors** (step 4): the readings in the letter, with the noses' declaration bump. When a reading
-  first leaves the world, the thermal map and the pillar heat join the input log's header (and Clu builds the field
-  from them) - today Clu builds no field, since nothing it checks reads one.
+- **The thermoreceptors** (step 4): the readings in the letter, with the noses' declaration bump. The thermal map
+  and the pillar heat are in the input log's header already (the `heat` line, with the master seed), and Clu
+  builds the field from them.
 - **The pillars are mirrored by hand** from the flagship's `pillarPlacements` (`heat::PILLARS`); a world
   definition on the wire would end the copy.
 - **The cost**: odour and heat together take 2.26 ms a tick in release, past the 1-2 ms the air was budgeted.
@@ -536,12 +536,21 @@ heartbeat runs, outside the state hash; the chain golden replays unchanged. 0.80
 - **The food in the state hash**: the wire half is done (above), but the hash still covers
   the bodies alone. The orbs' quantities and gone ticks are state, so they join the hash, and
   the goldens are re-recorded with them.
-- **A master seed worth the name.** Every world is master seed zero (`MASTER_SEED` in
-  `main.rs`), so every world meets the same food. When lives want different food, a `--seed`
-  flag (and config key) sets it, and the log's header carries it beside the food line.
-- **Three constants unverified in place**, as the code marks them (the design marks the first): air's diffusivity
-  (1e-5 m^2/s), the amphid's opening (a micrometre) and the half-saturating concentration (a
-  nanomolar). Each is to be read out of a source before it is fixed; the last two set only the
-  readings' scale and noise, the first the field's reach in time.
-- **Odour blocked by the terraces**: the field treats the Grid as a flat half-space (each orb's
-  image is below its own floor). The trigger and the fix are the design's.
+- [x] **A master seed worth the name** (done 2026-11-04): `--seed <u64>` and the `seed` config key
+  (`DEFAULT_MASTER_SEED`, 0, in `lib.rs`, so a world launched without one is unchanged) feed every
+  seeded draw - the food's placement and taste, the smell's counting noise. The input log's header
+  carries every launch setting, one line each (`seed`, `food`, `reflection`, `heat`, `solutes`,
+  floats as their bits); Clu builds the world from them through the heartbeat's own
+  `record::Launch::roster`, the temperature field and the floor's solutes included, and refuses a
+  log short of any (0.0.0, no backwards compatibility). The chain golden was re-recorded.
+- **Three constants still unverified in place** (checked 2026-11-04), as `src/odour.rs` marks all
+  three: the odorant's diffusivity in air (`DIFFUSIVITY`, 1e-5 m^2/s before scaling - now the air
+  grid's diffusion too, mc#88, not only the closed form's; the heat's thermal diffusivity is a
+  different constant and is read, Incropera), the amphid's opening (`AMPHID_RADIUS`, a micrometre)
+  and the half-saturating concentration (`HALF_SATURATION`, a nanomolar). Each is to be read out of
+  a source before it is fixed; the last two set only the readings' scale and noise, the first the
+  field's reach in time.
+- [x] **Odour blocked by the terraces** (done 2026-11-04 by the air grid, mc#88): `src/air.rs`
+  diffuses the odour over the floor cut at its terraces with the risers as walls, so it fills a
+  hollow and is shadowed behind a terrace; the closed form's flat half-space stays only as the
+  open-floor reference ("Done (2026-11-04), the air" above).

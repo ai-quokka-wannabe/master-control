@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A master seed worth the name, and every launch setting in the input log's header.** `--seed <u64>` (and the
+  `seed` config key) sets the run's master seed, 0 by default so a default world is unchanged; every seeded draw
+  comes from it - the food's placement and taste, the smell's counting noise. The header now carries every launch
+  setting, one line each and floats as their bits: `seed`, `food`, `reflection`, `heat` (the ambient, the floor's
+  gradient and its direction, the pillars' heat) and `solutes` (the leach rate and the fade). The heartbeat and Clu
+  open their world through one function, `record::Launch::roster`, so Clu re-simulates with the temperature field
+  and the floor's solutes the world ran with. Clu refuses a header short of any setting, saying one twice, a launch
+  line after the life began, or a food seed that is not the master seed's: the format is 0.0.0, with no backwards
+  compatibility. The chain golden is re-recorded for the new header - 1,075 ticks, 33 hashes, every intent on its
+  tick, Clu agreeing to the last hash. TODO.md: the terraces' odour shadow is marked done by the air grid (mc#88),
+  and the three odour constants are still unverified in place.
 - **The rotation sense in the letter (protocol v14).** The flagship's ruling of 2026-11-04 (its `docs/PERCEPTION.md`
   § Imperfection at the body's own senses): the Grid no longer derives `angular_velocity` from the rows' yaw rate,
   the world composes it. `external/link` moves to v14 (link#59) and the mirror to client ABI 12: the letter gains

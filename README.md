@@ -119,10 +119,14 @@ sacred 32 Hz:
 
 ```text
 master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
-  [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--ambient <°C>]
+  [--food-density <orbs per 100 m^2>] [--seed <u64>] [--reflection-attenuation <0..1>] [--ambient <°C>]
   [--floor-gradient <°C per cm>] [--floor-gradient-direction <degrees>] [--pillar-heat <K>] [--config <file>]
   [--leach-rate <per s>] [--solute-fade <per s>]
 ```
+
+`--seed` is the run's master seed (0 by default): another seed, other food in other places. With `--log`, the
+input log's header carries the seed and every other launch setting, and Clu builds exactly the world that ran
+from them.
 
 Then, from a tron-grid-lite build: `TronGridLite --window` to watch, or `TronGridLite --program
 <name>` to host a creature — the constellation on one machine.

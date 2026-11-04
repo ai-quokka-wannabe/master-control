@@ -42,6 +42,45 @@ fn bits(value: f32) -> String {
     format!("{:08X}", value.to_bits())
 }
 
+/// A double as its bit pattern, sixteen hex digits: the heat's and the solutes' settings.
+fn bits64(value: f64) -> String {
+    format!("{:016X}", value.to_bits())
+}
+
+/// Every setting a world is launched with that shapes what it does: what the input log's
+/// header carries and what Clu builds its world from, so a re-simulation is the world that
+/// ran - the same food from the same seed, the same air warmed the same way, the same floor.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Launch {
+    /// The run's master seed (`--seed`), the root of every seeded draw: the food's placement
+    /// and taste, the smell's counting noise.
+    pub master_seed: u64,
+    /// The food: its density and its seed, the master seed's food stream.
+    pub food: crate::food::FoodSettings,
+    /// The fraction a surface returns per bounce, told in `WELCOME`; the physics never reads it.
+    pub reflection_attenuation: f32,
+    /// The floor's thermal map and the pillars' heat (heat.rs).
+    pub heat: crate::heat::HeatSettings,
+    /// The floor's solutes' leach rate and fade (solutes.rs).
+    pub solutes: crate::solutes::SoluteSettings,
+}
+
+impl Launch {
+    /// The world as it opens under these settings: the guest, the food placed from them and the
+    /// senses' noise seeded by the master seed, the air's temperature, the floor's solutes. The
+    /// heartbeat and Clu both open their world here, so the two cannot open different ones.
+    ///
+    /// # Errors
+    /// When the food cannot be placed (a density the floor cannot hold).
+    pub fn roster(&self) -> Result<crate::roster::Roster, String> {
+        let orbs = crate::food::place(&self.food)?;
+        Ok(crate::roster::Roster::with_the_guest()
+            .with_food(orbs, self.master_seed)
+            .with_heat(&self.heat)
+            .with_solutes(self.solutes))
+    }
+}
+
 impl InputLog {
     /// Create the log and write its header: which wire, which world, which start - the same
     /// facts a Disk's header carries, so the two logs of one run can be matched.
@@ -92,29 +131,50 @@ impl InputLog {
         writeln!(file, "# derez <tick> <creature>")?;
         writeln!(file, "# claim <tick> <creature>")?;
         writeln!(file, "# end <tick>")?;
+        writeln!(file, "# seed <master_seed_hex>")?;
         writeln!(file, "# food <density_bits> <food_seed_hex>")?;
+        writeln!(file, "# reflection <attenuation_bits>")?;
+        writeln!(
+            file,
+            "# heat <ambient_celsius_bits64> <gradient_bits64> <gradient_direction_degrees_bits64> <pillar_excess_bits64>"
+        )?;
+        writeln!(file, "# solutes <leach_rate_bits64> <fade_rate_bits64>")?;
         file.flush()?;
         Ok(InputLog { file })
     }
 
-    /// The food the world was launched with, the last header line: the density as its bits and
-    /// the food's seed, everything placement needs, so a re-simulation re-places the same orbs.
-    /// A log without the line is from before food, and holds none.
-    /// The world's reflection attenuation, a header line after the food: the bits of the
-    /// fraction a surface returns per bounce, which every client was told in `WELCOME`. The
-    /// world's physics never reads it, so Clu re-simulates without it; it is recorded so a life
-    /// can be described exactly. A log without the line is from before protocol v13.
-    pub fn reflection(&mut self, attenuation: f32) {
-        let _ = writeln!(self.file, "reflection {}", bits(attenuation));
-        let _ = self.file.flush();
-    }
-
-    pub fn food(&mut self, settings: &crate::food::FoodSettings) {
+    /// The world's launch settings, the header's last lines, one line each and every one
+    /// always written: the master seed, the food, the reflection attenuation, the thermal map
+    /// and the pillars' heat, the floor's solute rates - floats as their bits, so Clu builds
+    /// exactly the world that ran, its heat and its solutes included (clu.rs refuses a log
+    /// short of any of them: the format is 0.0.0 and keeps no backwards compatibility).
+    pub fn launch(&mut self, launch: &Launch) {
+        let _ = writeln!(self.file, "seed {:016X}", launch.master_seed);
         let _ = writeln!(
             self.file,
             "food {} {:016X}",
-            bits(settings.density),
-            settings.seed
+            bits(launch.food.density),
+            launch.food.seed
+        );
+        let _ = writeln!(
+            self.file,
+            "reflection {}",
+            bits(launch.reflection_attenuation)
+        );
+        let heat = &launch.heat;
+        let _ = writeln!(
+            self.file,
+            "heat {} {} {} {}",
+            bits64(heat.ambient_celsius),
+            bits64(heat.gradient),
+            bits64(heat.gradient_direction_degrees),
+            bits64(heat.pillar_excess)
+        );
+        let _ = writeln!(
+            self.file,
+            "solutes {} {}",
+            bits64(launch.solutes.leach_rate),
+            bits64(launch.solutes.fade_rate)
         );
         let _ = self.file.flush();
     }
@@ -305,35 +365,40 @@ mod tests {
     }
 
     #[test]
-    fn the_header_carries_the_reflection_attenuation_as_bits() {
-        let scratch = Scratch::new("master-control-input-log-reflection-test.txt");
+    fn the_header_carries_every_launch_setting_as_bits() {
+        let scratch = Scratch::new("master-control-input-log-launch-test.txt");
         let path = &scratch.0;
-        let mut log = InputLog::create(path, 13, &[0; 32], 0, 0, 0, 32).expect("create");
-        log.reflection(0.9);
-        let text = std::fs::read_to_string(path).expect("read");
-        assert!(
-            text.lines().any(|line| line == "reflection 3F666666"),
-            "the attenuation as its bits"
-        );
-    }
-
-    #[test]
-    fn the_header_carries_the_food_as_bits() {
-        let scratch = Scratch::new("master-control-input-log-food-test.txt");
-        let path = &scratch.0;
-        let mut log = InputLog::create(path, 5, &[0; 32], 0, 0, 0, 32).expect("create");
-        log.food(&crate::food::FoodSettings {
-            density: 0.25,
-            seed: 0x0123_4567_89AB_CDEF,
+        let mut log = InputLog::create(path, 14, &[0; 32], 0, 0, 0, 32).expect("create");
+        log.launch(&Launch {
+            master_seed: 0x0123_4567_89AB_CDEF,
+            food: crate::food::FoodSettings {
+                density: 0.25,
+                seed: 0x0FED_CBA9_8765_4321,
+            },
+            reflection_attenuation: 0.9,
+            heat: crate::heat::HeatSettings {
+                ambient_celsius: 20.0,
+                gradient: 0.5,
+                gradient_direction_degrees: -90.0,
+                pillar_excess: 1.0,
+            },
+            solutes: crate::solutes::SoluteSettings {
+                leach_rate: 2.0,
+                fade_rate: 0.0,
+            },
         });
         let text = std::fs::read_to_string(path).expect("read");
-        assert!(
-            text.contains(
-                "
-food 3E800000 0123456789ABCDEF
-"
-            ),
-            "the density as bits, the seed as hex"
-        );
+        for line in [
+            "seed 0123456789ABCDEF",
+            "food 3E800000 0FEDCBA987654321",
+            "reflection 3F666666",
+            "heat 4034000000000000 3FE0000000000000 C056800000000000 3FF0000000000000",
+            "solutes 4000000000000000 0000000000000000",
+        ] {
+            assert!(
+                text.lines().any(|written| written == line),
+                "{line} missing from the header"
+            );
+        }
     }
 }
