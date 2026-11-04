@@ -669,6 +669,8 @@ impl Roster {
                     grounded: u8::from(body.grounded),
                     reserved0: [0; 3],
                     specific_force: body.specific_force,
+                    // And what the canals read, composed beside it (protocol v14).
+                    angular_velocity: body.angular_velocity,
                     // The servos' own readings - a body of one segment reports seven zeros.
                     joint_angles: body.chain.joint_angles(),
                     // And the load each holds with - what the letter alone can carry.
@@ -689,7 +691,6 @@ impl Roster {
                         }
                         flat
                     },
-                    reserved1: [0; 4],
                 };
                 letters.push(Letter {
                     owner,
@@ -1510,7 +1511,6 @@ mod tests {
             [0.0; 4],
             "a chain of four has three joints"
         );
-        assert_eq!(letter.header.reserved1, [0; 4]);
         assert!(
             letter.header.joint_torques[..3]
                 .iter()

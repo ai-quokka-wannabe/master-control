@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The rotation sense in the letter (protocol v14).** The flagship's ruling of 2026-11-04 (its `docs/PERCEPTION.md`
+  § Imperfection at the body's own senses): the Grid no longer derives `angular_velocity` from the rows' yaw rate,
+  the world composes it. `external/link` moves to v14 (link#59) and the mirror to client ABI 12: the letter gains
+  `angular_velocity` after `specific_force`, loses `reserved1` and is 168 bytes. It is composed beside the force, at
+  the head and in the same body frame, right-handed, from the yaw and pitch the head actually turned through over
+  the tick; roll is held at zero by the model. Exact - its noise comes later, with sourced figures - and in the
+  bodies' hash. The chain golden is re-recorded at protocol 14: 1,075 ticks, 33 hashes, every intent on its tick.
 - **A deep audit: honest warnings, a sturdier Clu, comments that agree with the code.** Asked for by the owner:
   every issue, even a cosmetic one, and every warning an executable prints. Clu's note that a log came from
   another build while the two agreed is now `[INFO]`, not `[WARN]` - agreement is not a problem - and a full or
