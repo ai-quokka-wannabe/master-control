@@ -1,14 +1,7 @@
 # TODO
 
-The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` an
-
-**Done (2026-11-04), the air.** The flagship's ruling of the day (tron-grid-lite#186): Master Control owns the air.
-`src/air.rs` is a numerical diffusion field on a grid of 2 m columns over the floor cut at its terraces, risers
-as walls, open at its sides and top, stepped by Douglas-Gunn ADI (`theta = 1`) every tick in the roster's step,
-so the heartbeat and Clu step it alike; `odour.rs` emits each orb into it and reads the amphids from it. The
-closed form stays as the open-floor reference (within 8%). Outside the state hash; 1.47 ms a tick. Owed next: the
-organ declaration on the wire, then the smoke in the spectator window (the ruling's order).d the
-`grid` library) and the wire carries a tick (link protocol v3 then; v12 today). The blueprint is the flagship's
+The gates opened on 2026-08-21: the flagship's seams exist (`src/world_definition.hpp` and the
+`grid` library) and the wire carries a tick (link protocol v3 then; v14 today). The blueprint is the flagship's
 [docs/TOPOLOGY.md](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/TOPOLOGY.md)
 — its § Master Control's mechanics and § One tick, across the wire sections carry every
 mechanism below with its citation; this file only stages the server-side etapes so they are not
@@ -146,7 +139,7 @@ in the log's `food` line), but every world is seed zero; the flag and the header
 The owner's observation (2026-08-22), ruled in `TOPOLOGY.md` § Master Control's mechanics: the
 Grid and every creature are triangles and squares only, so contacts are closed-form and the
 capsule-against-height-function body in `src/physics.rs` is a placeholder that `REZ` retires.
-Gated on the `REZ` payload (Link protocol v4, now v12) and on Etape 2's roster of record.
+Gated on the `REZ` payload (Link protocol v4, now v14) and on Etape 2's roster of record.
 
 - **World collision geometry** = planar faces with adjacency, derived from the same
   world-definition source as the mesh and the reflectors — never from a triangle soup. **A
@@ -456,6 +449,21 @@ to every hosted ear, the scraping body's own included, as energy in the ear's bi
 arrival to range; rc-worm's panel shows a dragging worm's own spikes lighting both ears'
 earliest bins.
 
+## The body's own senses
+
+The ruling is the flagship's
+[docs/PERCEPTION.md § Imperfection at the body's own senses](https://github.com/ai-quokka-wannabe/tron-grid-lite/blob/main/docs/PERCEPTION.md)
+(2026-11-04): every body sense is composed by the world, in the letter, and carries noise.
+
+**Done (2026-11-04), the rotation sense in the letter.** Link v14: the letter's `angular_velocity`, radians per
+second in the body frame the specific force is told in (x right, y up, z backwards), right-handed. The world
+composes it at the head from the yaw and pitch it actually turned through over the tick, carried into that frame;
+roll is held at zero by the model, so nothing turns about the forward axis of its own. Exact, as every body sense
+still is. The Grid copies it instead of deriving it from the rows' yaw rate.
+
+**Still owed:** the noise, per tick, per body and per channel from the RNG of record, with each organ's precision
+declared with the organ and read out of a source - never invented.
+
 ## Food and smell
 
 **The owner's ask (2026-10-29)**, designed in the flagship's
@@ -478,6 +486,13 @@ letter with its `intake` and its two amphids' `odour`, and hands the present orb
 Clu places the same orbs again from the log's `food` line. A test holds the mouth, the pumps, the smell and
 the pew, each red when its wiring was switched off. The bodies' hash does not cover food yet (intake moves
 nothing), so the golden holds; the Grid draws the orbs and hands the senses on next (Program ABI 11).
+
+**Done (2026-11-04), the air.** The flagship's ruling of the day (tron-grid-lite#186): Master Control owns the air.
+`src/air.rs` is a numerical diffusion field on a grid of 2 m columns over the floor cut at its terraces, risers
+as walls, open at its sides and top, stepped by Douglas-Gunn ADI (`theta = 1`) every tick in the roster's step,
+so the heartbeat and Clu step it alike; `odour.rs` emits each orb into it and reads the amphids from it. The
+closed form stays as the open-floor reference (within 8%). Outside the state hash; 1.47 ms a tick. Owed next: the
+organ declaration on the wire, then the smoke in the spectator window (the ruling's order).
 
 **Still owed:**
 

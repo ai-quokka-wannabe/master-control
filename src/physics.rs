@@ -236,6 +236,10 @@ pub struct Body {
     pub turn_rate: f32,
     pub vocalisation: f32,
     pub specific_force: [f32; 3],
+    /// What the semicircular canals read: the body's angular velocity over the tick, radians per
+    /// second in the frame the specific force is told in (x right, y up, z backwards),
+    /// right-handed - the world's own rates, composed beside the force (protocol v14).
+    pub angular_velocity: [f32; 3],
     pub contacts: Vec<Contact>,
     /// The collision proxy: the convex hull of the body's REZ mesh, built once at rez. `None`
     /// is a bodiless creature, which keeps the point proxy the goldens hold.
@@ -260,6 +264,7 @@ impl Body {
             turn_rate: 0.0,
             vocalisation: 0.0,
             specific_force: [0.0; 3],
+            angular_velocity: [0.0; 3],
             contacts: Vec::new(),
             hull: None,
             bounds,
@@ -287,6 +292,20 @@ pub fn advance_chain(body: &mut Body) {
 }
 
 /// The direction a body faces: -Z at rest, +Y up, right-handed, so positive yaw turns left.
+/// The rotation sense of a body whose frame at the tick's end is `frame`, turning about the
+/// world's up at `yaw_rate` and about its own right hand at `pitch_rate`: the sum carried into the
+/// body frame, as the specific force is. Positive yaw turns the body left and positive pitch lifts
+/// its nose, both right-handed, so the signs carry over unchanged. Roll is held at zero by the
+/// model - the body has no roll to change - so nothing turns about its forward axis of its own;
+/// a pitched body turning still reads part of its yaw there, as a real head would.
+fn angular_velocity_in(frame: &crate::chain::Frame, yaw_rate: f32, pitch_rate: f32) -> [f32; 3] {
+    frame.to_body([
+        frame.right[0] * pitch_rate,
+        frame.right[1].mul_add(pitch_rate, yaw_rate),
+        frame.right[2] * pitch_rate,
+    ])
+}
+
 fn forward_for(yaw: f32) -> [f32; 3] {
     let (sin, cos) = trig::sin_cos(yaw);
     [-sin, 0.0, -cos]
@@ -634,6 +653,14 @@ pub fn step_body(body: &mut Body, staged: Intent, ground: impl Fn(f32, f32) -> f
         (world[2] * cos_yaw) - (world[0] * sin_yaw),
     ];
 
+    // The rotation sense, in the same frame: the yaw rate the pose was integrated with, and no
+    // pitch - a single body is kept level, so it never pitches.
+    body.angular_velocity = angular_velocity_in(
+        &crate::chain::Frame::of(yaw_after, body.pitch),
+        body.turn_rate,
+        0.0,
+    );
+
     // What the head met - a wall, the air - the chain must know: the head is its first segment.
     body.chain.set_head(body.position, body.yaw, body.velocity);
 
@@ -652,6 +679,8 @@ fn step_chain_body(body: &mut Body, staged: Intent, ground: &dyn Fn(f32, f32) ->
     let velocity_before = body.velocity;
     let position_before = body.position;
     let yaw_before = body.yaw;
+    // The head's own pitch, not the body's copy: the roster writes back only the yaw.
+    let pitch_before = body.chain.head().pitch;
 
     // The voice has no traction condition: a body calls as well in flight as standing.
     body.vocalisation = staged.vocalisation;
@@ -699,6 +728,14 @@ fn step_chain_body(body: &mut Body, staged: Intent, ground: &dyn Fn(f32, f32) ->
     ];
     body.specific_force =
         head_frame.to_body([acceleration[0], acceleration[1] + GRAVITY, acceleration[2]]);
+
+    // The rotation sense, at the same head and in the same frame: the yaw and the pitch the head
+    // actually turned through over the tick, as rates.
+    body.angular_velocity = angular_velocity_in(
+        &head_frame,
+        body.turn_rate,
+        (head.pitch - pitch_before) * (1.0 / DT),
+    );
 
     // Touch: every segment's, the head's included, in the head's frame. The floor's support of
     // a segment is shared among the vertices it rests on, each knowing its normal, its depth
@@ -780,6 +817,7 @@ pub fn state_hash<'a>(bodies: impl IntoIterator<Item = (u32, &'a Body)>) -> u64 
         hasher.float(body.turn_rate);
         hasher.float(body.vocalisation);
         hasher.floats(&body.specific_force);
+        hasher.floats(&body.angular_velocity);
         // The bounds, fixed at rez but the clamp every step obeys: a rez replayed with other
         // bounds is another world.
         hasher.float(body.bounds.max_forward_speed);
@@ -1912,6 +1950,69 @@ mod tests {
             body.position[2] > 4.0 - f32::EPSILON,
             "the body never crosses into the cliff"
         );
+    }
+
+    /// The canals read the turn the body makes: a body turning left at a known rate reads it
+    /// about its own up, positive (right-handed), and nothing about the other two axes.
+    #[test]
+    fn a_turning_body_reads_its_yaw_rate_about_its_up() {
+        let flat = |_: f32, _: f32| 0.0;
+        let mut body = Body::standing_at(0.0, 0.0, 0.0, FIRST_BODY);
+        let staged = sanitise_and_clamp(
+            Intent {
+                forward_speed: 0.5,
+                turn_rate: 0.75,
+                vocalisation: 0.0,
+                joint_targets: [0.0; 7],
+            },
+            &FIRST_BODY,
+        );
+        for _ in 0..16 {
+            let yaw_before = body.yaw;
+            step_body(&mut body, staged, flat);
+            assert!(body.yaw > yaw_before, "a positive rate turns the body left");
+            let [x, y, z] = body.angular_velocity;
+            assert!(x.abs() < 1e-6 && z.abs() < 1e-6, "level: {x} {z}");
+            assert!((y - 0.75).abs() < 1e-6, "the yaw rate about +Y: {y}");
+            assert!(body.angular_velocity.iter().all(|w| w.is_finite()));
+        }
+
+        // Turning right reads the other sign.
+        let right = sanitise_and_clamp(
+            Intent {
+                turn_rate: -0.75,
+                ..staged
+            },
+            &FIRST_BODY,
+        );
+        step_body(&mut body, right, flat);
+        assert!((body.angular_velocity[1] + 0.75).abs() < 1e-6);
+    }
+
+    /// A body that does not turn reads no rotation, exactly.
+    #[test]
+    fn a_still_body_reads_no_rotation() {
+        let flat = |_: f32, _: f32| 0.0;
+        let mut body = Body::standing_at(0.0, 0.0, 0.0, FIRST_BODY);
+        for _ in 0..8 {
+            step_body(&mut body, Intent::default(), flat);
+            assert_eq!(body.angular_velocity, [0.0; 3]);
+        }
+    }
+
+    /// Pitched, the yaw about the world's up is shared between the head's up and its backward
+    /// axis, and a pitch rate reads about its right hand - the canals' own frame.
+    #[test]
+    fn a_pitched_head_shares_its_yaw_between_up_and_back() {
+        let pitch = 0.5_f32;
+        let frame = crate::chain::Frame::of(1.0, pitch);
+        let (sin_pitch, cos_pitch) = trig::sin_cos(pitch);
+        let [x, y, z] = angular_velocity_in(&frame, 2.0, 0.0);
+        assert!(x.abs() < 1e-6, "{x}");
+        assert!((y - 2.0 * cos_pitch).abs() < 1e-6, "{y}");
+        assert!((z + 2.0 * sin_pitch).abs() < 1e-6, "{z}");
+        let [x, y, z] = angular_velocity_in(&frame, 0.0, 0.3);
+        assert!((x - 0.3).abs() < 1e-6 && y.abs() < 1e-6 && z.abs() < 1e-6);
     }
 
     /// The hash tells apart every state a lazier hash would merge.
