@@ -564,6 +564,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Smell a body can climb (#76).** Each receptor type is now a population of 21 affinities, log-uniform over five
+  decades centred on the old K - the 100,000-fold range over which the real worm follows a point source of diacetyl,
+  reached partly with receptors of different affinity (ODR-10 in AWA, another in ASH). A reading is the population's
+  mean bound fraction: still saturating at both ends and never a concentration, roughly the logarithm in between,
+  exactly a half at K. At the default density the floor now reads from 0.48 (median 0.67) with no reading saturated,
+  where it read from 0.44 (median 0.89) with 43% at 0.9 or more; even at the densest setting every orb stands out as
+  its own peak (`docs/figures/smell-map.svg`). No adaptation in the sense, and no wire or physics bit moves.
+
 - **A new recording never rolls onto an earlier one.** `--disk life.disk` rolled to `life.0002.disk`, `life.0003.disk`
   and on without asking whether an earlier run had left files of those names, so a long life recorded where an older
   one had been overwrote it file by file and left one numbered set that was half of each. The world now refuses to
