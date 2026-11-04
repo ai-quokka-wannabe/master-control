@@ -1207,7 +1207,14 @@ fn clu_resimulates_a_log_to_its_own_hashes_and_names_the_bit_that_lies() {
     {
         let roster = master_control::roster::Roster::with_the_guest();
         let mut later = wire
-            .record_open(&later_path, fingerprint, 1_000, 0.031_25, 0)
+            .record_open(
+                &later_path,
+                fingerprint,
+                1_000,
+                0.031_25,
+                master_control::DEFAULT_REFLECTION_ATTENUATION,
+                0,
+            )
             .expect("a later Disk opens");
         for model in roster.models() {
             assert_eq!(

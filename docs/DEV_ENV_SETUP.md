@@ -147,7 +147,7 @@ stop signal).
 
 ```text
 master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>]
-               [--food-density <orbs per 100 m^2>] [--config <file>]
+               [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--config <file>]
 master-control clu <log> [<disk>]
 ```
 
@@ -161,12 +161,18 @@ master-control clu <log> [<disk>]
   the 64 orbs a tick carries, and is refused). The density and the
   food's seed go into the log's header, so Clu re-places the same food. The orbs travel in
   every `TICK_STATE` since link v12.
+- `--reflection-attenuation` is the fraction of radiance and of acoustic energy a surface - the
+  Grid's or a body's - returns at each bounce, from 0 to 1 (0.9 by default). The world's physics
+  never reads it: Master Control owns it and tells every client in `WELCOME` (link v13), the
+  Disk's header carries it so a replay perceives the same world, and the log's header records it.
+  Lower it and walls come back dimmer and quieter; it is a hyperparameter a training run may set.
 - `--config <file>` reads `key = value` lines - the long flags without their dashes, `#` for a
   comment - and a flag on the command line wins over the file:
 
   ```text
   # world.conf
   food-density = 0.2
+  reflection-attenuation = 0.8
   log = world.log
   verbose = true
   ```

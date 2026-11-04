@@ -89,6 +89,8 @@ enum Record {
         hash: u64,
     },
     Food(crate::food::FoodSettings),
+    /// The reflection attenuation the world told its clients; the physics never reads it.
+    Reflection(f32),
 }
 
 /// The servo bounds of a rez line: after the vertices, the count and the spacing, `which` is
@@ -236,6 +238,16 @@ fn parse_line(line: &str) -> Result<Option<Record>, String> {
                 density,
                 seed,
             })))
+        }
+        "reflection" => {
+            let malformed = || format!("malformed reflection record: {line}");
+            let (Some(value), None) = (words.get(1), words.get(2)) else {
+                return Err(malformed());
+            };
+            let value = hex_f32(value).map_err(|_| malformed())?;
+            crate::reflection_attenuation(value)
+                .map(|value| Some(Record::Reflection(value)))
+                .map_err(|words| format!("reflection record: {words}"))
         }
         "derez" => Ok(Some(Record::Derez {
             creature_id: narrow(2)?,
@@ -453,6 +465,9 @@ pub fn check(log_path: &Path, disk_path: Option<&Path>, wire: &LinkDll) -> Resul
                 // constant until the log's header records a drawn one.
                 roster = std::mem::take(&mut roster).with_food(orbs, crate::MASTER_SEED);
             }
+            // Light and sound are the Grid's: the world's physics never reads the attenuation, so a
+            // re-simulation has nothing to do with it but to have read it back whole.
+            Record::Reflection(_) => {}
             Record::Applied {
                 tick,
                 creature_id,
@@ -736,6 +751,24 @@ mod tests {
         assert!(parse_line("derez 9 4294967396").is_err());
         assert!(parse_line("rez 5 7 3F800000 3FC90FDB 3F800000 4 18446744073709551615").is_err());
         assert!(parse_line("applied x 7 fresh 0 0 0").is_err());
+    }
+
+    #[test]
+    fn the_reflection_line_is_read_back_and_a_bad_one_refused() {
+        match parse_line("reflection 3F666666") {
+            Ok(Some(Record::Reflection(value))) => assert_eq!(value.to_bits(), 0x3F66_6666),
+            other => panic!("{other:?}"),
+        }
+        for bad in [
+            "reflection",
+            "reflection 3F666666 extra",
+            "reflection zz",
+            "reflection 7FC00000",
+            "reflection 3FC00000",
+            "reflection BF800000",
+        ] {
+            assert!(parse_line(bad).is_err(), "{bad} must be refused");
+        }
     }
 
     #[test]

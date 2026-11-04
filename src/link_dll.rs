@@ -37,7 +37,7 @@ use std::path::PathBuf;
 
 /// `LNK_PROTOCOL_VERSION` as this server was built. The handshake carries the fingerprint, not
 /// this number; the number exists for logs and refusals.
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// `LNK_DEFAULT_PORT`: where Master Control listens when nobody names another port.
 pub const DEFAULT_PORT: u16 = 30_702;
@@ -188,6 +188,9 @@ pub struct Welcome {
     pub nominal_dt_seconds: f32,
     pub client_id: u32,
     pub world_fingerprint: u64,
+    /// The fraction of radiance and acoustic energy a surface returns per bounce (protocol v13).
+    pub reflection_attenuation: f32,
+    pub reserved0: [u8; 4],
 }
 
 /// `LnkRez`: a creature's bounds and the counts of the rows that follow it on the wire.
@@ -328,7 +331,7 @@ pub struct Pong {
 
 const _: () = assert!(size_of::<WorldDefinition>() == 40);
 const _: () = assert!(size_of::<Hello>() == 48);
-const _: () = assert!(size_of::<Welcome>() == 24);
+const _: () = assert!(size_of::<Welcome>() == 32);
 const _: () = assert!(size_of::<Rez>() == 48);
 const _: () = assert!(size_of::<SegmentPose>() == 20);
 const _: () = assert!(size_of::<RezVertex>() == 12);
@@ -349,7 +352,7 @@ const _: () = assert!(size_of::<Refused>() == 16);
 // ---------------------------------------------------------------------------------------------
 
 /// `LNK_CLIENT_ABI_VERSION` this binding was written against; the export refuses any other.
-pub const CLIENT_ABI_VERSION: u32 = 10;
+pub const CLIENT_ABI_VERSION: u32 = 11;
 
 pub type LnkStatus = i32;
 
@@ -610,6 +613,7 @@ pub struct LnkClientVTable {
         world_fingerprint: u64,
         start_tick: u64,
         nominal_dt_seconds: f32,
+        reflection_attenuation: f32,
         start_unix_seconds: u64,
         out_status: *mut LnkStatus,
         out_detail_utf8: *mut c_char,
@@ -802,6 +806,8 @@ impl LinkDll {
             nominal_dt_seconds: 0.0,
             client_id: 0,
             world_fingerprint: 0,
+            reflection_attenuation: 0.0,
+            reserved0: [0; 4],
         };
         let mut status: LnkStatus = LNK_PANIC;
         let mut detail = [0u8; 256];
@@ -840,6 +846,7 @@ impl LinkDll {
         world_fingerprint: u64,
         start_tick: u64,
         nominal_dt_seconds: f32,
+        reflection_attenuation: f32,
         start_unix_seconds: u64,
     ) -> Result<Connection, String> {
         let c_path = CString::new(path.to_string_lossy().as_bytes())
@@ -851,6 +858,7 @@ impl LinkDll {
             world_fingerprint,
             start_tick,
             nominal_dt_seconds,
+            reflection_attenuation,
             start_unix_seconds,
             &raw mut status,
             detail.as_mut_ptr().cast::<c_char>(),
@@ -883,6 +891,8 @@ impl LinkDll {
             nominal_dt_seconds: 0.0,
             client_id: 0,
             world_fingerprint: 0,
+            reflection_attenuation: 0.0,
+            reserved0: [0; 4],
         };
         let mut status: LnkStatus = LNK_PANIC;
         let mut detail = [0u8; 256];

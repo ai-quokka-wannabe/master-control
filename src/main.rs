@@ -13,7 +13,7 @@
     If not, see <https://www.gnu.org/licenses/>.
 */
 
-//! `master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>] [--food-density <orbs per 100 m^2>] [--config <file>]` - the world server of the Grid;
+//! `master-control [port] [--verbose] [--version] [--disk <path>] [--disk-roll <MiB>] [--log <path>] [--food-density <orbs per 100 m^2>] [--reflection-attenuation <0..1>] [--config <file>]` - the world server of the Grid;
 //! `master-control clu <log> [<disk>]` - Clu, the re-simulation and the hash check.
 //!
 //! The command line keeps the flagship's ruled shape: where the world listens is the plain
@@ -102,7 +102,7 @@ fn clu_main(arguments: Vec<String>) -> std::process::ExitCode {
 use master_control::MASTER_SEED;
 
 /// The surface, said once for every refusal that names it.
-const SURFACE: &str = "[port], --verbose, --version, --disk <path>, --disk-roll <MiB>, --log <path>, --food-density <orbs per 100 m^2>, --config <file>";
+const SURFACE: &str = "[port], --verbose, --version, --disk <path>, --disk-roll <MiB>, --log <path>, --food-density <orbs per 100 m^2>, --reflection-attenuation <0..1>, --config <file>";
 
 /// What the operator asked for, from the command line or from a config file: every setting
 /// unsaid until said, so the two can be laid over each other and the command line win.
@@ -114,6 +114,7 @@ struct Settings {
     disk_roll_mib: Option<u64>,
     log: Option<PathBuf>,
     food_density: Option<f32>,
+    reflection_attenuation: Option<f32>,
     config: Option<PathBuf>,
     version: bool,
 }
@@ -129,6 +130,7 @@ impl Settings {
             disk_roll_mib: self.disk_roll_mib.or(file.disk_roll_mib),
             log: self.log.or(file.log),
             food_density: self.food_density.or(file.food_density),
+            reflection_attenuation: self.reflection_attenuation.or(file.reflection_attenuation),
             config: self.config,
             version: self.version,
         }
@@ -168,6 +170,19 @@ fn food_density(word: Option<&str>) -> Result<f32, String> {
     Ok(density)
 }
 
+/// A reflection attenuation: the fraction of radiance and acoustic energy a surface returns per
+/// bounce, from 0 to 1, which every client is told in `WELCOME`.
+fn reflection_attenuation(word: Option<&str>) -> Result<f32, String> {
+    let value = word
+        .and_then(|word| word.parse::<f32>().ok())
+        .ok_or_else(|| {
+            "--reflection-attenuation needs the fraction a surface returns per bounce, from 0 to 1."
+                .to_string()
+        })?;
+    master_control::reflection_attenuation(value)
+        .map_err(|words| format!("--reflection-attenuation: {words}."))
+}
+
 /// The command line, judged word by word. `clu` is taken before this is asked.
 fn from_command_line(arguments: impl IntoIterator<Item = String>) -> Result<Settings, String> {
     let mut settings = Settings::default();
@@ -180,6 +195,9 @@ fn from_command_line(arguments: impl IntoIterator<Item = String>) -> Result<Sett
             "--disk-roll" => settings.disk_roll_mib = Some(disk_roll(value().as_deref())?),
             "--log" => settings.log = Some(log_path(value().as_deref())?),
             "--food-density" => settings.food_density = Some(food_density(value().as_deref())?),
+            "--reflection-attenuation" => {
+                settings.reflection_attenuation = Some(reflection_attenuation(value().as_deref())?);
+            }
             "--config" => {
                 settings.config = Some(
                     value()
@@ -251,9 +269,15 @@ fn from_config(text: &str) -> Result<Settings, String> {
             "log" => settings.log = Some(log_path(word).map_err(at)?),
             "food-density" if settings.food_density.is_some() => return Err(said_twice()),
             "food-density" => settings.food_density = Some(food_density(word).map_err(at)?),
+            "reflection-attenuation" if settings.reflection_attenuation.is_some() => {
+                return Err(said_twice());
+            }
+            "reflection-attenuation" => {
+                settings.reflection_attenuation = Some(reflection_attenuation(word).map_err(at)?);
+            }
             other => {
                 return Err(at(format!(
-                    "unknown key \"{other}\". A config sets the long flags without their dashes: verbose, disk, disk-roll, log, food-density."
+                    "unknown key \"{other}\". A config sets the long flags without their dashes: verbose, disk, disk-roll, log, food-density, reflection-attenuation."
                 )));
             }
         }
@@ -328,6 +352,9 @@ fn main() -> std::process::ExitCode {
             settings.food_density.unwrap_or(DEFAULT_DENSITY),
             MASTER_SEED,
         ),
+        reflection_attenuation: settings
+            .reflection_attenuation
+            .unwrap_or(defaults.reflection_attenuation),
         ..defaults
     };
     let port = settings.port.unwrap_or(DEFAULT_PORT);
@@ -402,8 +429,50 @@ mod tests {
         assert!(
             from_command_line(words("--teleport"))
                 .expect_err("unknown")
-                .contains("--food-density <orbs per 100 m^2>, --config <file>"),
+                .contains("--food-density <orbs per 100 m^2>, --reflection-attenuation <0..1>, --config <file>"),
             "the surface names the new flags"
+        );
+    }
+
+    #[test]
+    fn the_reflection_attenuation_is_a_fraction_and_refused_in_words_otherwise() {
+        let settings = from_command_line(words("--reflection-attenuation 0.5")).expect("parses");
+        assert_eq!(settings.reflection_attenuation, Some(0.5));
+        for edge in ["0", "1"] {
+            let line = format!("--reflection-attenuation {edge}");
+            assert!(from_command_line(words(&line)).is_ok(), "{line}");
+        }
+        for (line, says) in [
+            (
+                "--reflection-attenuation",
+                "needs the fraction a surface returns",
+            ),
+            (
+                "--reflection-attenuation shiny",
+                "needs the fraction a surface returns",
+            ),
+            ("--reflection-attenuation 1.5", "from 0 to 1"),
+            ("--reflection-attenuation -0.1", "from 0 to 1"),
+            ("--reflection-attenuation NaN", "from 0 to 1"),
+            ("--reflection-attenuation inf", "from 0 to 1"),
+        ] {
+            let refusal = from_command_line(words(line)).expect_err(line);
+            assert!(refusal.contains(says), "{line}: {refusal}");
+        }
+        let file = from_config(
+            "reflection-attenuation = 0.25
+",
+        )
+        .expect("a config sets it");
+        assert_eq!(file.reflection_attenuation, Some(0.25));
+        assert!(
+            from_config(
+                "reflection-attenuation = 0.2
+reflection-attenuation = 0.3
+"
+            )
+            .is_err(),
+            "said twice is refused"
         );
     }
 
